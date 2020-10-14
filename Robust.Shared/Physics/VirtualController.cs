@@ -9,21 +9,21 @@ namespace Robust.Shared.Physics
     /// </summary>
     public abstract class VirtualController
     {
-        private Vector2 _linearVelocity;
+        private Vector2 _impulse;
 
         /// <summary>
         ///     Current contribution to the linear velocity of the entity in meters per second.
         /// </summary>
         [ViewVariables(VVAccess.ReadWrite)]
-        public virtual Vector2 LinearVelocity
+        public virtual Vector2 Impulse
         {
-            get => _linearVelocity;
+            get => _impulse;
             set
             {
-                if (_linearVelocity == value)
+                if (_impulse == value)
                     return;
 
-                _linearVelocity = value;
+                _impulse = value;
 
                 if (ControlledComponent != null)
                 {
@@ -41,7 +41,7 @@ namespace Robust.Shared.Physics
         /// <returns>True if successful, false otherwise.</returns>
         public virtual bool Stop()
         {
-            LinearVelocity = Vector2.Zero;
+            Impulse = Vector2.Zero;
             return true;
         }
 

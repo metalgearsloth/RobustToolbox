@@ -23,7 +23,7 @@ namespace Robust.Shared.GameObjects.Systems
         private const float Epsilon = 1.0e-6f;
 
         private readonly List<Manifold> _collisionCache = new List<Manifold>();
-        
+
         /// <summary>
         ///     Collidable objects that are awake and usable for world simulation.
         /// </summary>
@@ -37,13 +37,13 @@ namespace Robust.Shared.GameObjects.Systems
         /// <summary>
         ///     VirtualControllers on applicable <see cref="IPhysicsComponent"/>s
         /// </summary>
-        private Dictionary<IPhysicsComponent, IEnumerable<VirtualController>> _controllers = 
+        private Dictionary<IPhysicsComponent, IEnumerable<VirtualController>> _controllers =
             new Dictionary<IPhysicsComponent, IEnumerable<VirtualController>>();
-        
+
         // We'll defer changes to ICollidable until each step is done.
         private readonly List<IPhysicsComponent> _queuedDeletions = new List<IPhysicsComponent>();
         private readonly List<IPhysicsComponent> _queuedUpdates = new List<IPhysicsComponent>();
-        
+
         /// <summary>
         ///     Updates to EntityTree etc. that are deferred until the end of physics.
         /// </summary>
@@ -79,14 +79,14 @@ namespace Robust.Shared.GameObjects.Systems
             {
                 if (collidable.Predict)
                     _predictedAwakeBodies.Add(collidable);
-                
+
                 _awakeBodies.Add(collidable);
 
                 if (collidable.Controllers.Count > 0 && !_controllers.ContainsKey(collidable))
                     _controllers.Add(collidable, collidable.Controllers.Values);
 
             }
-            
+
             _queuedUpdates.Clear();
 
             foreach (var collidable in _queuedDeletions)
@@ -95,7 +95,7 @@ namespace Robust.Shared.GameObjects.Systems
                 _predictedAwakeBodies.Remove(collidable);
                 _controllers.Remove(collidable);
             }
-            
+
             _queuedDeletions.Clear();
         }
 
@@ -107,9 +107,9 @@ namespace Robust.Shared.GameObjects.Systems
         protected void SimulateWorld(float deltaTime, bool prediction)
         {
             var simulatedBodies = prediction ? _predictedAwakeBodies : _awakeBodies;
-            
+
             ProcessQueue();
-            
+
             foreach (var body in simulatedBodies)
             {
                 // running prediction updates will not cause a body to go to sleep.
@@ -125,7 +125,7 @@ namespace Robust.Shared.GameObjects.Systems
                 foreach (var controller in body.Controllers.Values)
                 {
                     controller.UpdateBeforeProcessing();
-                    linearVelocity += controller.LinearVelocity;
+                    linearVelocity += controller.Impulse * body.InvMass * deltaTime;
                 }
 
                 // i'm not sure if this is the proper way to solve this, but
@@ -147,7 +147,7 @@ namespace Robust.Shared.GameObjects.Systems
 
             // Calculate collisions and store them in the cache
             ProcessCollisions(_awakeBodies);
-            
+
             // Remove all entities that were deleted during collision handling
             ProcessQueue();
 
@@ -156,7 +156,7 @@ namespace Robust.Shared.GameObjects.Systems
             {
                 ProcessFriction(physics, deltaTime);
             }
-            
+
             foreach (var (_, controllers) in _controllers)
             {
                 foreach (var controller in controllers)
@@ -164,7 +164,7 @@ namespace Robust.Shared.GameObjects.Systems
                     controller.UpdateAfterProcessing();
                 }
             }
-            
+
             // Remove all entities that were deleted due to the controller
             ProcessQueue();
 
@@ -204,7 +204,7 @@ namespace Robust.Shared.GameObjects.Systems
                 transform.DeferUpdates = false;
                 transform.RunCollidableDeferred();
             }
-            
+
             _deferredUpdates.Clear();
         }
 
@@ -367,7 +367,7 @@ namespace Robust.Shared.GameObjects.Systems
                     physics.LinearVelocity = Vector2.Zero;
                 }
             }
-            
+
             physics.Owner.Transform.DeferUpdates = true;
             _deferredUpdates.Add(physics);
             physics.WorldRotation += physics.AngularVelocity * frameTime;
