@@ -247,12 +247,12 @@ namespace Robust.Shared.GameObjects.Systems
                 var impulse = _physicsManager.SolveCollisionImpulse(collision);
                 if (collision.A.CanMove())
                 {
-                    collision.A.Momentum -= impulse;
+                    collision.A.LinearVelocity -= impulse * collision.A.InvMass;
                 }
 
                 if (collision.B.CanMove())
                 {
-                    collision.B.Momentum += impulse;
+                    collision.B.LinearVelocity += impulse * collision.A.InvMass;
                 }
             }
 
