@@ -468,7 +468,10 @@ namespace Robust.Shared.Physics.Chunks
         /// <param name="moveEvent"></param>
         private void HandleEntityMove(MoveEvent moveEvent)
         {
-            if (moveEvent.Sender.Deleted || !moveEvent.NewPosition.IsValid(EntityManager))
+            // TODO: Should we check for all container children?
+            // Definitely shouldn't check transform children at the least.
+            if (moveEvent.Sender.Deleted ||
+                !moveEvent.NewPosition.IsValid(EntityManager))
             {
                 HandleEntityRemove(moveEvent.Sender);
                 return;

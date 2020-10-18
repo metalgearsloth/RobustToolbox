@@ -193,16 +193,16 @@ namespace Robust.Server.GameObjects
             // Would also need to store last time we sent a chunk to a particular player.
             foreach (var entity in _lookupSystem.GetEntitiesIntersecting(mapId, viewbox, range))
             {
-                // Need to suss out whether it's even worse doing the AABB checks because you gotta do it on
-                // 1k+ entities
-                // Exclude invisible
-                if (data.EntityLastSeen.TryGetValue(entity.Uid, out var lastSeen)
-                    && entity.LastModifiedTick <= lastSeen ||
-                    entity.LastModifiedTick == GameTick.Zero ||
-                    (entity.TryGetComponent(out VisibilityComponent? visibility) &&
-                     (player.VisibilityMask & visibility.Layer) == 0))
+                // Get whether we need to send dat state
+                // If we haven't seen it ever then force send that baby
+                if (data.EntityLastSeen.TryGetValue(entity.Uid, out var lastSeen))
                 {
-                    continue;
+                    if (entity.LastModifiedTick <= lastSeen ||
+                        (entity.TryGetComponent(out VisibilityComponent? visibility) &&
+                         (player.VisibilityMask & visibility.Layer) == 0))
+                    {
+                        continue;
+                    }
                 }
 
                 var state = GetEntityState(ComponentManager, entity.Uid, fromTick);

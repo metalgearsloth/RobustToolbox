@@ -294,6 +294,19 @@ namespace Robust.Shared.GameObjects.Components.Transform
                 SetPosition(value);
                 Dirty();
 
+                // Set ourselves to a new grid if we didn't have one or we're on one (and need to check if we're actually on another).
+                // If something is parented to a non-grid then we won't bother checking
+                // TODO: FIX ENTITY PARENTING
+                /*
+                if (_parent.IsValid() && _entityManager.GetEntity(_parent).HasComponent<MapGridComponent>())
+                {
+                    if (IoCManager.Resolve<IMapManager>().TryFindGridAt(MapID, WorldPosition, out var grid))
+                    {
+                        AttachParent(_entityManager.GetEntity(grid.GridEntityId));
+                    }
+                }
+                */
+
                 if (!DeferUpdates)
                 {
                     RebuildMatrices();
