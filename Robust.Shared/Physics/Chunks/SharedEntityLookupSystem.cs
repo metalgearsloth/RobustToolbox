@@ -91,26 +91,20 @@ namespace Robust.Shared.Physics.Chunks
 
         public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Box2 worldBox, float? range = null, bool approximate = true)
         {
-            foreach (var chunk in GetChunksInRange(mapId, worldBox, range))
+            foreach (var node in GetNodesInRange(mapId, worldBox, range))
             {
-                foreach (var entity in chunk.GetEntities())
+                foreach (var entity in node.Entities)
                 {
-                    // TODO: If not approx check worldbounds intersect
-                    if (approximate)
+                    if (approximate || worldBox.Intersects(EntityManager.GetWorldAabbFromEntity(entity)))
                     {
                         yield return entity;
-                    }
-                    else
-                    {
-                        throw new NotImplementedException();
                     }
                 }
             }
         }
 
-        private IEnumerable<EntityLookupChunk> GetChunksInRange(MapId mapId, Box2 worldBox, float? range = null)
+        private IEnumerable<EntityLookupNode> GetNodesInRange(MapId mapId, Box2 worldBox, float? range = null)
         {
-            // TODO: Do we need to round up?
             range ??= (worldBox.BottomLeft - worldBox.Center).Length;
 
             // This is the max in any direction that we can get a chunk (e.g. max 2 chunks away of data).
@@ -119,10 +113,11 @@ namespace Robust.Shared.Physics.Chunks
             foreach (var grid in MapManager.FindGridsIntersecting(mapId, worldBox))
             {
                 var localCenter = grid.WorldToLocal(worldBox.Center);
-
                 var centerTile = new Vector2i((int) Math.Floor(localCenter.X), (int) Math.Floor(localCenter.Y));
-
                 var chunks = _graph[mapId][grid.Index];
+
+                var bottomLeftNodeBound = new Vector2i((int) Math.Floor(centerTile.X - range.Value), (int) Math.Floor(centerTile.Y - range.Value));
+                var topRightNodeBound = new Vector2i((int) Math.Floor(centerTile.X + range.Value + 1), (int) Math.Floor(centerTile.Y + range.Value + 1));
 
                 for (var x = -maxXDiff; x <= maxXDiff; x++)
                 {
@@ -141,7 +136,10 @@ namespace Robust.Shared.Physics.Chunks
                             xDiff < 0 && Math.Abs(xDiff + EntityLookupChunk.ChunkSize) > range ||
                             yDiff < 0 && Math.Abs(yDiff + EntityLookupChunk.ChunkSize) > range) continue;
 
-                        yield return chunk;
+                        foreach (var node in chunk.GetNodes(bottomLeftNodeBound, topRightNodeBound))
+                        {
+                            yield return node;
+                        }
                     }
                 }
             }

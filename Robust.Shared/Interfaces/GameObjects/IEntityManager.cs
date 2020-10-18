@@ -215,6 +215,8 @@ namespace Robust.Shared.Interfaces.GameObjects
         /// <returns></returns>
         IEnumerable<IEntity> GetEntitiesInArc(EntityCoordinates coordinates, float range, Angle direction, float arcWidth, bool approximate = false);
 
+        Box2 GetWorldAabbFromEntity(in IEntity ent);
+
         #endregion
 
         void Update();

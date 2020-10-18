@@ -173,7 +173,7 @@ namespace Robust.Server.GameStates
                 return (stateUpdateMessage, channel);
             }
 
-            var mailBag = _playerManager.GetAllPlayers().Select(GenerateMail).ToList();
+            var mailBag = _playerManager.GetAllPlayers().Select(GenerateMail).AsParallel().ToList();
 
             // TODO: oh god oh fuck kill it with fire.
             // PLINQ *seems* to be scheduling to the main thread partially (I guess that makes sense?)

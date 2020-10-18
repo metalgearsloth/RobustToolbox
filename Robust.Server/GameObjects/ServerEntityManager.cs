@@ -229,32 +229,13 @@ namespace Robust.Server.GameObjects
 
             // Include map critical (e.g. station) entities.
             // TODO: MapManager needs to be aware of PVS (this was an old ass comment nfi if it still applies).
+            // Given grids / maps are now entities and always intersecting the viewbox.
             IncludeMapCriticalEntities(entityStates);
 
             // Sort for the client.
             entityStates.Sort((a, b) => a.Uid.CompareTo(b.Uid));
             return entityStates;
 
-        }
-
-        private static void AddContainedRecursive(IEntity ent, HashSet<IEntity> set)
-        {
-            if (!ent.TryGetComponent(out ContainerManagerComponent? contMgr))
-            {
-                return;
-            }
-
-            foreach (var container in contMgr.GetAllContainers())
-            {
-                // Manual for loop to cut out allocations.
-                // ReSharper disable once ForCanBeConvertedToForeach
-                for (var i = 0; i < container.ContainedEntities.Count; i++)
-                {
-                    var contEnt = container.ContainedEntities[i];
-                    set.Add(contEnt);
-                    AddContainedRecursive(contEnt, set);
-                }
-            }
         }
 
         public override void DeleteEntity(IEntity e)

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Robust.Shared.Interfaces.GameObjects;
 using Robust.Shared.Map;
@@ -9,7 +10,7 @@ namespace Robust.Shared.Physics.Chunks
 {
     internal sealed class EntityLookupChunk
     {
-        internal const byte ChunkSize = 16;
+        internal const byte ChunkSize = 8;
 
         /// <summary>
         ///     Parent MapId for this chunk
@@ -78,6 +79,26 @@ namespace Robust.Shared.Physics.Chunks
             for (var x = 0; x < ChunkSize; x++)
             {
                 for (var y = 0; y < ChunkSize; y++)
+                {
+                    yield return _nodes[x, y];
+                }
+            }
+        }
+
+        /// <summary>
+        ///     Bounded nodes
+        /// </summary>
+        /// <param name="bottomLeft"></param>
+        /// <param name="topRight"></param>
+        /// <returns></returns>
+        public IEnumerable<EntityLookupNode> GetNodes(Vector2i bottomLeft, Vector2i topRight)
+        {
+            var bottomLeftBound = new Vector2i(Math.Max(bottomLeft.X - Origin.X, 0), Math.Max(bottomLeft.Y - Origin.Y, 0));
+            var topRightBound = new Vector2i(Math.Min(topRight.X - Origin.X, ChunkSize - 1), Math.Min(topRight.Y - Origin.Y, ChunkSize - 1));
+
+            for (var x = bottomLeftBound.X; x <= topRightBound.X; x++)
+            {
+                for (var y = bottomLeftBound.Y; y <= topRightBound.Y; y++)
                 {
                     yield return _nodes[x, y];
                 }
