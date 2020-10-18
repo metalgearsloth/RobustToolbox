@@ -32,5 +32,8 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+  <ItemGroup>
+    <Folder Include="GameObjects\EntitySystems\TileLookup" />
+  </ItemGroup>
   <Import Project="..\MSBuild\Robust.Engine.targets" />
 </Project>

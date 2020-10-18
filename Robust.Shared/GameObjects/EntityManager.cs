@@ -6,6 +6,7 @@ using System.Linq;
 using Prometheus;
 using Robust.Shared.GameObjects.Components;
 using Robust.Shared.GameObjects.Components.Transform;
+using Robust.Shared.GameObjects.Systems;
 using Robust.Shared.Interfaces.GameObjects;
 using Robust.Shared.Interfaces.GameObjects.Components;
 using Robust.Shared.Interfaces.Map;
@@ -14,6 +15,7 @@ using Robust.Shared.IoC;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics;
+using Robust.Shared.Physics.Chunks;
 using Robust.Shared.Prototypes;
 using Robust.Shared.Timing;
 using Robust.Shared.Utility;
@@ -427,47 +429,29 @@ namespace Robust.Shared.GameObjects
         {
             if (mapId == MapId.Nullspace)
             {
-                return Enumerable.Empty<IEntity>();
+                yield break;
             }
 
-            var list = new List<IEntity>();
-
-            _entityTreesPerMap[mapId].QueryAabb(ref list, (ref List<IEntity> list, in IEntity ent) =>
+            // Same here on intersecting calls
+            foreach (var entity in EntitySystem.Get<EntityLookupSystem>().GetEntitiesIntersecting(mapId, position))
             {
-                if (!ent.Deleted)
-                {
-                    list.Add(ent);
-                }
-                return true;
-            }, position, approximate);
-
-            return list;
+                yield return entity;
+            }
         }
 
         /// <inheritdoc />
         public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Vector2 position, bool approximate = false)
         {
-            const float range = .00001f / 2;
-            var aabb = new Box2(position, position).Enlarged(range);
-
             if (mapId == MapId.Nullspace)
             {
-                return Enumerable.Empty<IEntity>();
+                yield break;
             }
 
-            var list = new List<IEntity>();
-            var state = (list, position);
-
-            _entityTreesPerMap[mapId].QueryAabb(ref state, (ref (List<IEntity> list, Vector2 position) state, in IEntity ent) =>
+            // TODO: Need to do Intersecting calls etc.
+            foreach (var entity in EntitySystem.Get<EntityLookupSystem>().GetEntitiesIntersecting(mapId, position))
             {
-                if (Intersecting(ent, state.position))
-                {
-                    state.list.Add(ent);
-                }
-                return true;
-            }, aabb, approximate);
-
-            return list;
+                yield return entity;
+            }
         }
 
         /// <inheritdoc />
