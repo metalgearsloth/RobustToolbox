@@ -60,23 +60,12 @@ namespace Robust.Shared.GameObjects
         public bool Initialized { get; private set; }
 
         [ViewVariables]
-        public bool Initializing
-        {
-            get => _initializing;
-            private set
-            {
-                _initializing = value;
-                if (value)
-                {
-                    EntityManager.UpdateEntityTree(this);
-                }
-            }
-        }
+        public bool Initializing { get; private set; }
 
         /// <inheritdoc />
         [ViewVariables]
         public bool Deleted { get; private set; }
-        
+
         [ViewVariables]
         public bool Paused { get; set; }
 
@@ -87,8 +76,6 @@ namespace Robust.Shared.GameObjects
         public ITransformComponent Transform => _transform ??= GetComponent<ITransformComponent>();
 
         private IMetaDataComponent? _metaData;
-
-        private bool _initializing;
 
         /// <inheritdoc />
         [ViewVariables]
@@ -202,8 +189,6 @@ namespace Robust.Shared.GameObjects
                     comp.Running = true;
                 }
             }
-
-            EntityManager.UpdateEntityTree(this);
         }
 
         #endregion Initialization

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using JetBrains.Annotations;
+using Robust.Shared.GameObjects;
 using Robust.Shared.GameObjects.Components;
 using Robust.Shared.GameObjects.Components.Transform;
 using Robust.Shared.GameObjects.EntitySystemMessages;
@@ -18,9 +19,12 @@ namespace Robust.Shared.Physics.Chunks
     ///     Stores what entities intersect a particular tile.
     /// </summary>
     [UsedImplicitly]
-    public sealed class EntityLookupSystem : EntitySystem
+    public abstract class SharedEntityLookupSystem : EntitySystem
     {
-        [Dependency] private readonly IMapManager _mapManager = default!;
+        // TODO: This thing is going to memory leak like a motherfucker for space so need to handle that.
+        // Ideally you'd pool space chunks.
+
+        [Dependency] protected readonly IMapManager MapManager = default!;
 
         private readonly Dictionary<MapId, Dictionary<GridId, Dictionary<Vector2i, EntityLookupChunk>>> _graph =
                      new Dictionary<MapId, Dictionary<GridId, Dictionary<Vector2i, EntityLookupChunk>>>();
@@ -30,6 +34,20 @@ namespace Robust.Shared.Physics.Chunks
         /// </summary>
         private readonly Dictionary<IEntity, HashSet<EntityLookupNode>> _lastKnownNodes =
                      new Dictionary<IEntity, HashSet<EntityLookupNode>>();
+
+        public IEnumerable<IEntity> GetEntitiesInMap(MapId mapId)
+        {
+            foreach (var (_, grid) in _graph[mapId])
+            {
+                foreach (var (_, chunk) in grid)
+                {
+                    foreach (var entity in chunk.GetEntities())
+                    {
+                        yield return entity;
+                    }
+                }
+            }
+        }
 
         /// <summary>
         ///     Yields all of the entities intersecting a particular entity's tiles.
@@ -71,21 +89,59 @@ namespace Robust.Shared.Physics.Chunks
             }
         }
 
-        public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Box2 worldBox)
+        public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Box2 worldBox, float? range = null, bool approximate = true)
         {
-            var grids = _graph[mapId];
-
-            foreach (var grid in _mapManager.FindGridsIntersecting(mapId, worldBox))
+            foreach (var chunk in GetChunksInRange(mapId, worldBox, range))
             {
-                foreach (var (_, chunk) in grids[grid.Index])
+                foreach (var entity in chunk.GetEntities())
                 {
-                    // TODO: Need to check node is in box.
-                    foreach (var node in chunk.GetNodes())
+                    // TODO: If not approx check worldbounds intersect
+                    if (approximate)
                     {
-                        foreach (var entity in node.Entities)
-                        {
-                            yield return entity;
-                        }
+                        yield return entity;
+                    }
+                    else
+                    {
+                        throw new NotImplementedException();
+                    }
+                }
+            }
+        }
+
+        private IEnumerable<EntityLookupChunk> GetChunksInRange(MapId mapId, Box2 worldBox, float? range = null)
+        {
+            // TODO: Do we need to round up?
+            range ??= (worldBox.BottomLeft - worldBox.Center).Length;
+
+            // This is the max in any direction that we can get a chunk (e.g. max 2 chunks away of data).
+            var (maxXDiff, maxYDiff) = ((int) (range.Value / EntityLookupChunk.ChunkSize) + 1, (int) (range.Value / EntityLookupChunk.ChunkSize) + 1);
+
+            foreach (var grid in MapManager.FindGridsIntersecting(mapId, worldBox))
+            {
+                var localCenter = grid.WorldToLocal(worldBox.Center);
+
+                var centerTile = new Vector2i((int) Math.Floor(localCenter.X), (int) Math.Floor(localCenter.Y));
+
+                var chunks = _graph[mapId][grid.Index];
+
+                for (var x = -maxXDiff; x <= maxXDiff; x++)
+                {
+                    for (var y = -maxYDiff; y <= maxYDiff; y++)
+                    {
+                        var chunkIndices = GetChunkIndices(new Vector2i(centerTile.X + x * EntityLookupChunk.ChunkSize, centerTile.Y + y * EntityLookupChunk.ChunkSize));
+
+                        if (!chunks.TryGetValue(chunkIndices, out var chunk)) continue;
+
+                        // Now we'll check if it's in range and relevant for us
+                        // (e.g. if we're on the very edge of a chunk we may need more chunks).
+
+                        var (xDiff, yDiff) = (chunkIndices.X - centerTile.X, chunkIndices.Y - centerTile.Y);
+                        if (xDiff > 0 && xDiff > range ||
+                            yDiff > 0 && yDiff > range ||
+                            xDiff < 0 && Math.Abs(xDiff + EntityLookupChunk.ChunkSize) > range ||
+                            yDiff < 0 && Math.Abs(yDiff + EntityLookupChunk.ChunkSize) > range) continue;
+
+                        yield return chunk;
                     }
                 }
             }
@@ -95,7 +151,7 @@ namespace Robust.Shared.Physics.Chunks
         {
             var grids = _graph[mapId];
 
-            if (_mapManager.TryFindGridAt(mapId, position, out var grid))
+            if (MapManager.TryFindGridAt(mapId, position, out var grid))
             {
                 var chunkIndices = GetChunkIndices(position);
                 var offsetIndices = new Vector2i((int) (Math.Floor(position.X)), (int) (Math.Floor(position.Y)));
@@ -105,6 +161,22 @@ namespace Robust.Shared.Physics.Chunks
                 {
                     yield return entity;
                 }
+            }
+        }
+
+        public IEnumerable<IEntity> GetEntitiesIntersecting(GridId gridId, Vector2i index)
+        {
+            var mapId = MapManager.GetGrid(gridId).ParentMapId;
+            var grids = _graph[mapId];
+
+            var chunkIndices = GetChunkIndices(index);
+
+            if (!grids[gridId].TryGetValue(chunkIndices, out var chunk))
+                yield break;
+
+            foreach (var entity in chunk.GetEntities(index))
+            {
+                yield return entity;
             }
         }
 
@@ -212,7 +284,7 @@ namespace Robust.Shared.Physics.Chunks
             var results = new Dictionary<GridId, List<Vector2i>>();
             var onlyOnGrid = false;
 
-            foreach (var grid in _mapManager.FindGridsIntersecting(entity.Transform.MapID, GetEntityBox(entity)))
+            foreach (var grid in MapManager.FindGridsIntersecting(entity.Transform.MapID, GetEntityBox(entity)))
             {
                 var indices = new List<Vector2i>();
 
@@ -262,19 +334,19 @@ namespace Robust.Shared.Physics.Chunks
         {
             SubscribeLocalEvent<MoveEvent>(HandleEntityMove);
             SubscribeLocalEvent<EntityInitializedMessage>(HandleEntityInitialized);
-            _mapManager.OnGridCreated += HandleGridCreated;
-            _mapManager.OnGridRemoved += HandleGridRemoval;
-            _mapManager.TileChanged += HandleTileChanged;
-            _mapManager.MapCreated += HandleMapCreated;
+            MapManager.OnGridCreated += HandleGridCreated;
+            MapManager.OnGridRemoved += HandleGridRemoval;
+            MapManager.TileChanged += HandleTileChanged;
+            MapManager.MapCreated += HandleMapCreated;
         }
 
         public override void Shutdown()
         {
             base.Shutdown();
-            _mapManager.OnGridCreated -= HandleGridCreated;
-            _mapManager.OnGridRemoved -= HandleGridRemoval;
-            _mapManager.TileChanged -= HandleTileChanged;
-            _mapManager.MapCreated -= HandleMapCreated;
+            MapManager.OnGridCreated -= HandleGridCreated;
+            MapManager.OnGridRemoved -= HandleGridRemoval;
+            MapManager.TileChanged -= HandleTileChanged;
+            MapManager.MapCreated -= HandleMapCreated;
         }
 
         private void HandleEntityInitialized(EntityInitializedMessage message)
@@ -296,7 +368,7 @@ namespace Robust.Shared.Physics.Chunks
 
         private void HandleGridCreated(GridId gridId)
         {
-            var mapId = _mapManager.GetGrid(gridId).ParentMapId;
+            var mapId = MapManager.GetGrid(gridId).ParentMapId;
 
             if (!_graph.TryGetValue(mapId, out var grids))
             {
@@ -327,7 +399,7 @@ namespace Robust.Shared.Physics.Chunks
                 _lastKnownNodes.Remove(entity);
             }
 
-            var mapId = _mapManager.GetGrid(gridId).ParentMapId;
+            var mapId = MapManager.GetGrid(gridId).ParentMapId;
             _graph[mapId].Remove(gridId);
         }
 
@@ -338,7 +410,9 @@ namespace Robust.Shared.Physics.Chunks
         /// <param name="entity"></param>
         private void HandleEntityAdd(IEntity entity)
         {
-            if (entity.Deleted || entity.Transform.GridID == GridId.Invalid)
+            if (entity.Deleted ||
+                entity.Transform.MapID == MapId.Nullspace ||
+                entity.Transform.GridID == GridId.Invalid)
             {
                 return;
             }
@@ -398,7 +472,7 @@ namespace Robust.Shared.Physics.Chunks
             }
 
             // Memory leak protection
-            var gridBounds = _mapManager.GetGrid(moveEvent.Sender.Transform.GridID).WorldBounds;
+            var gridBounds = MapManager.GetGrid(moveEvent.Sender.Transform.GridID).WorldBounds;
             if (!gridBounds.Contains(moveEvent.Sender.Transform.WorldPosition))
             {
                 HandleEntityRemove(moveEvent.Sender);
