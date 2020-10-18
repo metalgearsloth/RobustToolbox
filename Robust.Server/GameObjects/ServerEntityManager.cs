@@ -205,21 +205,11 @@ namespace Robust.Server.GameObjects
                 // This is also why we check that last.
 
                 // Exclude invisible
-                // TODO: Optimise this once it works properly.
-                data.TryLastSeen(entity.Uid, out var lastSeen);
-
-                if (entity.LastModifiedTick < lastSeen)
-                {
-                    continue;
-                }
-
-                if ((entity.TryGetComponent(out VisibilityComponent? visibility) &&
-                     (player.VisibilityMask & visibility.Layer) == 0))
-                {
-                    continue;
-                }
-
-                if (!viewbox.Intersects(GetWorldAabbFromEntity(entity)))
+                if (data.EntityLastSeen.TryGetValue(entity.Uid, out var lastSeen)
+                    && entity.LastModifiedTick <= lastSeen ||
+                    (entity.TryGetComponent(out VisibilityComponent? visibility) &&
+                    (player.VisibilityMask & visibility.Layer) == 0) ||
+                    !viewbox.Intersects(GetWorldAabbFromEntity(entity)))
                 {
                     continue;
                 }
