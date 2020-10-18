@@ -413,7 +413,7 @@ namespace Robust.Shared.GameObjects
             if (mapId == MapId.Nullspace)
                 yield break;
 
-            foreach (var entity in EntitySystem.Get<SharedEntityLookupSystem>().GetEntitiesIntersecting(mapId, position))
+            foreach (var entity in EntitySystem.Get<SharedEntityLookupSystem>().GetEntitiesIntersecting(mapId, position, approximate: approximate))
             {
                 yield return entity;
             }

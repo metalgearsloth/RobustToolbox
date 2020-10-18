@@ -129,13 +129,6 @@ namespace Robust.Shared.Physics.Chunks
 
                         // Now we'll check if it's in range and relevant for us
                         // (e.g. if we're on the very edge of a chunk we may need more chunks).
-
-                        var (xDiff, yDiff) = (chunkIndices.X - centerTile.X, chunkIndices.Y - centerTile.Y);
-                        if (xDiff > 0 && xDiff > range ||
-                            yDiff > 0 && yDiff > range ||
-                            xDiff < 0 && Math.Abs(xDiff + EntityLookupChunk.ChunkSize) > range ||
-                            yDiff < 0 && Math.Abs(yDiff + EntityLookupChunk.ChunkSize) > range) continue;
-
                         foreach (var node in chunk.GetNodes(bottomLeftNodeBound, topRightNodeBound))
                         {
                             yield return node;
@@ -254,6 +247,23 @@ namespace Robust.Shared.Physics.Chunks
             }
 
             _lastKnownNodes[entity] = results;
+            return results;
+        }
+
+        private HashSet<EntityLookupNode> GetNodes(IEntity entity)
+        {
+            var grids = GetEntityIndices(entity);
+            var results = new HashSet<EntityLookupNode>();
+            var mapId = entity.Transform.MapID;
+
+            foreach (var (grid, indices) in grids)
+            {
+                foreach (var index in indices)
+                {
+                    results.Add(GetOrCreateNode(mapId, grid, index));
+                }
+            }
+
             return results;
         }
 
@@ -470,6 +480,8 @@ namespace Robust.Shared.Physics.Chunks
             }
 
             // Memory leak protection
+            // TODO: Need to add entity parenting to transform (when _localPosition is set then check its parent
+            // TODO: Need to handle space memory leak (try pooling)
             var gridBounds = MapManager.GetGrid(moveEvent.Sender.Transform.GridID).WorldBounds;
             if (!gridBounds.Contains(moveEvent.Sender.Transform.WorldPosition))
             {
@@ -477,7 +489,7 @@ namespace Robust.Shared.Physics.Chunks
                 return;
             }
 
-            var newNodes = GetOrCreateNodes(moveEvent.Sender);
+            var newNodes = GetNodes(moveEvent.Sender);
 
             if (oldNodes.Count == newNodes.Count && oldNodes.SetEquals(newNodes))
             {

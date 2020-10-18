@@ -168,11 +168,6 @@ namespace Robust.Server.GameObjects
 
         // TODO: Physics chunks doesn't need any of this shit, just needs to subscribe to MoveEvent IMO.
 
-        private void IncludeMapCriticalEntities(in List<EntityState> state)
-        {
-            //todo oh fuck oh god
-        }
-
         public List<EntityState> GetEntityStates(GameTick fromTick, GameTick currentTick, IPlayerSession player, float range)
         {
             var playerEnt = player.AttachedEntity;
@@ -193,23 +188,19 @@ namespace Robust.Server.GameObjects
             // TODO: We should also consider some stuff like lights which necessitate a higher PVS range
             var viewbox = new Box2(playerPos, playerPos).Enlarged(range);
 
-            var idx = 0;
-
             // TODO: Ideally each chunk has "LastModifiedTick" that is the latest of any entity contained within
             // Then we can just do a quicker check... stuff gets modified frequently but I think this will still work well...
             // Would also need to store last time we sent a chunk to a particular player.
             foreach (var entity in _lookupSystem.GetEntitiesIntersecting(mapId, viewbox, range))
             {
-                idx++;
-                // TODO: GetWorldAabbFromEntity will likely be inefficient as hell so we could optimise this more.
-                // This is also why we check that last.
-
+                // Need to suss out whether it's even worse doing the AABB checks because you gotta do it on
+                // 1k+ entities
                 // Exclude invisible
                 if (data.EntityLastSeen.TryGetValue(entity.Uid, out var lastSeen)
                     && entity.LastModifiedTick <= lastSeen ||
+                    entity.LastModifiedTick == GameTick.Zero ||
                     (entity.TryGetComponent(out VisibilityComponent? visibility) &&
-                    (player.VisibilityMask & visibility.Layer) == 0) ||
-                    !viewbox.Intersects(GetWorldAabbFromEntity(entity)))
+                     (player.VisibilityMask & visibility.Layer) == 0))
                 {
                     continue;
                 }
@@ -224,13 +215,6 @@ namespace Robust.Server.GameObjects
                 entityStates.Add(state);
                 // TODO: Look at that transform shit.
             }
-
-            Logger.Debug($"Looked up {idx} entities in range");
-
-            // Include map critical (e.g. station) entities.
-            // TODO: MapManager needs to be aware of PVS (this was an old ass comment nfi if it still applies).
-            // Given grids / maps are now entities and always intersecting the viewbox.
-            IncludeMapCriticalEntities(entityStates);
 
             // Sort for the client.
             entityStates.Sort((a, b) => a.Uid.CompareTo(b.Uid));
