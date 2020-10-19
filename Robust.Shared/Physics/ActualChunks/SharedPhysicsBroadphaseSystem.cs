@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using JetBrains.Annotations;
@@ -20,23 +20,11 @@ using Robust.Shared.Maths;
 namespace Robust.Shared.Physics.Chunks
 {
     /// <summary>
-    ///     Stores what entities intersect a particular tile.
+    ///     Essentially a specialised version of the entitylookups for physics.
     /// </summary>
     [UsedImplicitly]
-    public abstract class SharedEntityLookupSystem : EntitySystem
+    public abstract class SharedPhysicsBroadphaseSystem : EntitySystem
     {
-        /*
-         * Look, is this the most optimised system in the world? Hell no. If you didn't have grids and optimised DynamicTree more I'd go with that.
-         * As it is DynamicTree doesn't seem suited for grid-based stuff, we need something faster for grids to work.
-         * Some of this is for sure snowflaked and won't support all types of transform children configs
-         * (i.e. it assumes if you're a child you're still in your parent's bounds which seems reasonable???)
-         *
-         * This also means we don't need to keep GridTileLookupSystem around which will save a chunk of memory as
-         * GetEntitiesIntersecting isn't slow af anymore.
-         *
-         * By all means if you come up with a better data structure that can handle grids THEN GO AHEAD.
-         */
-
         // TODO: Have message for stuff inserted into containers
         // Anything in a container is removed from the graph and anything removed from a container is added to the graph.
 
@@ -45,44 +33,14 @@ namespace Robust.Shared.Physics.Chunks
 
         [Dependency] protected readonly IMapManager MapManager = default!;
 
-        private readonly Dictionary<MapId, Dictionary<GridId, Dictionary<Vector2i, EntityLookupChunk>>> _graph =
-                     new Dictionary<MapId, Dictionary<GridId, Dictionary<Vector2i, EntityLookupChunk>>>();
+        private readonly Dictionary<MapId, Dictionary<GridId, Dictionary<Vector2i, PhysicsLookupChunk>>> _graph =
+                     new Dictionary<MapId, Dictionary<GridId, Dictionary<Vector2i, PhysicsLookupChunk>>>();
 
         /// <summary>
         ///     Need to store the nodes for each entity because if the entity is deleted its transform is no longer valid.
         /// </summary>
-        private readonly Dictionary<IEntity, HashSet<EntityLookupNode>> _lastKnownNodes =
-                     new Dictionary<IEntity, HashSet<EntityLookupNode>>();
-
-        public IEnumerable<IEntity> GetEntitiesInMap(MapId mapId)
-        {
-            foreach (var (_, grid) in _graph[mapId])
-            {
-                foreach (var (_, chunk) in grid)
-                {
-                    foreach (var entity in chunk.GetEntities())
-                    {
-                        yield return entity;
-                    }
-                }
-            }
-        }
-
-        /// <summary>
-        ///     Yields all of the entities intersecting a particular entity's tiles.
-        /// </summary>
-        /// <param name="entity"></param>
-        /// <returns></returns>
-        public IEnumerable<IEntity> GetEntitiesIntersecting(IEntity entity)
-        {
-            foreach (var node in GetOrCreateNodes(entity))
-            {
-                foreach (var ent in node.Entities)
-                {
-                    yield return ent;
-                }
-            }
-        }
+        private readonly Dictionary<IPhysicsComponent, HashSet<PhysicsLookupNode>> _lastKnownNodes =
+                     new Dictionary<IPhysicsComponent, HashSet<PhysicsLookupNode>>();
 
         /// <summary>
         ///     Yields all of the entities intersecting a particular Vector2i
@@ -91,7 +49,7 @@ namespace Robust.Shared.Physics.Chunks
         /// <param name="gridId"></param>
         /// <param name="gridIndices"></param>
         /// <returns></returns>
-        public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, GridId gridId, Vector2i gridIndices)
+        public IEnumerable<IPhysicsComponent> GetPhysicsIntersecting(MapId mapId, GridId gridId, Vector2i gridIndices)
         {
             var grids = _graph[mapId];
             var chunks = grids[gridId];
@@ -102,93 +60,43 @@ namespace Robust.Shared.Physics.Chunks
                 yield break;
             }
 
-            foreach (var entity in chunk.GetNode(gridIndices).Entities)
+            foreach (var entity in chunk.GetNode(gridIndices).PhysicsShapes)
             {
                 yield return entity;
             }
         }
 
-        public IEnumerable<IEntity> GetEntitiesIntersecting(
+        // TODO: Probably just snowflake grids.
+
+        public IEnumerable<IPhysicsComponent> GetPhysicsIntersecting(
             MapId mapId,
             Box2 worldBox,
-            bool includeContainers = true,
-            bool includeGrids = false,
             bool approximate = true)
         {
-            var checkedEntities = new HashSet<EntityUid>();
-
-            if (includeGrids)
-            {
-                foreach (var grid in MapManager.FindGridsIntersecting(mapId, worldBox))
-                {
-                    if (checkedEntities.Contains(grid.GridEntityId))
-                        continue;
-
-                    var gridEntity = EntityManager.GetEntity(grid.GridEntityId);
-
-                    foreach (var contained in GetContained(includeContainers, gridEntity))
-                    {
-                        if (checkedEntities.Contains(contained.Uid))
-                            continue;
-
-                        yield return contained;
-                    }
-
-                    checkedEntities.Add(grid.GridEntityId);
-                    yield return gridEntity;
-                }
-            }
+            var checkedEntities = new HashSet<IPhysicsComponent>();
 
             foreach (var node in GetNodesInRange(mapId, worldBox))
             {
-                foreach (var entity in node.Entities)
+                foreach (var physicsComponent in node.PhysicsShapes)
                 {
-                    if (approximate || worldBox.Intersects(EntityManager.GetWorldAabbFromEntity(entity)))
+                    if (approximate || worldBox.Intersects(physicsComponent.WorldAABB))
                     {
-                        if (checkedEntities.Contains(entity.Uid))
+                        if (checkedEntities.Contains(physicsComponent))
                             continue;
 
-                        foreach (var contained in GetContained(includeContainers, entity))
-                        {
-                            if (checkedEntities.Contains(contained.Uid))
-                                continue;
-
-                            yield return contained;
-                        }
-
-                        checkedEntities.Add(entity.Uid);
-                        yield return entity;
+                        checkedEntities.Add(physicsComponent);
+                        yield return physicsComponent;
                     }
                 }
             }
         }
 
-        // Yeah I made a helper, seemed easier than pasting it everywhere.
-        private IEnumerable<IEntity> GetContained(bool includeContainers, IEntity entity)
-        {
-            if (!includeContainers || !entity.TryGetComponent(out IContainerManager? containerManager))
-                yield break;
-
-            var cast = (SharedContainerManagerComponent) containerManager;
-
-            foreach (var container in cast.GetAllContainers())
-            {
-                foreach (var contained in container.ContainedEntities)
-                {
-                    if (contained == null)
-                        continue;
-
-                    yield return contained;
-                }
-            }
-        }
-
-        private IEnumerable<EntityLookupNode> GetNodesInRange(MapId mapId, Box2 worldBox)
+        private IEnumerable<PhysicsLookupNode> GetNodesInRange(MapId mapId, Box2 worldBox)
         {
             var range = (worldBox.BottomLeft - worldBox.Center).Length;
 
             // This is the max in any direction that we can get a chunk (e.g. max 2 chunks away of data).
-            var (maxXDiff, maxYDiff) = ((int) (range / EntityLookupChunk.ChunkSize) + 1, (int) (range / EntityLookupChunk.ChunkSize) + 1);
+            var (maxXDiff, maxYDiff) = ((int) (range / PhysicsLookupChunk.ChunkSize) + 1, (int) (range / PhysicsLookupChunk.ChunkSize) + 1);
 
             foreach (var grid in MapManager.FindGridsIntersecting(mapId, worldBox))
             {
@@ -203,7 +111,7 @@ namespace Robust.Shared.Physics.Chunks
                 {
                     for (var y = -maxYDiff; y <= maxYDiff; y++)
                     {
-                        var chunkIndices = GetChunkIndices(new Vector2i(centerTile.X + x * EntityLookupChunk.ChunkSize, centerTile.Y + y * EntityLookupChunk.ChunkSize));
+                        var chunkIndices = GetChunkIndices(new Vector2i(centerTile.X + x * PhysicsLookupChunk.ChunkSize, centerTile.Y + y * PhysicsLookupChunk.ChunkSize));
 
                         if (!chunks.TryGetValue(chunkIndices, out var chunk)) continue;
 
@@ -218,7 +126,7 @@ namespace Robust.Shared.Physics.Chunks
             }
         }
 
-        public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Vector2 position)
+        public IEnumerable<IPhysicsComponent> GetPhysicsIntersecting(MapId mapId, Vector2 position)
         {
             var grids = _graph[mapId];
 
@@ -228,14 +136,14 @@ namespace Robust.Shared.Physics.Chunks
                 var offsetIndices = new Vector2i((int) (Math.Floor(position.X)), (int) (Math.Floor(position.Y)));
                 var node = grids[grid.Index][chunkIndices].GetNode(offsetIndices - chunkIndices);
 
-                foreach (var entity in node.Entities)
+                foreach (var entity in node.PhysicsShapes)
                 {
                     yield return entity;
                 }
             }
         }
 
-        public IEnumerable<IEntity> GetEntitiesIntersecting(GridId gridId, Vector2i index)
+        public IEnumerable<IPhysicsComponent> GetPhysicsIntersecting(GridId gridId, Vector2i index)
         {
             var mapId = MapManager.GetGrid(gridId).ParentMapId;
             var grids = _graph[mapId];
@@ -251,7 +159,7 @@ namespace Robust.Shared.Physics.Chunks
             }
         }
 
-        public List<Vector2i> GetIndices(IEntity entity)
+        public List<Vector2i> GetIndices(IPhysicsComponent entity)
         {
             var results = new List<Vector2i>();
 
@@ -268,25 +176,25 @@ namespace Robust.Shared.Physics.Chunks
             return results;
         }
 
-        private EntityLookupChunk GetOrCreateChunk(MapId mapId, GridId gridId, Vector2i indices)
+        private PhysicsLookupChunk GetOrCreateChunk(MapId mapId, GridId gridId, Vector2i indices)
         {
             var chunkIndices = GetChunkIndices(indices);
 
             if (!_graph.TryGetValue(mapId, out var grids))
             {
-                grids = new Dictionary<GridId, Dictionary<Vector2i, EntityLookupChunk>>();
+                grids = new Dictionary<GridId, Dictionary<Vector2i, PhysicsLookupChunk>>();
                 _graph[mapId] = grids;
             }
 
             if (!grids.TryGetValue(gridId, out var gridChunks))
             {
-                gridChunks = new Dictionary<Vector2i, EntityLookupChunk>();
+                gridChunks = new Dictionary<Vector2i, PhysicsLookupChunk>();
                 grids[gridId] = gridChunks;
             }
 
             if (!gridChunks.TryGetValue(chunkIndices, out var chunk))
             {
-                chunk = new EntityLookupChunk(mapId, gridId, chunkIndices);
+                chunk = new PhysicsLookupChunk(mapId, gridId, chunkIndices);
                 gridChunks[chunkIndices] = chunk;
             }
 
@@ -296,27 +204,25 @@ namespace Robust.Shared.Physics.Chunks
         private Vector2i GetChunkIndices(Vector2i indices)
         {
             return new Vector2i(
-                (int) (Math.Floor((float) indices.X / EntityLookupChunk.ChunkSize) * EntityLookupChunk.ChunkSize),
-                (int) (Math.Floor((float) indices.Y / EntityLookupChunk.ChunkSize) * EntityLookupChunk.ChunkSize));
+                (int) (Math.Floor((float) indices.X / PhysicsLookupChunk.ChunkSize) * PhysicsLookupChunk.ChunkSize),
+                (int) (Math.Floor((float) indices.Y / PhysicsLookupChunk.ChunkSize) * PhysicsLookupChunk.ChunkSize));
         }
 
         private Vector2i GetChunkIndices(Vector2 indices)
         {
             return new Vector2i(
-                (int) (Math.Floor(indices.X / EntityLookupChunk.ChunkSize) * EntityLookupChunk.ChunkSize),
-                (int) (Math.Floor(indices.Y / EntityLookupChunk.ChunkSize) * EntityLookupChunk.ChunkSize));
+                (int) (Math.Floor(indices.X / PhysicsLookupChunk.ChunkSize) * PhysicsLookupChunk.ChunkSize),
+                (int) (Math.Floor(indices.Y / PhysicsLookupChunk.ChunkSize) * PhysicsLookupChunk.ChunkSize));
         }
 
-        private HashSet<EntityLookupNode> GetOrCreateNodes(IEntity entity)
+        private HashSet<PhysicsLookupNode> GetOrCreateNodes(IPhysicsComponent physicsComponent)
         {
-            if (_lastKnownNodes.TryGetValue(entity, out var nodes))
-            {
+            if (_lastKnownNodes.TryGetValue(physicsComponent, out var nodes))
                 return nodes;
-            }
 
-            var grids = GetEntityIndices(entity);
-            var results = new HashSet<EntityLookupNode>();
-            var mapId = entity.Transform.MapID;
+            var grids = GetEntityIndices(physicsComponent);
+            var results = new HashSet<PhysicsLookupNode>();
+            var mapId = physicsComponent.Owner.Transform.MapID;
 
             foreach (var (grid, indices) in grids)
             {
@@ -326,15 +232,15 @@ namespace Robust.Shared.Physics.Chunks
                 }
             }
 
-            _lastKnownNodes[entity] = results;
+            _lastKnownNodes[physicsComponent] = results;
             return results;
         }
 
-        private HashSet<EntityLookupNode> GetNodes(IEntity entity)
+        private HashSet<PhysicsLookupNode> GetNodes(IPhysicsComponent physicsComponent)
         {
-            var grids = GetEntityIndices(entity);
-            var results = new HashSet<EntityLookupNode>();
-            var mapId = entity.Transform.MapID;
+            var grids = GetEntityIndices(physicsComponent);
+            var results = new HashSet<PhysicsLookupNode>();
+            var mapId = physicsComponent.Owner.Transform.MapID;
 
             foreach (var (grid, indices) in grids)
             {
@@ -354,7 +260,7 @@ namespace Robust.Shared.Physics.Chunks
         /// <param name="gridId"></param>
         /// <param name="indices"></param>
         /// <returns></returns>
-        private EntityLookupNode GetOrCreateNode(MapId mapId, GridId gridId, Vector2i indices)
+        private PhysicsLookupNode GetOrCreateNode(MapId mapId, GridId gridId, Vector2i indices)
         {
             var chunk = GetOrCreateChunk(mapId, gridId, indices);
 
@@ -364,15 +270,15 @@ namespace Robust.Shared.Physics.Chunks
         /// <summary>
         ///     Get the relevant GridId and Vector2i for this entity for lookup.
         /// </summary>
-        /// <param name="entity"></param>
+        /// <param name="physicsComponent"></param>
         /// <returns></returns>
-        private Dictionary<GridId, List<Vector2i>> GetEntityIndices(IEntity entity)
+        private Dictionary<GridId, List<Vector2i>> GetEntityIndices(IPhysicsComponent physicsComponent)
         {
-            var entityBounds = GetEntityBox(entity);
+            var entityBounds = GetEntityBox(physicsComponent);
             var results = new Dictionary<GridId, List<Vector2i>>();
             var onlyOnGrid = false;
 
-            foreach (var grid in MapManager.FindGridsIntersecting(entity.Transform.MapID, GetEntityBox(entity)))
+            foreach (var grid in MapManager.FindGridsIntersecting(physicsComponent.Owner.Transform.MapID, GetEntityBox(physicsComponent)))
             {
                 var indices = new List<Vector2i>();
 
@@ -407,21 +313,15 @@ namespace Robust.Shared.Physics.Chunks
             return results;
         }
 
-        private Box2 GetEntityBox(IEntity entity)
+        private Box2 GetEntityBox(IPhysicsComponent physicsComponent)
         {
-            // Need to clip the aabb as anything with an edge intersecting another tile might be picked up, such as walls.
-            // TODO: Check if we still need this, also try using 0.001 instead
-            if (entity.TryGetComponent(out IPhysicsComponent? physics))
-                return new Box2(physics.WorldAABB.BottomLeft + 0.01f, physics.WorldAABB.TopRight - 0.01f);
-
-            // Don't want to accidentally get neighboring tiles unless we're near an edge
-            return Box2.CenteredAround(entity.Transform.Coordinates.ToMapPos(EntityManager), Vector2.One / 2);
+            return physicsComponent.WorldAABB;
         }
 
         public override void Initialize()
         {
-            SubscribeLocalEvent<MoveEvent>(HandleEntityMove);
-            SubscribeLocalEvent<EntityInitializedMessage>(HandleEntityInitialized);
+            SubscribeLocalEvent<MoveEvent>(HandlePhysicsMove);
+            SubscribeLocalEvent<CollisionChangeMessage>(HandleCollisionChange);
             MapManager.OnGridCreated += HandleGridCreated;
             MapManager.OnGridRemoved += HandleGridRemoval;
             MapManager.TileChanged += HandleTileChanged;
@@ -437,15 +337,22 @@ namespace Robust.Shared.Physics.Chunks
             MapManager.MapCreated -= HandleMapCreated;
         }
 
-        private void HandleEntityInitialized(EntityInitializedMessage message)
+        private void HandleCollisionChange(CollisionChangeMessage message)
         {
-            HandleEntityAdd(message.Entity);
+            if (message.CanCollide)
+            {
+                HandlePhysicsAdd(message.PhysicsComponent);
+            }
+            else
+            {
+                HandlePhysicsRemove(message.PhysicsComponent);
+            }
         }
 
         /*
         private void HandleEntityDeleted(EntityDeletedMessage message)
         {
-            HandleEntityRemove(message.Entity);
+            HandlePhysicsRemove(message.Entity);
         }
         */
 
@@ -460,26 +367,26 @@ namespace Robust.Shared.Physics.Chunks
 
             if (!_graph.TryGetValue(mapId, out var grids))
             {
-                grids = new Dictionary<GridId, Dictionary<Vector2i, EntityLookupChunk>>();
+                grids = new Dictionary<GridId, Dictionary<Vector2i, PhysicsLookupChunk>>();
                 _graph[mapId] = grids;
             }
 
-            grids[gridId] = new Dictionary<Vector2i, EntityLookupChunk>();
+            grids[gridId] = new Dictionary<Vector2i, PhysicsLookupChunk>();
         }
 
         private void HandleMapCreated(object? sender, MapEventArgs eventArgs)
         {
-            _graph[eventArgs.Map] = new Dictionary<GridId, Dictionary<Vector2i, EntityLookupChunk>>();
+            _graph[eventArgs.Map] = new Dictionary<GridId, Dictionary<Vector2i, PhysicsLookupChunk>>();
         }
 
         private void HandleGridRemoval(GridId gridId)
         {
-            var toRemove = new List<IEntity>();
+            var toRemove = new List<IPhysicsComponent>();
 
-            foreach (var (entity, _) in _lastKnownNodes)
+            foreach (var (physicsComponent, _) in _lastKnownNodes)
             {
-                if (entity.Deleted || entity.Transform.GridID == gridId)
-                    toRemove.Add(entity);
+                if (physicsComponent.Deleted || physicsComponent.Owner.Transform.GridID == gridId)
+                    toRemove.Add(physicsComponent);
             }
 
             foreach (var entity in toRemove)
@@ -513,30 +420,31 @@ namespace Robust.Shared.Physics.Chunks
         /// </summary>
         /// The node will filter it to the correct category (if possible)
         /// <param name="entity"></param>
-        private void HandleEntityAdd(IEntity entity)
+        private void HandlePhysicsAdd(IPhysicsComponent physicsComponent)
         {
             // TODO: I DON'T THINK TRANSFORM IS CORRECT FOR CONTAINED ENTITIES
             //PROBABLY CALL THIS WHEN AN ENTITY'S PARENT IS CHANGED
-            if (!entity.IsValid() ||
-                entity.Transform.MapID == MapId.Nullspace)
+            if (physicsComponent.Deleted ||
+                physicsComponent.Owner.Transform.MapID == MapId.Nullspace)
             {
                 return;
             }
 
-            // TODO: This stops grids from showing up on lookups which uhhhhhh idk.
-            // Might just be better to take an arg on the intersecting methods so they can also get the grid back if they want it?
-            if (MapManager.TryFindGridAt(entity.Transform.MapID, entity.Transform.WorldPosition, out var grid) &&
-                entity.Uid == grid.GridEntityId)
+            // TODO: We still need grids to show up.... riiiggghhhttt?
+            // Might need to look at parents I guess...? Or maybe have a separate grid collision thing?
+            // TODO: Also should look if they have the physics grid shape...
+            if (MapManager.TryFindGridAt(physicsComponent.Owner.Transform.MapID, physicsComponent.Owner.Transform.WorldPosition, out var grid) &&
+                physicsComponent.Owner.Uid == grid.GridEntityId)
             {
                 return;
             }
 
-            var entityNodes = GetOrCreateNodes(entity);
+            var entityNodes = GetOrCreateNodes(physicsComponent);
             var newIndices = new Dictionary<GridId, List<Vector2i>>();
 
             foreach (var node in entityNodes)
             {
-                node.AddEntity(entity);
+                node.AddPhysics(physicsComponent);
                 if (!newIndices.TryGetValue(node.ParentChunk.GridId, out var existing))
                 {
                     existing = new List<Vector2i>();
@@ -546,7 +454,7 @@ namespace Robust.Shared.Physics.Chunks
                 existing.Add(node.Indices);
             }
 
-            _lastKnownNodes[entity] = entityNodes;
+            _lastKnownNodes[physicsComponent] = entityNodes;
             //EntityManager.EventBus.RaiseEvent(EventSource.Local, new TileLookupUpdateMessage(newIndices));
         }
 
@@ -554,10 +462,10 @@ namespace Robust.Shared.Physics.Chunks
         ///     Removes this entity from all of the applicable nodes.
         /// </summary>
         /// <param name="entity"></param>
-        private void HandleEntityRemove(IEntity entity)
+        private void HandlePhysicsRemove(IPhysicsComponent entity)
         {
-            var toDelete = new List<EntityLookupChunk>();
-            var checkedChunks = new HashSet<EntityLookupChunk>();
+            var toDelete = new List<PhysicsLookupChunk>();
+            var checkedChunks = new HashSet<PhysicsLookupChunk>();
 
             if (_lastKnownNodes.TryGetValue(entity, out var nodes))
             {
@@ -572,7 +480,7 @@ namespace Robust.Shared.Physics.Chunks
                         }
                     }
 
-                    node.RemoveEntity(entity);
+                    node.RemovePhysics(entity);
                 }
             }
 
@@ -590,21 +498,24 @@ namespace Robust.Shared.Physics.Chunks
         ///     When an entity moves around we'll remove it from its old node and add it to its new node (if applicable)
         /// </summary>
         /// <param name="moveEvent"></param>
-        private void HandleEntityMove(MoveEvent moveEvent)
+        private void HandlePhysicsMove(MoveEvent moveEvent)
         {
+            var physicsComponent = moveEvent.Sender.GetComponent<IPhysicsComponent>();
             if (moveEvent.Sender.Deleted ||
                 !moveEvent.NewPosition.IsValid(EntityManager))
             {
-                HandleEntityRemove(moveEvent.Sender);
+                // TODO: Need an event when a body is removed
+                HandlePhysicsRemove(physicsComponent);
                 return;
             }
 
             // This probably means it's a grid
-            if (!_lastKnownNodes.TryGetValue(moveEvent.Sender, out var oldNodes))
+            // TODO: REALLY NEED TO HANDLE IT BUDDY
+            if (!_lastKnownNodes.TryGetValue(physicsComponent, out var oldNodes))
                 return;
 
             // TODO: Need to add entity parenting to transform (when _localPosition is set then check its parent
-            var newNodes = GetNodes(moveEvent.Sender);
+            var newNodes = GetNodes(physicsComponent);
             if (oldNodes.Count == newNodes.Count && oldNodes.SetEquals(newNodes))
             {
                 return;
@@ -615,12 +526,12 @@ namespace Robust.Shared.Physics.Chunks
 
             foreach (var node in toRemove)
             {
-                node.RemoveEntity(moveEvent.Sender);
+                node.RemovePhysics(physicsComponent);
             }
 
             foreach (var node in toAdd)
             {
-                node.AddEntity(moveEvent.Sender);
+                node.AddPhysics(physicsComponent);
             }
 
             var newIndices = new Dictionary<GridId, List<Vector2i>>();
@@ -635,8 +546,7 @@ namespace Robust.Shared.Physics.Chunks
                 existing.Add(node.Indices);
             }
 
-            _lastKnownNodes[moveEvent.Sender] = newNodes;
-            //EntityManager.EventBus.RaiseEvent(EventSource.Local, new TileLookupUpdateMessage(newIndices));
+            _lastKnownNodes[physicsComponent] = newNodes;
         }
     }
 }

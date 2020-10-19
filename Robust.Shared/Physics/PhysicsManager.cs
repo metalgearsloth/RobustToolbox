@@ -10,6 +10,7 @@ using Robust.Shared.IoC;
 using Robust.Shared.Log;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
+using Robust.Shared.Physics.Chunks;
 
 namespace Robust.Shared.Physics
 {
@@ -19,10 +20,7 @@ namespace Robust.Shared.Physics
         [Dependency] private readonly IMapManager _mapManager = default!;
         [Dependency] private readonly IEntityManager _entityManager = default!;
 
-        private readonly ConcurrentDictionary<MapId,BroadPhase> _treesPerMap =
-            new ConcurrentDictionary<MapId, BroadPhase>();
-
-        private BroadPhase this[MapId mapId] => _treesPerMap.GetOrAdd(mapId, _ => new BroadPhase());
+        private readonly SharedPhysicsBroadphaseSystem _sharedPhysics = default!;
 
         /// <summary>
         ///     returns true if collider intersects a physBody under management.
