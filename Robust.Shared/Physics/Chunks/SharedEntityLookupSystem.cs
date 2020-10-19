@@ -2,12 +2,15 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using JetBrains.Annotations;
+using Robust.Shared.Containers;
 using Robust.Shared.GameObjects;
 using Robust.Shared.GameObjects.Components;
+using Robust.Shared.GameObjects.Components.Containers;
 using Robust.Shared.GameObjects.Components.Transform;
 using Robust.Shared.GameObjects.EntitySystemMessages;
 using Robust.Shared.GameObjects.Systems;
 using Robust.Shared.Interfaces.GameObjects;
+using Robust.Shared.Interfaces.GameObjects.Components;
 using Robust.Shared.Interfaces.Map;
 using Robust.Shared.IoC;
 using Robust.Shared.Map;
@@ -21,6 +24,9 @@ namespace Robust.Shared.Physics.Chunks
     [UsedImplicitly]
     public abstract class SharedEntityLookupSystem : EntitySystem
     {
+        // TODO: Have message for stuff inserted into containers
+        // Anything in a container is removed from the graph and anything removed from a container is added to the graph.
+
         // TODO: This thing is going to memory leak like a motherfucker for space so need to handle that.
         // Ideally you'd pool space chunks.
 
@@ -89,26 +95,87 @@ namespace Robust.Shared.Physics.Chunks
             }
         }
 
-        public IEnumerable<IEntity> GetEntitiesIntersecting(MapId mapId, Box2 worldBox, float? range = null, bool approximate = true)
+        public IEnumerable<IEntity> GetEntitiesIntersecting(
+            MapId mapId,
+            Box2 worldBox,
+            bool includeContainers = true,
+            bool includeGrids = false,
+            bool approximate = true)
         {
-            foreach (var node in GetNodesInRange(mapId, worldBox, range))
+            var checkedEntities = new HashSet<EntityUid>();
+
+            if (includeGrids)
+            {
+                foreach (var grid in MapManager.FindGridsIntersecting(mapId, worldBox))
+                {
+                    if (checkedEntities.Contains(grid.GridEntityId))
+                        continue;
+
+                    var gridEntity = EntityManager.GetEntity(grid.GridEntityId);
+
+                    foreach (var contained in GetContained(includeContainers, gridEntity))
+                    {
+                        if (checkedEntities.Contains(contained.Uid))
+                            continue;
+
+                        yield return contained;
+                    }
+
+                    checkedEntities.Add(grid.GridEntityId);
+                    yield return gridEntity;
+                }
+            }
+
+            foreach (var node in GetNodesInRange(mapId, worldBox))
             {
                 foreach (var entity in node.Entities)
                 {
                     if (approximate || worldBox.Intersects(EntityManager.GetWorldAabbFromEntity(entity)))
                     {
+                        if (checkedEntities.Contains(entity.Uid))
+                            continue;
+
+                        foreach (var contained in GetContained(includeContainers, entity))
+                        {
+                            if (checkedEntities.Contains(contained.Uid))
+                                continue;
+
+                            yield return contained;
+                        }
+
+                        checkedEntities.Add(entity.Uid);
                         yield return entity;
                     }
                 }
             }
         }
 
-        private IEnumerable<EntityLookupNode> GetNodesInRange(MapId mapId, Box2 worldBox, float? range = null)
+        // Yeah I made a helper, seemed easier than pasting it everywhere.
+        private IEnumerable<IEntity> GetContained(bool includeContainers, IEntity entity)
         {
-            range ??= (worldBox.BottomLeft - worldBox.Center).Length;
+            if (!includeContainers || !entity.TryGetComponent(out IContainerManager? containerManager))
+                yield break;
+
+            var cast = (SharedContainerManagerComponent) containerManager;
+
+            foreach (var container in cast.GetAllContainers())
+            {
+                foreach (var contained in container.ContainedEntities)
+                {
+                    if (contained == null)
+                        continue;
+
+                    yield return contained;
+                }
+            }
+        }
+
+        private IEnumerable<EntityLookupNode> GetNodesInRange(MapId mapId, Box2 worldBox)
+        {
+            var range = (worldBox.BottomLeft - worldBox.Center).Length;
 
             // This is the max in any direction that we can get a chunk (e.g. max 2 chunks away of data).
-            var (maxXDiff, maxYDiff) = ((int) (range.Value / EntityLookupChunk.ChunkSize) + 1, (int) (range.Value / EntityLookupChunk.ChunkSize) + 1);
+            var (maxXDiff, maxYDiff) = ((int) (range / EntityLookupChunk.ChunkSize) + 1, (int) (range / EntityLookupChunk.ChunkSize) + 1);
 
             foreach (var grid in MapManager.FindGridsIntersecting(mapId, worldBox))
             {
@@ -116,8 +183,8 @@ namespace Robust.Shared.Physics.Chunks
                 var centerTile = new Vector2i((int) Math.Floor(localCenter.X), (int) Math.Floor(localCenter.Y));
                 var chunks = _graph[mapId][grid.Index];
 
-                var bottomLeftNodeBound = new Vector2i((int) Math.Floor(centerTile.X - range.Value), (int) Math.Floor(centerTile.Y - range.Value));
-                var topRightNodeBound = new Vector2i((int) Math.Floor(centerTile.X + range.Value + 1), (int) Math.Floor(centerTile.Y + range.Value + 1));
+                var bottomLeftNodeBound = new Vector2i((int) Math.Floor(centerTile.X - range), (int) Math.Floor(centerTile.Y - range));
+                var topRightNodeBound = new Vector2i((int) Math.Floor(centerTile.X + range + 1), (int) Math.Floor(centerTile.Y + range + 1));
 
                 for (var x = -maxXDiff; x <= maxXDiff; x++)
                 {
@@ -407,8 +474,25 @@ namespace Robust.Shared.Physics.Chunks
                 _lastKnownNodes.Remove(entity);
             }
 
-            var mapId = MapManager.GetGrid(gridId).ParentMapId;
-            _graph[mapId].Remove(gridId);
+            MapId? mapId = null;
+
+            foreach (var (map, grids) in _graph)
+            {
+                foreach (var (grid, _) in grids)
+                {
+                    if (gridId == grid)
+                    {
+                        mapId = map;
+                        break;
+                    }
+                }
+
+                if (mapId != null)
+                    break;
+            }
+
+            if (mapId != null)
+                _graph[mapId.Value].Remove(gridId);
         }
 
         /// <summary>
@@ -418,9 +502,19 @@ namespace Robust.Shared.Physics.Chunks
         /// <param name="entity"></param>
         private void HandleEntityAdd(IEntity entity)
         {
+            // TODO: I DON'T THINK TRANSFORM IS CORRECT FOR CONTAINED ENTITIES
+            //PROBABLY CALL THIS WHEN AN ENTITY'S PARENT IS CHANGED
             if (entity.Deleted ||
                 entity.Transform.MapID == MapId.Nullspace ||
                 entity.Transform.GridID == GridId.Invalid)
+            {
+                return;
+            }
+
+            // TODO: This stops grids from showing up on lookups which uhhhhhh idk.
+            // Might just be better to take an arg on the intersecting methods so they can also get the grid back if they want it?
+            if (MapManager.TryFindGridAt(entity.Transform.MapID, entity.Transform.WorldPosition, out var grid) &&
+                entity.Uid == grid.GridEntityId)
             {
                 return;
             }
@@ -450,15 +544,33 @@ namespace Robust.Shared.Physics.Chunks
         /// <param name="entity"></param>
         private void HandleEntityRemove(IEntity entity)
         {
+            var toDelete = new List<EntityLookupChunk>();
+            var checkedChunks = new HashSet<EntityLookupChunk>();
+
             if (_lastKnownNodes.TryGetValue(entity, out var nodes))
             {
                 foreach (var node in nodes)
                 {
+                    if (!checkedChunks.Contains(node.ParentChunk))
+                    {
+                        checkedChunks.Add(node.ParentChunk);
+                        if (node.ParentChunk.CanDeleteChunk())
+                        {
+                            toDelete.Add(node.ParentChunk);
+                        }
+                    }
+
                     node.RemoveEntity(entity);
                 }
             }
 
             _lastKnownNodes.Remove(entity);
+
+            foreach (var chunk in toDelete)
+            {
+                _graph[chunk.MapId][chunk.GridId].Remove(chunk.Origin);
+            }
+
             //EntityManager.EventBus.RaiseEvent(EventSource.Local, new TileLookupUpdateMessage(null));
         }
 
@@ -468,8 +580,6 @@ namespace Robust.Shared.Physics.Chunks
         /// <param name="moveEvent"></param>
         private void HandleEntityMove(MoveEvent moveEvent)
         {
-            // TODO: Should we check for all container children?
-            // Definitely shouldn't check transform children at the least.
             if (moveEvent.Sender.Deleted ||
                 !moveEvent.NewPosition.IsValid(EntityManager))
             {
@@ -478,22 +588,10 @@ namespace Robust.Shared.Physics.Chunks
             }
 
             if (!_lastKnownNodes.TryGetValue(moveEvent.Sender, out var oldNodes))
-            {
                 return;
-            }
 
-            // Memory leak protection
             // TODO: Need to add entity parenting to transform (when _localPosition is set then check its parent
-            // TODO: Need to handle space memory leak (try pooling)
-            var gridBounds = MapManager.GetGrid(moveEvent.Sender.Transform.GridID).WorldBounds;
-            if (!gridBounds.Contains(moveEvent.Sender.Transform.WorldPosition))
-            {
-                HandleEntityRemove(moveEvent.Sender);
-                return;
-            }
-
             var newNodes = GetNodes(moveEvent.Sender);
-
             if (oldNodes.Count == newNodes.Count && oldNodes.SetEquals(newNodes))
             {
                 return;

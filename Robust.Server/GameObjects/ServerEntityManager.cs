@@ -186,13 +186,18 @@ namespace Robust.Server.GameObjects
 
             // TODO: This is based on the old method but ideally it iterates through all of their eyes enlarged
             // TODO: We should also consider some stuff like lights which necessitate a higher PVS range
+            // Probably just have a separate component that the lookups tracks separately
             var viewbox = new Box2(playerPos, playerPos).Enlarged(range);
 
             // TODO: Ideally each chunk has "LastModifiedTick" that is the latest of any entity contained within
             // Then we can just do a quicker check... stuff gets modified frequently but I think this will still work well...
-            // Would also need to store last time we sent a chunk to a particular player.
-            foreach (var entity in _lookupSystem.GetEntitiesIntersecting(mapId, viewbox, range))
+            // Would also need to store last time we sent a chunk to a particular player given they don't get sent the whole chunk
+            foreach (var entity in _lookupSystem.GetEntitiesIntersecting(mapId, viewbox, approximate: true))
             {
+                // TODO: Probably don't send container data to clients maybe? Though we need to fix containers so they
+                // don't throw if we don't send it (coz currently they do).
+                // Though I guess sending contents is useful for prediction ahhhhhhhh
+
                 // Get whether we need to send dat state
                 // If we haven't seen it ever then force send that baby
                 if (data.EntityLastSeen.TryGetValue(entity.Uid, out var lastSeen))

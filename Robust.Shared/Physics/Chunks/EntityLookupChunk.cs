@@ -49,6 +49,22 @@ namespace Robust.Shared.Physics.Chunks
             DebugTools.Assert(_nodes.Length == ChunkSize * ChunkSize, $"Length is {_nodes.Length}, size is {ChunkSize * ChunkSize}");
         }
 
+        /// <summary>
+        ///     If we're a space chunk then we can ourselves when there's no more entities intersecting us.
+        /// </summary>
+        public bool CanDeleteChunk()
+        {
+            if (GridId != GridId.Invalid)
+                return false;
+
+            foreach (var _ in GetEntities())
+            {
+                return false;
+            }
+
+            return true;
+        }
+
         public IEnumerable<IEntity> GetEntities()
         {
             for (var x = 0; x < ChunkSize; x++)

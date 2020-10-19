@@ -292,6 +292,7 @@ namespace Robust.Shared.GameObjects.Components.Transform
 
                 var oldGridPos = Coordinates;
                 SetPosition(value);
+                // TODO: Try not calling dirty if our velocity etc. is the same and the client can easily extrapolate our position maybe...
                 Dirty();
 
                 // Set ourselves to a new grid if we didn't have one or we're on one (and need to check if we're actually on another).
