@@ -6,6 +6,7 @@ using Robust.Shared.Containers;
 using Robust.Shared.GameObjects;
 using Robust.Shared.GameObjects.Components;
 using Robust.Shared.GameObjects.Components.Containers;
+using Robust.Shared.GameObjects.Components.Map;
 using Robust.Shared.GameObjects.Components.Transform;
 using Robust.Shared.GameObjects.EntitySystemMessages;
 using Robust.Shared.GameObjects.Systems;
@@ -587,6 +588,7 @@ namespace Robust.Shared.Physics.Chunks
                 return;
             }
 
+            // This probably means it's a grid
             if (!_lastKnownNodes.TryGetValue(moveEvent.Sender, out var oldNodes))
                 return;
 
