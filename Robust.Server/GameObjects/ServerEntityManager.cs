@@ -192,7 +192,7 @@ namespace Robust.Server.GameObjects
             // TODO: Ideally each chunk has "LastModifiedTick" that is the latest of any entity contained within
             // Then we can just do a quicker check... stuff gets modified frequently but I think this will still work well...
             // Would also need to store last time we sent a chunk to a particular player given they don't get sent the whole chunk
-            foreach (var entity in _lookupSystem.GetEntitiesIntersecting(mapId, viewbox, approximate: true))
+            foreach (var entity in _lookupSystem.GetEntitiesIntersecting(mapId, viewbox, includeGrids: true, approximate: true))
             {
                 // TODO: Probably don't send container data to clients maybe? Though we need to fix containers so they
                 // don't throw if we don't send it (coz currently they do).
