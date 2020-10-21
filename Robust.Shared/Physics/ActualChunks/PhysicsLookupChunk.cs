@@ -43,9 +43,6 @@ namespace Robust.Shared.Physics.Chunks
                     _nodes[x, y] = new PhysicsLookupNode(this, new Vector2i(Origin.X + x, Origin.Y + y));
                 }
             }
-
-            // TODO: REPLACE WITH A test
-            DebugTools.Assert(_nodes.Length == ChunkSize * ChunkSize, $"Length is {_nodes.Length}, size is {ChunkSize * ChunkSize}");
         }
 
         /// <summary>
@@ -64,28 +61,44 @@ namespace Robust.Shared.Physics.Chunks
             return true;
         }
 
-        public IEnumerable<IPhysicsComponent> GetEntities()
+        public IEnumerable<IPhysShape> GetShapes()
         {
             for (var x = 0; x < ChunkSize; x++)
             {
                 for (var y = 0; y < ChunkSize; y++)
                 {
                     var node = _nodes[x, y];
-                    foreach (var physicsComponent in node.PhysicsShapes)
+                    foreach (var shape in node.PhysicsShapes)
                     {
-                        yield return physicsComponent;
+                        yield return shape;
                     }
                 }
             }
         }
 
-        public IEnumerable<PhysicsComponent> GetEntities(Vector2i index)
+        public IEnumerable<IPhysShape> GetEntities()
+        {
+            for (var x = 0; x < ChunkSize; x++)
+            {
+                for (var y = 0; y < ChunkSize; y++)
+                {
+                    var node = _nodes[x, y];
+
+                    foreach (var shape in node.PhysicsShapes)
+                    {
+                        yield return shape;
+                    }
+                }
+            }
+        }
+
+        public IEnumerable<IPhysShape> GetEntities(Vector2i index)
         {
             var node = _nodes[index.X - Origin.X, index.Y - Origin.Y];
 
-            foreach (var entity in node.PhysicsShapes)
+            foreach (var shape in node.PhysicsShapes)
             {
-                yield return entity;
+                yield return shape;
             }
         }
 

@@ -34,10 +34,6 @@ namespace Robust.Shared.GameObjects.Components
         bool IsColliding(Vector2 offset, bool approximate = true);
 
         IEnumerable<IEntity> GetCollidingEntities(Vector2 offset, bool approximate = true);
-        bool UpdatePhysicsTree();
-
-        void RemovedFromPhysicsTree(MapId mapId);
-        void AddedToPhysicsTree(MapId mapId);
     }
 
     public partial class PhysicsComponent : Component, IPhysicsComponent
@@ -225,7 +221,7 @@ namespace Robust.Shared.GameObjects.Components
                 _canCollide = value;
 
                 Owner.EntityManager.EventBus.RaiseEvent(EventSource.Local,
-                    new CollisionChangeMessage(Owner.Uid, _canCollide));
+                    new CollisionChangeMessage(Owner.Uid, _canCollide, this));
                 Dirty();
             }
         }
@@ -259,7 +255,7 @@ namespace Robust.Shared.GameObjects.Components
                 var layers = 0x0;
 
                 foreach (var shape in _physShapes)
-                    layers = layers | shape.CollisionLayer;
+                    layers |= shape.CollisionLayer;
                 return layers;
             }
         }
@@ -275,7 +271,7 @@ namespace Robust.Shared.GameObjects.Components
                 var mask = 0x0;
 
                 foreach (var shape in _physShapes)
-                    mask = mask | shape.CollisionMask;
+                    mask |= shape.CollisionMask;
                 return mask;
             }
         }
@@ -304,7 +300,7 @@ namespace Robust.Shared.GameObjects.Components
             }
 
             Owner.EntityManager.EventBus.RaiseEvent(EventSource.Local,
-                new CollisionChangeMessage(Owner.Uid, _canCollide));
+                new CollisionChangeMessage(Owner.Uid, _canCollide, this));
         }
 
         public override void OnAdd()
@@ -324,7 +320,7 @@ namespace Robust.Shared.GameObjects.Components
             }
 
             // Should we not call this if !_canCollide? PathfindingSystem doesn't care at least.
-            Owner.EntityManager.EventBus.RaiseEvent(EventSource.Local, new CollisionChangeMessage(Owner.Uid, false));
+            Owner.EntityManager.EventBus.RaiseEvent(EventSource.Local, new CollisionChangeMessage(Owner.Uid, false, this));
             Owner.EntityManager.EventBus.RaiseEvent(EventSource.Local, new PhysicsUpdateMessage(this));
         }
 
@@ -358,38 +354,11 @@ namespace Robust.Shared.GameObjects.Components
             return _physicsManager.IsColliding(this, offset, approx);
         }
 
-        public IEnumerable<IEntity> GetCollidingEntities(Vector2 offset, bool approx = true)
-        {
-            return _physicsManager.GetCollidingEntities(this, offset, approx);
-        }
-
-        public bool UpdatePhysicsTree()
-            => _physicsManager.Update(this);
-
-        public void RemovedFromPhysicsTree(MapId mapId)
-        {
-            _physicsManager.RemovedFromMap(this, mapId);
-        }
-
-        public void AddedToPhysicsTree(MapId mapId)
-        {
-            _physicsManager.AddedToMap(this, mapId);
-        }
-
-        public bool IsOnGround()
-        {
-            return Status == BodyStatus.OnGround;
-        }
-
-        public bool IsInAir()
-        {
-            return Status == BodyStatus.InAir;
-        }
+        public IEnumerable<IEntity> GetCollidingEntities(Vector2 offset, bool approximate = true) => _physicsManager.GetCollidingEntities(this, offset, approximate);
 
         private void ShapeDataChanged()
         {
             Dirty();
-            UpdatePhysicsTree();
         }
 
         // Custom IList<> implementation so that we can hook addition/removal of shapes.

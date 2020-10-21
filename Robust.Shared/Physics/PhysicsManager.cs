@@ -28,7 +28,7 @@ namespace Robust.Shared.Physics
         /// <param name="collider">Rectangle to check for collision</param>
         /// <param name="map">Map ID to filter</param>
         /// <returns></returns>
-        public bool TryCollideRect(Box2 collider, MapId map)
+        public bool TryCollideRect(MapId map, Box2 collider)
         {
             var state = (collider, map, found: false);
             this[map].QueryAabb(ref state, (ref (Box2 collider, MapId map, bool found) state, in IPhysBody body) =>
@@ -336,24 +336,6 @@ namespace Robust.Shared.Physics
         }
 
         public event Action<DebugRayData>? DebugDrawRay;
-
-        public bool Update(IPhysBody collider)
-        {
-            collider.WakeBody();
-            return this[collider.MapID].Update(collider);
-        }
-
-        public void RemovedFromMap(IPhysBody body, MapId mapId)
-        {
-            body.WakeBody();
-            this[mapId].Remove(body);
-        }
-
-        public void AddedToMap(IPhysBody body, MapId mapId)
-        {
-            body.WakeBody();
-            this[mapId].Add(body);
-        }
 
         /// <summary>
         /// How many ticks before a physics body will go to sleep. Bodies will only sleep if
