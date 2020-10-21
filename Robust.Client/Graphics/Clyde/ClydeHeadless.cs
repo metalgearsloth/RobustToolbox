@@ -228,6 +228,11 @@ namespace Robust.Client.Graphics.Clyde
                 // Nada.
             }
 
+            public void SetEffect(AudioEffect effect)
+            {
+                // Nada.
+            }
+
             public void SetVolume(float decibels)
             {
                 // Nada.

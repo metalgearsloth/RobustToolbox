@@ -32,14 +32,19 @@ namespace Robust.Client.Graphics.Clyde
 
         // Used to track audio sources that were disposed in the finalizer thread,
         // so we need to properly send them off in the main thread.
-        private readonly ConcurrentQueue<(int sourceHandle, int filterHandle)> _sourceDisposeQueue = new ConcurrentQueue<(int, int)>();
-        private readonly ConcurrentQueue<(int sourceHandle, int filterHandle)> _bufferedSourceDisposeQueue = new ConcurrentQueue<(int, int)>();
+        private readonly ConcurrentQueue<(int sourceHandle, int filterHandle, int effectHandle)> _sourceDisposeQueue =
+                     new ConcurrentQueue<(int, int, int)>();
+        private readonly ConcurrentQueue<(int sourceHandle, int filterHandle, int effectHandle)> _bufferedSourceDisposeQueue =
+                     new ConcurrentQueue<(int, int, int)>();
         private readonly ConcurrentQueue<int> _bufferDisposeQueue = new ConcurrentQueue<int>();
 
         public bool HasAlDeviceExtension(string extension) => _alcDeviceExtensions.Contains(extension);
         public bool HasAlContextExtension(string extension) => _alContextExtensions.Contains(extension);
 
         internal bool IsEfxSupported;
+
+        // TODO: Could support more handles I guess, need to check for support
+        internal int AuxiliaryHandle;
 
         private void _initializeAudio()
         {
@@ -49,6 +54,7 @@ namespace Robust.Client.Graphics.Clyde
             _audioCreateContext();
 
             IsEfxSupported = HasAlDeviceExtension("ALC_EXT_EFX");
+            AuxiliaryHandle = EFX.GenAuxiliaryEffectSlot();
         }
 
         private void _audioCreateContext()
@@ -129,6 +135,8 @@ namespace Robust.Client.Graphics.Clyde
                 }
             }
 
+            EFX.DeleteAuxiliaryEffectSlot(AuxiliaryHandle);
+
             if (_openALContext != ALContext.Null)
             {
                 ALC.DestroyContext(_openALContext);
@@ -174,9 +182,10 @@ namespace Robust.Client.Graphics.Clyde
             }
         }
 
-        private static void RemoveEfx((int sourceHandle, int filterHandle) handles)
+        private static void RemoveEfx((int sourceHandle, int filterHandle, int effectHandle) handles)
         {
             if (handles.filterHandle != 0) EFX.DeleteFilter(handles.filterHandle);
+            if (handles.effectHandle != 0) EFX.DeleteEffect(handles.effectHandle);
         }
 
         public IClydeAudioSource CreateAudioSource(AudioStream stream)
@@ -331,14 +340,15 @@ namespace Robust.Client.Graphics.Clyde
             }
         }
 
-        private void DeleteSourceOnMainThread(int sourceHandle, int filterHandle)
+        private void DeleteSourceOnMainThread(int sourceHandle, int filterHandle, int effectHandle)
         {
-            _sourceDisposeQueue.Enqueue((sourceHandle, filterHandle));
+            _sourceDisposeQueue.Enqueue((sourceHandle, filterHandle, effectHandle));
         }
 
         private void DeleteBufferedSourceOnMainThread(int bufferedSourceHandle, int filterHandle)
         {
-            _bufferedSourceDisposeQueue.Enqueue((bufferedSourceHandle, filterHandle));
+            // TODO
+            _bufferedSourceDisposeQueue.Enqueue((bufferedSourceHandle, filterHandle, 0));
         }
 
         private void DeleteAudioBufferOnMainThread(int bufferHandle)
@@ -352,6 +362,8 @@ namespace Robust.Client.Graphics.Clyde
             private readonly Clyde _master;
             private readonly AudioStream _sourceStream;
             private int FilterHandle;
+            private int EffectHandle;
+            private int AuxiliaryHandle => _master.AuxiliaryHandle;
 #if DEBUG
             private bool _didPositionWarning;
 #endif
@@ -359,7 +371,6 @@ namespace Robust.Client.Graphics.Clyde
             private float _gain;
 
             private bool IsEfxSupported => _master.IsEfxSupported;
-
             public AudioSource(Clyde master, int sourceHandle, AudioStream sourceStream)
             {
                 _master = master;
@@ -427,6 +438,63 @@ namespace Robust.Client.Graphics.Clyde
                 }
                 _gain =  MathF.Pow(10, decibels / 10);
                 AL.Source(SourceHandle, ALSourcef.Gain, _gain * priorOcclusion);
+                _checkAlError();
+            }
+
+            public void SetEffect(AudioEffect effect)
+            {
+                _checkDisposed();
+                if (!IsEfxSupported)
+                    return;
+
+                switch (effect)
+                {
+                    case AudioEffect.Space:
+                        ConvertReverbParameters(ReverbPresets.Underwater);
+                        break;
+                    default:
+                        Logger.Error($"Tried to play effect {effect} but nothing setup for it!");
+                        break;
+                }
+
+                _checkAlError();
+            }
+
+            private void ConvertReverbParameters(ReverbProperties preset)
+            {
+                if (EffectHandle == 0)
+                {
+                    EffectHandle = EFX.GenEffect();
+                }
+
+                // TODO: Did I do the Vector3s correctly?
+                EFX.Effect(EffectHandle, EffectInteger.EffectType, (int) EffectType.EaxReverb);
+                EFX.Effect(EffectHandle, EffectFloat.ReverbDensity, preset.Density);
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbDiffusion, preset.Diffusion);
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbGain, preset.Gain);
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbGainHF, preset.GainHF);
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbGainLF, preset.GainLF);
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbDecayTime, preset.DecayTime);
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbDecayHFRatio, preset.DecayHFRatio);
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbDecayLFRatio, preset.DecayLFRatio);
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbReflectionsGain, preset.ReflectionsGain);
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbReflectionsDelay, preset.ReflectionsDelay);
+                EFX.Effect(EffectHandle, EffectVector3.EaxReverbReflectionsPan, new [] {preset.ReflectionsPan.X, preset.ReflectionsPan.Y, preset.ReflectionsPan.Z});
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbLateReverbGain, preset.LateReverbGain);
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbLateReverbDelay, preset.LateReverbDelay);
+                EFX.Effect(EffectHandle, EffectVector3.EaxReverbLateReverbPan, new [] {preset.LateReverbPan.X, preset.LateReverbPan.Y, preset.LateReverbPan.Z});
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbEchoTime, preset.EchoTime);
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbEchoDepth, preset.EchoDepth);
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbModulationTime, preset.ModulationTime);
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbModulationDepth, preset.ModulationDepth);
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbAirAbsorptionGainHF, preset.AirAbsorptionGainHF);
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbHFReference, preset.HFReference);
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbLFReference, preset.LFReference);
+                EFX.Effect(EffectHandle, EffectFloat.EaxReverbRoomRolloffFactor, preset.RoomRolloffFactor);
+                EFX.Effect(EffectHandle, EffectInteger.EaxReverbDecayHFLimit, preset.DecayHFLimit);
+
+                EFX.AuxiliaryEffectSlot(AuxiliaryHandle, EffectSlotInteger.Effect, EffectHandle);
+                EFX.Source(SourceHandle, EFXSourceInteger3.AuxiliarySendFilter, new[]{AuxiliaryHandle, 0});
                 _checkAlError();
             }
 
@@ -527,11 +595,11 @@ namespace Robust.Client.Graphics.Clyde
                 if (!disposing)
                 {
                     // We can't run this code inside the finalizer thread so tell Clyde to clear it up later.
-                    _master.DeleteSourceOnMainThread(SourceHandle, FilterHandle);
+                    _master.DeleteSourceOnMainThread(SourceHandle, FilterHandle, EffectHandle);
                 }
                 else
                 {
-                    if (FilterHandle != 0) EFX.DeleteFilter(FilterHandle);
+                    RemoveEfx((SourceHandle, FilterHandle, EffectHandle));
                     AL.DeleteSource(SourceHandle);
                     _master._audioSources.Remove(SourceHandle);
                     _checkAlError();
@@ -619,6 +687,12 @@ namespace Robust.Client.Graphics.Clyde
                 // ReSharper disable once PossibleInvalidOperationException
                 AL.Source(SourceHandle!.Value, ALSourceb.SourceRelative, true);
                 _checkAlError();
+            }
+
+            public void SetEffect(AudioEffect effect)
+            {
+                Logger.Error("Sound effects not implemented for buffered");
+                return;
             }
 
             public void SetLooping()
@@ -866,5 +940,10 @@ namespace Robust.Client.Graphics.Clyde
                 QueueBuffers(handles);
             }
         }
+    }
+
+    public enum AudioEffect
+    {
+        Space,
     }
 }

@@ -2,9 +2,11 @@
 using System.Collections.Generic;
 using JetBrains.Annotations;
 using Robust.Client.Audio;
+using Robust.Client.Graphics.Clyde;
 using Robust.Client.Interfaces.Graphics;
 using Robust.Client.Interfaces.Graphics.ClientEye;
 using Robust.Client.Interfaces.ResourceManagement;
+using Robust.Client.Player;
 using Robust.Client.ResourceManagement;
 using Robust.Shared.Audio;
 using Robust.Shared.GameObjects;
@@ -57,7 +59,7 @@ namespace Robust.Client.GameObjects.EntitySystems
         private void PlayAudioPositionalHandler(PlayAudioPositionalMessage ev)
         {
             var gridId = ev.Coordinates.GetGridId(_entityManager);
-            
+
             if (!_mapManager.GridExists(gridId))
             {
                 Logger.Error(
@@ -156,6 +158,7 @@ namespace Robust.Client.GameObjects.EntitySystems
                                     stream.TrackingEntity);
                             }
 
+                            SetTileEffect(stream.Source);
                             stream.Source.SetVolume(stream.Volume);
                             stream.Source.SetOcclusion(occlusion);
                         }
@@ -174,6 +177,21 @@ namespace Robust.Client.GameObjects.EntitySystems
                 // that will then throw on IsPlaying.
                 // meaning it'll break the entire audio system.
                 _playingClydeStreams.RemoveAll(p => p.Done);
+            }
+        }
+
+        private void SetTileEffect(IClydeAudioSource source)
+        {
+            var player = IoCManager.Resolve<IPlayerManager>().LocalPlayer?.ControlledEntity;
+            if (player == null)
+                return;
+
+            var tile = _mapManager.GetGrid(player.Transform.GridID).GetTileRef(player.Transform.Coordinates);
+
+            if (tile.Tile.IsEmpty)
+            {
+                source.SetEffect(AudioEffect.Space);
+                return;
             }
         }
 
