@@ -1252,18 +1252,6 @@ namespace Robust.Client.GameObjects
             UpdateIsInert();
         }
 
-        public override void OnRemove()
-        {
-            base.OnRemove();
-
-            var map = Owner.Transform.MapID;
-            if (map != MapId.Nullspace)
-            {
-                Owner.EntityManager.EventBus.RaiseEvent(EventSource.Local,
-                    new RenderTreeRemoveSpriteMessage(this, map));
-            }
-        }
-
         public void FrameUpdate(float delta)
         {
             foreach (var t in Layers)

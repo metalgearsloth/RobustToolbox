@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using JetBrains.Annotations;
+using Robust.Client.Physics;
 using Robust.Shared.GameObjects.Components.Transform;
 using Robust.Shared.GameObjects.EntitySystemMessages;
 using Robust.Shared.GameObjects.Systems;
@@ -34,6 +35,7 @@ namespace Robust.Client.GameObjects.EntitySystems
             base.Initialize();
 
             SubscribeLocalEvent<TransformStartLerpMessage>(TransformStartLerpHandler);
+            UpdatesAfter.Add(typeof(PhysicsSystem));
         }
 
         private void TransformStartLerpHandler(TransformStartLerpMessage ev)

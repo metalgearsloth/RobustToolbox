@@ -2,19 +2,13 @@
 using System.Collections.Generic;
 using System.Linq;
 using JetBrains.Annotations;
-using Robust.Shared.Containers;
-using Robust.Shared.GameObjects;
 using Robust.Shared.GameObjects.Components;
-using Robust.Shared.GameObjects.Components.Containers;
 using Robust.Shared.GameObjects.Components.Map;
 using Robust.Shared.GameObjects.Components.Transform;
-using Robust.Shared.GameObjects.EntitySystemMessages;
 using Robust.Shared.GameObjects.Systems;
-using Robust.Shared.Interfaces.GameObjects;
-using Robust.Shared.Interfaces.GameObjects.Components;
 using Robust.Shared.Interfaces.Map;
-using Robust.Shared.Interfaces.Physics;
 using Robust.Shared.IoC;
+using Robust.Shared.Log;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
 
@@ -42,6 +36,9 @@ namespace Robust.Shared.Physics.Chunks
         /// </summary>
         private readonly Dictionary<IPhysicsComponent, HashSet<PhysicsLookupNode>> _lastKnownNodes =
                      new Dictionary<IPhysicsComponent, HashSet<PhysicsLookupNode>>();
+
+        // TODO: Could potentially combine this with the EntityLookups and just have each node store multiple components or w/e
+        // Save muh memory.
 
         /// <summary>
         ///     Yields all of the entities intersecting a particular Vector2i
@@ -421,7 +418,7 @@ namespace Robust.Shared.Physics.Chunks
         ///     Tries to add the entity to the relevant TileLookupNode
         /// </summary>
         /// The node will filter it to the correct category (if possible)
-        /// <param name="entity"></param>
+        /// <param name="physicsComponent"></param>
         private void HandlePhysicsAdd(IPhysicsComponent physicsComponent)
         {
             // TODO: I DON'T THINK TRANSFORM IS CORRECT FOR CONTAINED ENTITIES
@@ -435,8 +432,7 @@ namespace Robust.Shared.Physics.Chunks
             // TODO: We still need grids to show up.... riiiggghhhttt?
             // Might need to look at parents I guess...? Or maybe have a separate grid collision thing?
             // TODO: Also should look if they have the physics grid shape...
-            if (MapManager.TryFindGridAt(physicsComponent.Owner.Transform.MapID, physicsComponent.Owner.Transform.WorldPosition, out var grid) &&
-                physicsComponent.Owner.Uid == grid.GridEntityId)
+            if (physicsComponent.Owner.TryGetComponent(out IMapGridComponent? mapGridComponent))
             {
                 return;
             }

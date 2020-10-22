@@ -12,6 +12,7 @@ using Robust.Shared.GameObjects.Systems;
 using Robust.Shared.Log;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
+using Robust.Shared.Physics.Chunks;
 using static Robust.Client.GameObjects.ClientOccluderComponent;
 using OGLTextureWrapMode = OpenToolkit.Graphics.OpenGL.TextureWrapMode;
 
@@ -496,43 +497,31 @@ namespace Robust.Client.Graphics.Clyde
             // (if the occluder is in the current lights at all, it's still not between the light and the world bounds).
             var expandedBounds = worldBounds;
 
-            var renderingTreeSystem = _entitySystemManager.GetEntitySystem<RenderingTreeSystem>();
-            var lightTree = renderingTreeSystem.GetLightTreeForMap(map);
+            var state = (clyde: this, expandedBounds, count: 0);
 
-            var state = (this, expandedBounds, count: 0);
-
-            lightTree.QueryAabb(ref state, (ref (Clyde clyde, Box2 expandedBounds, int count) state, in PointLightComponent light) =>
+            foreach (var entity in EntitySystem.Get<SharedEntityLookupSystem>().GetEntitiesIntersecting(map, worldBounds))
             {
+                if (!entity.TryGetComponent(out PointLightComponent? light) ||
+                    !light.Enabled ||
+                    light.ContainerOccluded)
+                    continue;
+
                 var transform = light.Owner.Transform;
-
-                if (!light.Enabled || light.ContainerOccluded)
-                {
-                    return true;
-                }
-
                 var lightPos = transform.WorldMatrix.Transform(light.Offset);
-
                 var circle = new Circle(lightPos, light.Radius);
 
                 if (!circle.Intersects(state.expandedBounds))
-                {
-                    return true;
-                }
+                    continue;
 
                 state.clyde._lightsToRenderList[state.count] = (light, lightPos);
                 state.count += 1;
 
                 state.expandedBounds = state.expandedBounds.ExtendToContain(lightPos);
 
+                // TODO: Allow more than MaxLightsPerScene lights.
                 if (state.count == MaxLightsPerScene)
-                {
-                    // TODO: Allow more than MaxLightsPerScene lights.
-                    return false;
-                }
-
-                return true;
-            }, expandedBounds);
-
+                    break;
+            }
             return (_lightsToRenderList, state.count, state.expandedBounds);
         }
 
@@ -710,7 +699,7 @@ namespace Robust.Client.Graphics.Clyde
             // 2D mask geometry used to apply wall bleed.
 
             // TODO: This code probably does not work correctly with rotated camera.
-            // TODO: Yes this function throws and index exception if you reach maxOccluders.
+            // TODO: Yes this function throws an index exception if you reach maxOccluders.
 
             const int maxOccluders = 2048;
             const float polygonHeight = 500;
@@ -725,15 +714,15 @@ namespace Robust.Client.Graphics.Clyde
 
             try
             {
-                var renderingTreeSystem = _entitySystemManager.GetEntitySystem<RenderingTreeSystem>();
                 var occluderSystem = _entitySystemManager.GetEntitySystem<OccluderSystem>();
-                var occluderTree = occluderSystem.GetOccluderTreeForMap(map);
+                //var occluderTree = occluderSystem.GetOccluderTreeForMap(map);
 
                 var ai = 0;
                 var ami = 0;
                 var ii = 0;
                 var imi = 0;
 
+                /*
                 occluderTree.QueryAabb((in OccluderComponent sOccluder) =>
                 {
                     var occluder = (ClientOccluderComponent) sOccluder;
@@ -864,6 +853,7 @@ namespace Robust.Client.Graphics.Clyde
 
                     return true;
                 }, expandedBounds);
+                */
 
                 _occlusionDataLength = ii;
                 _occlusionMaskDataLength = imi;

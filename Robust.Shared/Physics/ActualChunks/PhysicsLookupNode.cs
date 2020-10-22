@@ -1,7 +1,9 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using Robust.Shared.GameObjects.Components;
 using Robust.Shared.Interfaces.GameObjects;
 using Robust.Shared.Maths;
+using Robust.Shared.Utility;
 
 namespace Robust.Shared.Physics.Chunks
 {
@@ -15,25 +17,29 @@ namespace Robust.Shared.Physics.Chunks
         {
             get
             {
-                foreach (var comp in _entities)
+                for (var i = 0; i < _entities.Count; i++)
                 {
+                    var comp = _entities[i];
                     if (comp.Deleted)
                         continue;
 
-                    foreach (var shape in comp.PhysicsShapes)
+                    for (var j = 0; j < comp.PhysicsShapes.Count; j++)
                     {
+                        var shape = comp.PhysicsShapes[j];
+
                         yield return shape;
                     }
                 }
             }
         }
 
-        internal IEnumerable<IPhysicsComponent> PhysicsComponents
+        public IEnumerable<IPhysicsComponent> PhysicsComponents
         {
             get
             {
-                foreach (var comp in _entities)
+                for (var i = 0; i < _entities.Count; i++)
                 {
+                    var comp = _entities[i];
                     if (comp.Deleted)
                         continue;
 
@@ -42,7 +48,7 @@ namespace Robust.Shared.Physics.Chunks
             }
         }
 
-        private readonly HashSet<IPhysicsComponent> _entities = new HashSet<IPhysicsComponent>();
+        private readonly List<IPhysicsComponent> _entities = new List<IPhysicsComponent>();
 
         internal PhysicsLookupNode(PhysicsLookupChunk parentChunk, Vector2i indices)
         {
@@ -52,11 +58,13 @@ namespace Robust.Shared.Physics.Chunks
 
         internal void AddPhysics(IPhysicsComponent comp)
         {
+            DebugTools.Assert(!_entities.Contains(comp));
             _entities.Add(comp);
         }
 
         internal void RemovePhysics(IPhysicsComponent comp)
         {
+            DebugTools.Assert(_entities.Contains(comp));
             _entities.Remove(comp);
         }
     }

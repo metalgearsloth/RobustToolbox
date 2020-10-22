@@ -176,18 +176,6 @@ namespace Robust.Client.GameObjects
             }
         }
 
-        public override void OnRemove()
-        {
-            base.OnRemove();
-
-            var map = Owner.Transform.MapID;
-            if (map != MapId.Nullspace)
-            {
-                Owner.EntityManager.EventBus.RaiseEvent(EventSource.Local,
-                    new RenderTreeRemoveLightMessage(this, map));
-            }
-        }
-
         /// <inheritdoc />
         public override void HandleComponentState(ComponentState? curState, ComponentState? nextState)
         {

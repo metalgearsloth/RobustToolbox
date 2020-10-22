@@ -127,10 +127,25 @@ namespace Robust.Shared.Physics
             return manifold.Normal * impulse;
         }
 
+        private IEnumerable<IPhysicsComponent> HandleGrid(PhysShapeGrid grid)
+        {
+            yield break;
+        }
+
         public IEnumerable<IPhysicsComponent> GetCollidingComponents(IPhysBody body, bool approximate = true)
         {
             var modifiers = body.Entity.GetAllComponents<ICollideSpecial>().ToList();
             var transform = body.Entity.Transform;
+
+            if (body.PhysicsShapes.Count > 0 && body.PhysicsShapes[0] is PhysShapeGrid grid)
+            {
+                foreach (var physicsComponent in HandleGrid(grid))
+                {
+                    yield return physicsComponent;
+                }
+
+                yield break;
+            }
 
             foreach (var comp in SharedPhysics.GetPhysicsIntersecting(transform.MapID, body.WorldAABB, approximate))
             {

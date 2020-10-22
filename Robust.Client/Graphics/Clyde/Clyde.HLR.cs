@@ -8,9 +8,11 @@ using Robust.Client.Graphics.ClientEye;
 using Robust.Client.Graphics.Overlays;
 using Robust.Client.Interfaces.Graphics;
 using Robust.Client.ResourceManagement;
+using Robust.Shared.GameObjects.Systems;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics;
+using Robust.Shared.Physics.Chunks;
 using Robust.Shared.Utility;
 
 namespace Robust.Client.Graphics.Clyde
@@ -206,31 +208,22 @@ namespace Robust.Client.Graphics.Clyde
         private void ProcessSpriteEntities(MapId map, Box2 worldBounds,
             RefList<(SpriteComponent sprite, Matrix3 matrix, Angle worldRot, float yWorldPos)> list)
         {
-            var spriteSystem = _entitySystemManager.GetEntitySystem<RenderingTreeSystem>();
-
-            var tree = spriteSystem.GetSpriteTreeForMap(map);
-
-            tree.QueryAabb(ref list, ((
-                ref RefList<(SpriteComponent sprite, Matrix3 matrix, Angle worldRot, float yWorldPos)> state,
-                in SpriteComponent value) =>
+            foreach (var entity in EntitySystem.Get<SharedEntityLookupSystem>().GetEntitiesIntersecting(map, worldBounds))
             {
-                if (value.ContainerOccluded || !value.Visible)
-                {
-                    return true;
-                }
+                if (!entity.TryGetComponent(out SpriteComponent? spriteComponent) ||
+                    spriteComponent.ContainerOccluded ||
+                    !spriteComponent.Visible)
+                    continue;
 
-                var entity = value.Owner;
                 var transform = entity.Transform;
 
-                ref var entry = ref state.AllocAdd();
-                entry.sprite = value;
+                ref var entry = ref list.AllocAdd();
+                entry.sprite = spriteComponent;
                 entry.worldRot = transform.WorldRotation;
                 entry.matrix = transform.WorldMatrix;
                 var worldPos = entry.matrix.Transform(transform.LocalPosition);
                 entry.yWorldPos = worldPos.Y;
-                return true;
-
-            }), worldBounds, approx: true);
+            }
         }
 
         private void DrawSplash(IRenderHandle handle)
