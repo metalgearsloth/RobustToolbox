@@ -81,7 +81,7 @@ namespace Robust.Shared.Physics
         float InvMass { get; }
 
         /// <summary>
-        /// Inverse moment of inertia, in 
+        /// Inverse moment of inertia, in
         /// </summary>
         float InvI { get; }
 
@@ -130,6 +130,25 @@ namespace Robust.Shared.Physics
         {
             get => Entity.Transform.WorldPosition;
             set => Entity.Transform.WorldPosition = value;
+        }
+
+        EntityCoordinates Coordinates
+        {
+            get => Entity.Transform.Coordinates;
+            set => Entity.Transform.Coordinates = value;
+        }
+
+        /// <summary>
+        /// Moves the entity along by this vector2.
+        /// Will optimise itself internally
+        /// </summary>
+        /// <param name="amount"></param>
+        void Move(Vector2 amount)
+        {
+            if (amount == Vector2.Zero)
+                return;
+
+            Entity.Transform.WorldPosition += amount;
         }
 
         /// <summary>

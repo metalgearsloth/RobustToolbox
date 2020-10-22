@@ -371,7 +371,7 @@ namespace Robust.Shared.GameObjects.Systems
             physics.Owner.Transform.DeferUpdates = true;
             _deferredUpdates.Add(physics);
             physics.WorldRotation += physics.AngularVelocity * frameTime;
-            physics.WorldPosition += physics.LinearVelocity * frameTime;
+            physics.Move(physics.LinearVelocity * frameTime);
         }
 
         // Based off of Randy Gaul's ImpulseEngine code
@@ -398,14 +398,14 @@ namespace Robust.Shared.GameObjects.Systems
                 {
                     collision.A.Owner.Transform.DeferUpdates = true;
                     _deferredUpdates.Add(collision.A);
-                    collision.A.Owner.Transform.WorldPosition -= correction;
+                    collision.A.Move(-correction);
                 }
 
                 if (collision.B.CanMove())
                 {
                     collision.B.Owner.Transform.DeferUpdates = true;
                     _deferredUpdates.Add(collision.B);
-                    collision.B.Owner.Transform.WorldPosition += correction;
+                    collision.B.Move(correction);
                 }
             }
 
