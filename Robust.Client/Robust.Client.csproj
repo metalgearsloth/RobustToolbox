@@ -48,6 +48,9 @@
 
     <EmbeddedResource Include="Graphics\Clyde\Shaders\*" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="GameObjects\EntitySystems\AudioEffectSystem.cs" />
+  </ItemGroup>
   <Import Project="..\MSBuild\Robust.Engine.targets" />
   <PropertyGroup>
     <RobustToolsPath>../Tools</RobustToolsPath>

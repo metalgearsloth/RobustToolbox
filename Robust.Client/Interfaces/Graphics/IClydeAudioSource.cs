@@ -1,6 +1,7 @@
 using System;
 using JetBrains.Annotations;
 using Robust.Client.Graphics.Clyde;
+using Robust.Shared.Audio;
 using Robust.Shared.Maths;
 
 namespace Robust.Client.Interfaces.Graphics
@@ -18,9 +19,9 @@ namespace Robust.Client.Interfaces.Graphics
         bool SetPosition(Vector2 position);
         void SetPitch(float pitch);
         void SetGlobal();
-        void SetEffect(AudioEffect effect);
         void SetVolume(float decibels);
         void SetOcclusion(float blocks);
         void SetPlaybackPosition(float seconds);
+        void SetAudioEffect(AudioEffect effect);
     }
 }

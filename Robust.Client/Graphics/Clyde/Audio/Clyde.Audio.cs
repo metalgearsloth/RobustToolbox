@@ -9,6 +9,7 @@ using OpenToolkit.Audio.OpenAL;
 using OpenToolkit.Audio.OpenAL.Extensions.Creative.EFX;
 using Robust.Client.Audio;
 using Robust.Client.Interfaces.Graphics;
+using Robust.Shared.Audio;
 using Robust.Shared.Log;
 using Vector2 = Robust.Shared.Maths.Vector2;
 
@@ -186,6 +187,39 @@ namespace Robust.Client.Graphics.Clyde
         {
             if (handles.filterHandle != 0) EFX.DeleteFilter(handles.filterHandle);
             if (handles.effectHandle != 0) EFX.DeleteEffect(handles.effectHandle);
+        }
+
+        public void ConvertReverbParameters(int sourceHandle, int effectHandle, ReverbProperties preset)
+        {
+            // TODO: Did I do the Vector3s correctly?
+            EFX.Effect(effectHandle, EffectInteger.EffectType, (int) EffectType.EaxReverb);
+            EFX.Effect(effectHandle, EffectFloat.ReverbDensity, preset.Density);
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbDiffusion, preset.Diffusion);
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbGain, preset.Gain);
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbGainHF, preset.GainHF);
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbGainLF, preset.GainLF);
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbDecayTime, preset.DecayTime);
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbDecayHFRatio, preset.DecayHFRatio);
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbDecayLFRatio, preset.DecayLFRatio);
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbReflectionsGain, preset.ReflectionsGain);
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbReflectionsDelay, preset.ReflectionsDelay);
+            EFX.Effect(effectHandle, EffectVector3.EaxReverbReflectionsPan, new [] {preset.ReflectionsPan.X, preset.ReflectionsPan.Y, preset.ReflectionsPan.Z});
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbLateReverbGain, preset.LateReverbGain);
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbLateReverbDelay, preset.LateReverbDelay);
+            EFX.Effect(effectHandle, EffectVector3.EaxReverbLateReverbPan, new [] {preset.LateReverbPan.X, preset.LateReverbPan.Y, preset.LateReverbPan.Z});
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbEchoTime, preset.EchoTime);
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbEchoDepth, preset.EchoDepth);
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbModulationTime, preset.ModulationTime);
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbModulationDepth, preset.ModulationDepth);
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbAirAbsorptionGainHF, preset.AirAbsorptionGainHF);
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbHFReference, preset.HFReference);
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbLFReference, preset.LFReference);
+            EFX.Effect(effectHandle, EffectFloat.EaxReverbRoomRolloffFactor, preset.RoomRolloffFactor);
+            EFX.Effect(effectHandle, EffectInteger.EaxReverbDecayHFLimit, preset.DecayHFLimit);
+
+            EFX.AuxiliaryEffectSlot(AuxiliaryHandle, EffectSlotInteger.Effect, effectHandle);
+            EFX.Source(sourceHandle, EFXSourceInteger3.AuxiliarySendFilter, new[]{AuxiliaryHandle, 0});
+            _checkAlError();
         }
 
         public IClydeAudioSource CreateAudioSource(AudioStream stream)
@@ -441,63 +475,6 @@ namespace Robust.Client.Graphics.Clyde
                 _checkAlError();
             }
 
-            public void SetEffect(AudioEffect effect)
-            {
-                _checkDisposed();
-                if (!IsEfxSupported)
-                    return;
-
-                switch (effect)
-                {
-                    case AudioEffect.Space:
-                        ConvertReverbParameters(ReverbPresets.Underwater);
-                        break;
-                    default:
-                        Logger.Error($"Tried to play effect {effect} but nothing setup for it!");
-                        break;
-                }
-
-                _checkAlError();
-            }
-
-            private void ConvertReverbParameters(ReverbProperties preset)
-            {
-                if (EffectHandle == 0)
-                {
-                    EffectHandle = EFX.GenEffect();
-                }
-
-                // TODO: Did I do the Vector3s correctly?
-                EFX.Effect(EffectHandle, EffectInteger.EffectType, (int) EffectType.EaxReverb);
-                EFX.Effect(EffectHandle, EffectFloat.ReverbDensity, preset.Density);
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbDiffusion, preset.Diffusion);
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbGain, preset.Gain);
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbGainHF, preset.GainHF);
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbGainLF, preset.GainLF);
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbDecayTime, preset.DecayTime);
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbDecayHFRatio, preset.DecayHFRatio);
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbDecayLFRatio, preset.DecayLFRatio);
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbReflectionsGain, preset.ReflectionsGain);
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbReflectionsDelay, preset.ReflectionsDelay);
-                EFX.Effect(EffectHandle, EffectVector3.EaxReverbReflectionsPan, new [] {preset.ReflectionsPan.X, preset.ReflectionsPan.Y, preset.ReflectionsPan.Z});
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbLateReverbGain, preset.LateReverbGain);
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbLateReverbDelay, preset.LateReverbDelay);
-                EFX.Effect(EffectHandle, EffectVector3.EaxReverbLateReverbPan, new [] {preset.LateReverbPan.X, preset.LateReverbPan.Y, preset.LateReverbPan.Z});
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbEchoTime, preset.EchoTime);
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbEchoDepth, preset.EchoDepth);
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbModulationTime, preset.ModulationTime);
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbModulationDepth, preset.ModulationDepth);
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbAirAbsorptionGainHF, preset.AirAbsorptionGainHF);
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbHFReference, preset.HFReference);
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbLFReference, preset.LFReference);
-                EFX.Effect(EffectHandle, EffectFloat.EaxReverbRoomRolloffFactor, preset.RoomRolloffFactor);
-                EFX.Effect(EffectHandle, EffectInteger.EaxReverbDecayHFLimit, preset.DecayHFLimit);
-
-                EFX.AuxiliaryEffectSlot(AuxiliaryHandle, EffectSlotInteger.Effect, EffectHandle);
-                EFX.Source(SourceHandle, EFXSourceInteger3.AuxiliarySendFilter, new[]{AuxiliaryHandle, 0});
-                _checkAlError();
-            }
-
             public void SetOcclusion(float blocks)
             {
                 _checkDisposed();
@@ -532,6 +509,30 @@ namespace Robust.Client.Graphics.Clyde
             {
                 _checkDisposed();
                 AL.Source(SourceHandle, ALSourcef.SecOffset, seconds);
+                _checkAlError();
+            }
+
+            public void SetAudioEffect(AudioEffect effect)
+            {
+                _checkDisposed();
+                if (!IsEfxSupported)
+                    return;
+
+                if (EffectHandle == 0)
+                    EffectHandle = EFX.GenEffect();
+
+                switch (effect)
+                {
+                    case AudioEffect.None:
+                        break;
+                    case AudioEffect.Space:
+                        _master.ConvertReverbParameters(SourceHandle, EffectHandle, ReverbPresets.Underwater);
+                        break;
+                    default:
+                        Logger.Error($"Tried to play effect {effect} but nothing setup for it!");
+                        break;
+                }
+
                 _checkAlError();
             }
 
@@ -689,12 +690,6 @@ namespace Robust.Client.Graphics.Clyde
                 _checkAlError();
             }
 
-            public void SetEffect(AudioEffect effect)
-            {
-                Logger.Error("Sound effects not implemented for buffered");
-                return;
-            }
-
             public void SetLooping()
             {
                 // TODO?waaaaddDDDDD
@@ -751,6 +746,12 @@ namespace Robust.Client.Graphics.Clyde
                 // ReSharper disable once PossibleInvalidOperationException
                 AL.Source(SourceHandle!.Value, ALSourcef.SecOffset, seconds);
                 _checkAlError();
+            }
+
+            public void SetAudioEffect(AudioEffect effect)
+            {
+                Logger.Error("Sound effects not implemented for buffered");
+                return;
             }
 
             public bool SetPosition(Vector2 position)
@@ -940,10 +941,5 @@ namespace Robust.Client.Graphics.Clyde
                 QueueBuffers(handles);
             }
         }
-    }
-
-    public enum AudioEffect
-    {
-        Space,
     }
 }

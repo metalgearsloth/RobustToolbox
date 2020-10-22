@@ -6,6 +6,7 @@ using Robust.Client.Graphics.Shaders;
 using Robust.Client.Input;
 using Robust.Client.Interfaces.Graphics;
 using Robust.Client.Interfaces.Graphics.ClientEye;
+using Robust.Shared.Audio;
 using Robust.Shared.Maths;
 using Robust.Shared.Timing;
 using SixLabors.ImageSharp;
@@ -228,11 +229,6 @@ namespace Robust.Client.Graphics.Clyde
                 // Nada.
             }
 
-            public void SetEffect(AudioEffect effect)
-            {
-                // Nada.
-            }
-
             public void SetVolume(float decibels)
             {
                 // Nada.
@@ -244,6 +240,11 @@ namespace Robust.Client.Graphics.Clyde
             }
 
             public void SetPlaybackPosition(float seconds)
+            {
+                // Nada.
+            }
+
+            public void SetAudioEffect(AudioEffect effect)
             {
                 // Nada.
             }

@@ -2,11 +2,9 @@
 using System.Collections.Generic;
 using JetBrains.Annotations;
 using Robust.Client.Audio;
-using Robust.Client.Graphics.Clyde;
 using Robust.Client.Interfaces.Graphics;
 using Robust.Client.Interfaces.Graphics.ClientEye;
 using Robust.Client.Interfaces.ResourceManagement;
-using Robust.Client.Player;
 using Robust.Client.ResourceManagement;
 using Robust.Shared.Audio;
 using Robust.Shared.GameObjects;
@@ -14,6 +12,7 @@ using Robust.Shared.GameObjects.Systems;
 using Robust.Shared.Interfaces.GameObjects;
 using Robust.Shared.Interfaces.Map;
 using Robust.Shared.Interfaces.Physics;
+using Robust.Shared.Interfaces.Reflection;
 using Robust.Shared.IoC;
 using Robust.Shared.Log;
 using Robust.Shared.Map;
@@ -35,6 +34,8 @@ namespace Robust.Client.GameObjects.EntitySystems
 
         public int OcclusionCollisionMask;
 
+        private Dictionary<Type, IAudioEffect> _audioEffects = new Dictionary<Type, IAudioEffect>();
+
         /// <inheritdoc />
         public override void Initialize()
         {
@@ -42,6 +43,13 @@ namespace Robust.Client.GameObjects.EntitySystems
             SubscribeNetworkEvent<PlayAudioGlobalMessage>(PlayAudioGlobalHandler);
             SubscribeNetworkEvent<PlayAudioPositionalMessage>(PlayAudioPositionalHandler);
             SubscribeNetworkEvent<StopAudioMessageClient>(StopAudioMessageHandler);
+            var typeFactory = IoCManager.Resolve<IDynamicTypeFactory>();
+
+            foreach (var type in IoCManager.Resolve<IReflectionManager>().GetAllChildren(typeof(IAudioEffect)))
+            {
+                var instantiated = (IAudioEffect) typeFactory.CreateInstance(type);
+                _audioEffects.Add(type, instantiated);
+            }
         }
 
         private void StopAudioMessageHandler(StopAudioMessageClient ev)
@@ -158,7 +166,7 @@ namespace Robust.Client.GameObjects.EntitySystems
                                     stream.TrackingEntity);
                             }
 
-                            SetTileEffect(stream.Source);
+                            SetEffect(stream);
                             stream.Source.SetVolume(stream.Volume);
                             stream.Source.SetOcclusion(occlusion);
                         }
@@ -180,19 +188,19 @@ namespace Robust.Client.GameObjects.EntitySystems
             }
         }
 
-        private void SetTileEffect(IClydeAudioSource source)
+        private void SetEffect(PlayingStream stream)
         {
-            var player = IoCManager.Resolve<IPlayerManager>().LocalPlayer?.ControlledEntity;
-            if (player == null)
-                return;
-
-            var tile = _mapManager.GetGrid(player.Transform.GridID).GetTileRef(player.Transform.Coordinates);
-
-            if (tile.Tile.IsEmpty)
+            foreach (var (_, effect) in _audioEffects)
             {
-                source.SetEffect(AudioEffect.Space);
-                return;
+                if (stream.TrackingCoordinates != null && effect.TrySetCoordsEffect(stream.Source, stream.TrackingCoordinates.Value))
+                    return;
+
+                if (stream.TrackingEntity != null && effect.TrySetEntityEffect(stream.Source, stream.TrackingEntity))
+                    return;
+
             }
+
+            stream.Source.SetAudioEffect(AudioEffect.None);
         }
 
         private static void StreamDone(PlayingStream stream)
@@ -353,6 +361,7 @@ namespace Robust.Client.GameObjects.EntitySystems
             public EntityCoordinates? TrackingCoordinates;
             public bool Done;
             public float Volume;
+            public AudioEffect Effect;
 
             public void Stop()
             {

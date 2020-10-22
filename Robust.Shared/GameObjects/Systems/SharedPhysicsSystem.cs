@@ -275,6 +275,10 @@ namespace Robust.Shared.GameObjects.Systems
                         collisionsWith[behavior] = 1;
                     }
                 }
+
+                if (collision.B.Entity.Deleted)
+                    continue;
+
                 var bBehaviors = collision.B.Entity.GetAllComponents<ICollideBehavior>();
                 foreach (var behavior in bBehaviors)
                 {
