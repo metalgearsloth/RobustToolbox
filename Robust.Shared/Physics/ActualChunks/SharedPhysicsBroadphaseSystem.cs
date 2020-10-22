@@ -13,6 +13,7 @@ using Robust.Shared.GameObjects.Systems;
 using Robust.Shared.Interfaces.GameObjects;
 using Robust.Shared.Interfaces.GameObjects.Components;
 using Robust.Shared.Interfaces.Map;
+using Robust.Shared.Interfaces.Physics;
 using Robust.Shared.IoC;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
@@ -23,7 +24,7 @@ namespace Robust.Shared.Physics.Chunks
     ///     Essentially a specialised version of the entitylookups for physics.
     /// </summary>
     [UsedImplicitly]
-    public abstract class SharedPhysicsBroadphaseSystem : EntitySystem
+    public class SharedPhysicsBroadphaseSystem : EntitySystem
     {
         // TODO: Have message for stuff inserted into containers
         // Anything in a container is removed from the graph and anything removed from a container is added to the graph.
@@ -49,7 +50,7 @@ namespace Robust.Shared.Physics.Chunks
         /// <param name="gridId"></param>
         /// <param name="gridIndices"></param>
         /// <returns></returns>
-        public IEnumerable<IPhysicsComponent> GetPhysicsIntersecting(MapId mapId, GridId gridId, Vector2i gridIndices)
+        public IEnumerable<IPhysShape> GetShapesIntersecting(MapId mapId, GridId gridId, Vector2i gridIndices)
         {
             var grids = _graph[mapId];
             var chunks = grids[gridId];
@@ -60,9 +61,9 @@ namespace Robust.Shared.Physics.Chunks
                 yield break;
             }
 
-            foreach (var entity in chunk.GetNode(gridIndices).PhysicsShapes)
+            foreach (var shape in chunk.GetNode(gridIndices).PhysicsShapes)
             {
-                yield return entity;
+                yield return shape;
             }
         }
 
@@ -77,15 +78,16 @@ namespace Robust.Shared.Physics.Chunks
 
             foreach (var node in GetNodesInRange(mapId, worldBox))
             {
-                foreach (var physicsComponent in node.PhysicsShapes)
+                foreach (var comp in node.PhysicsComponents)
                 {
-                    if (approximate || worldBox.Intersects(physicsComponent.WorldAABB))
-                    {
-                        if (checkedEntities.Contains(physicsComponent))
-                            continue;
+                    if (checkedEntities.Contains(comp))
+                        continue;
 
-                        checkedEntities.Add(physicsComponent);
-                        yield return physicsComponent;
+                    checkedEntities.Add(comp);
+
+                    if (approximate || worldBox.Intersects(comp.WorldAABB))
+                    {
+                        yield return comp;
                     }
                 }
             }
@@ -136,9 +138,9 @@ namespace Robust.Shared.Physics.Chunks
                 var offsetIndices = new Vector2i((int) (Math.Floor(position.X)), (int) (Math.Floor(position.Y)));
                 var node = grids[grid.Index][chunkIndices].GetNode(offsetIndices - chunkIndices);
 
-                foreach (var entity in node.PhysicsShapes)
+                foreach (var comp in node.PhysicsComponents)
                 {
-                    yield return entity;
+                    yield return comp;
                 }
             }
         }
@@ -153,9 +155,9 @@ namespace Robust.Shared.Physics.Chunks
             if (!grids[gridId].TryGetValue(chunkIndices, out var chunk))
                 yield break;
 
-            foreach (var entity in chunk.GetEntities(index))
+            foreach (var comp in chunk.GetPhysicsComponents(index))
             {
-                yield return entity;
+                yield return comp;
             }
         }
 
@@ -500,7 +502,9 @@ namespace Robust.Shared.Physics.Chunks
         /// <param name="moveEvent"></param>
         private void HandlePhysicsMove(MoveEvent moveEvent)
         {
-            var physicsComponent = moveEvent.Sender.GetComponent<IPhysicsComponent>();
+            if (!moveEvent.Sender.TryGetComponent(out IPhysicsComponent? physicsComponent))
+                return;
+
             if (moveEvent.Sender.Deleted ||
                 !moveEvent.NewPosition.IsValid(EntityManager))
             {

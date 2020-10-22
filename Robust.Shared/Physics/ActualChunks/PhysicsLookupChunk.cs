@@ -92,13 +92,23 @@ namespace Robust.Shared.Physics.Chunks
             }
         }
 
-        public IEnumerable<IPhysShape> GetEntities(Vector2i index)
+        public IEnumerable<IPhysShape> GetPhysicsShapes(Vector2i index)
         {
             var node = _nodes[index.X - Origin.X, index.Y - Origin.Y];
 
             foreach (var shape in node.PhysicsShapes)
             {
                 yield return shape;
+            }
+        }
+
+        public IEnumerable<IPhysicsComponent> GetPhysicsComponents(Vector2i index)
+        {
+            var node = _nodes[index.X - Origin.X, index.Y - Origin.Y];
+
+            foreach (var comp in node.PhysicsComponents)
+            {
+                yield return comp;
             }
         }
 

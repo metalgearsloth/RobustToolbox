@@ -28,6 +28,20 @@ namespace Robust.Shared.Physics.Chunks
             }
         }
 
+        internal IEnumerable<IPhysicsComponent> PhysicsComponents
+        {
+            get
+            {
+                foreach (var comp in _entities)
+                {
+                    if (comp.Deleted)
+                        continue;
+
+                    yield return comp;
+                }
+            }
+        }
+
         private readonly HashSet<IPhysicsComponent> _entities = new HashSet<IPhysicsComponent>();
 
         internal PhysicsLookupNode(PhysicsLookupChunk parentChunk, Vector2i indices)

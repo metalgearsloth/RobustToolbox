@@ -1,8 +1,10 @@
 ﻿using System;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using Robust.Shared.GameObjects.Components;
+using Robust.Shared.GameObjects.Systems;
 using Robust.Shared.Interfaces.GameObjects;
 using Robust.Shared.Interfaces.Map;
 using Robust.Shared.Interfaces.Physics;
@@ -20,7 +22,15 @@ namespace Robust.Shared.Physics
         [Dependency] private readonly IMapManager _mapManager = default!;
         [Dependency] private readonly IEntityManager _entityManager = default!;
 
-        private readonly SharedPhysicsBroadphaseSystem _sharedPhysics = default!;
+        private SharedPhysicsBroadphaseSystem SharedPhysics
+        {
+            get
+            {
+                _sharedPhysics ??= EntitySystem.Get<SharedPhysicsBroadphaseSystem>();
+                return _sharedPhysics;
+            }
+        }
+        private SharedPhysicsBroadphaseSystem? _sharedPhysics;
 
         /// <summary>
         ///     returns true if collider intersects a physBody under management.
@@ -31,6 +41,7 @@ namespace Robust.Shared.Physics
         public bool TryCollideRect(MapId map, Box2 collider)
         {
             var state = (collider, map, found: false);
+            /* TODO?
             this[map].QueryAabb(ref state, (ref (Box2 collider, MapId map, bool found) state, in IPhysBody body) =>
             {
                 if (!body.CanCollide || body.CollisionLayer == 0x0)
@@ -45,6 +56,7 @@ namespace Robust.Shared.Physics
                 return true;
             }, collider, true);
 
+*/
             return state.found;
         }
 
@@ -115,55 +127,54 @@ namespace Robust.Shared.Physics
             return manifold.Normal * impulse;
         }
 
-        public IEnumerable<IEntity> GetCollidingEntities(IPhysBody physBody, Vector2 offset, bool approximate = true)
+        public IEnumerable<IPhysicsComponent> GetCollidingComponents(IPhysBody body, bool approximate = true)
         {
-            var modifiers = physBody.Entity.GetAllComponents<ICollideSpecial>();
-            var entities = new List<IEntity>();
+            var modifiers = body.Entity.GetAllComponents<ICollideSpecial>().ToList();
+            var transform = body.Entity.Transform;
 
-            var state = (physBody, modifiers, entities);
-
-            this[physBody.MapID].QueryAabb(ref state,
-                (ref (IPhysBody physBody, IEnumerable<ICollideSpecial> modifiers, List<IEntity> entities) state,
-                    in IPhysBody body) =>
+            foreach (var comp in SharedPhysics.GetPhysicsIntersecting(transform.MapID, body.WorldAABB, approximate))
             {
-                if (body.Entity.Deleted) {
-                    return true;
-                }
+                if (!CollidesOnMask(body, comp))
+                    continue;
 
-                if (CollidesOnMask(state.physBody, body))
+                var preventCollision = false;
+                var otherModifiers = comp.Entity.GetAllComponents<ICollideSpecial>();
+                foreach (var modifier in modifiers)
                 {
-                    var preventCollision = false;
-                    var otherModifiers = body.Entity.GetAllComponents<ICollideSpecial>();
-                    foreach (var modifier in state.modifiers)
-                    {
-                        preventCollision |= modifier.PreventCollide(body);
-                    }
-                    foreach (var modifier in otherModifiers)
-                    {
-                        preventCollision |= modifier.PreventCollide(state.physBody);
-                    }
-
-                    if (preventCollision)
-                    {
-                        return true;
-                    }
-                    state.entities.Add(body.Entity);
+                    preventCollision |= modifier.PreventCollide(comp);
                 }
-                return true;
-            }, physBody.WorldAABB, approximate);
+                foreach (var modifier in otherModifiers)
+                {
+                    preventCollision |= modifier.PreventCollide(body);
+                }
 
-            return entities;
+                if (preventCollision)
+                    continue;
+
+                yield return comp;
+            }
+        }
+
+        public IEnumerable<IEntity> GetCollidingEntities(IPhysBody physBody, bool approximate = true)
+        {
+            foreach (var comp in GetCollidingComponents(physBody, approximate))
+            {
+                yield return comp.Owner;
+            }
         }
 
         /// <inheritdoc />
-        public IEnumerable<IPhysBody> GetCollidingEntities(MapId mapId, in Box2 worldBox)
+        public IEnumerable<IPhysBody> GetCollidingBodies(MapId mapId, Box2 worldBox)
         {
-            return this[mapId].QueryAabb(worldBox, false);
+            foreach (var comp in SharedPhysics.GetPhysicsIntersecting(mapId, worldBox, false))
+            {
+                yield return comp;
+            }
         }
 
-        public bool IsColliding(IPhysBody body, Vector2 offset, bool approximate)
+        public bool IsColliding(IPhysBody body, bool approximate)
         {
-            return GetCollidingEntities(body, offset, approximate).Any();
+            return GetCollidingEntities(body, approximate).Any();
         }
 
         public static bool CollidesOnMask(IPhysBody a, IPhysBody b)
@@ -181,83 +192,13 @@ namespace Robust.Shared.Physics
             return true;
         }
 
-        /// <summary>
-        ///     Adds a physBody to the manager.
-        /// </summary>
-        /// <param name="physBody"></param>
-        public void AddBody(IPhysBody physBody)
-        {
-            if (!this[physBody.MapID].Add(physBody))
-            {
-                Logger.WarningS("phys", $"PhysicsBody already registered! {physBody.Entity}");
-            }
-        }
-
-        /// <summary>
-        ///     Removes a physBody from the manager
-        /// </summary>
-        /// <param name="physBody"></param>
-        public void RemoveBody(IPhysBody physBody)
-        {
-            var removed = false;
-
-            if (physBody.Entity.Deleted || physBody.Entity.Transform.Deleted)
-            {
-                foreach (var mapId in _mapManager.GetAllMapIds())
-                {
-                    removed = this[mapId].Remove(physBody);
-
-                    if (removed)
-                    {
-                        break;
-                    }
-                }
-            }
-
-            if (!removed)
-            {
-                try
-                {
-                    removed = this[physBody.MapID].Remove(physBody);
-                }
-                catch (InvalidOperationException)
-                {
-                    // TODO: TryGetMapId or something
-                    foreach (var mapId in _mapManager.GetAllMapIds())
-                    {
-                        removed = this[mapId].Remove(physBody);
-
-                        if (removed)
-                        {
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if (!removed)
-            {
-                foreach (var mapId in _mapManager.GetAllMapIds())
-                {
-                    removed = this[mapId].Remove(physBody);
-
-                    if (removed)
-                    {
-                        break;
-                    }
-                }
-            }
-
-            if (!removed)
-                Logger.WarningS("phys", $"Trying to remove unregistered PhysicsBody! {physBody.Entity.Uid}");
-        }
-
         /// <inheritdoc />
         public IEnumerable<RayCastResults> IntersectRayWithPredicate(MapId mapId, CollisionRay ray,
             float maxLength = 50F,
             Func<IEntity, bool>? predicate = null, bool returnOnFirstHit = true)
         {
             List<RayCastResults> results = new List<RayCastResults>();
+            /* TODO AS WELL
 
             this[mapId].QueryRay((in IPhysBody body, in Vector2 point, float distFromOrigin) =>
             {
@@ -293,6 +234,7 @@ namespace Robust.Shared.Physics
             {
                 DebugDrawRay?.Invoke(new DebugRayData(ray, maxLength, null));
             }
+            */
 
             results.Sort((a, b) => a.Distance.CompareTo(b.Distance));
             return results;
@@ -307,6 +249,7 @@ namespace Robust.Shared.Physics
         {
             var penetration = 0f;
 
+            /* BIG FAT TODO
             this[mapId].QueryRay((in IPhysBody body, in Vector2 point, float distFromOrigin) =>
             {
                 if (distFromOrigin > maxLength)
@@ -331,6 +274,7 @@ namespace Robust.Shared.Physics
                 }
                 return true;
             }, ray);
+            */
 
             return penetration;
         }

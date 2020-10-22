@@ -31,9 +31,9 @@ namespace Robust.Shared.GameObjects.Components
     public partial interface IPhysicsComponent : IComponent, IPhysBody
     {
         public new bool Hard { get; set; }
-        bool IsColliding(Vector2 offset, bool approximate = true);
+        bool IsColliding(bool approximate = true);
 
-        IEnumerable<IEntity> GetCollidingEntities(Vector2 offset, bool approximate = true);
+        IEnumerable<IPhysicsComponent> GetCollidingComponents(bool approximate = true);
     }
 
     public partial class PhysicsComponent : Component, IPhysicsComponent
@@ -335,26 +335,18 @@ namespace Robust.Shared.GameObjects.Components
         }
 
         /// <inheritdoc />
-        protected override void Startup()
-        {
-            base.Startup();
-            _physicsManager.AddBody(this);
-        }
-
-        /// <inheritdoc />
         protected override void Shutdown()
         {
             RemoveControllers();
-            _physicsManager.RemoveBody(this);
             base.Shutdown();
         }
 
-        public bool IsColliding(Vector2 offset, bool approx = true)
+        public bool IsColliding(bool approx = true)
         {
-            return _physicsManager.IsColliding(this, offset, approx);
+            return _physicsManager.IsColliding(this, approx);
         }
 
-        public IEnumerable<IEntity> GetCollidingEntities(Vector2 offset, bool approximate = true) => _physicsManager.GetCollidingEntities(this, offset, approximate);
+        public IEnumerable<IPhysicsComponent> GetCollidingComponents(bool approximate = true) => _physicsManager.GetCollidingComponents(this, approximate);
 
         private void ShapeDataChanged()
         {

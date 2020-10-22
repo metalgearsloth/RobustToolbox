@@ -210,7 +210,7 @@ namespace Robust.Client.Placement
                 bounds.Width,
                 bounds.Height);
 
-            if (pManager.PhysicsManager.TryCollideRect(collisionbox, pManager.MapManager.GetGrid(coordinates.GetGridId(pManager.EntityManager)).ParentMapId))
+            if (pManager.PhysicsManager.TryCollideRect(pManager.MapManager.GetGrid(coordinates.GetGridId(pManager.EntityManager)).ParentMapId, collisionbox))
                 return true;
 
             return false;

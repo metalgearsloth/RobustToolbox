@@ -21,7 +21,7 @@ namespace Robust.Shared.Interfaces.Physics
         /// <param name="collider">Collision rectangle to check</param>
         /// <param name="map">Map to check on</param>
         /// <returns>true if collides, false if not</returns>
-        bool TryCollideRect(Box2 collider, MapId map);
+        bool TryCollideRect(MapId map, Box2 collider);
 
         /// <summary>
         ///     Checks whether a certain grid position is weightless or not
@@ -34,21 +34,19 @@ namespace Robust.Shared.Interfaces.Physics
         /// Get all entities colliding with a certain body.
         /// </summary>
         /// <param name="body"></param>
+        /// <param name="approximate"></param>
         /// <returns></returns>
-        IEnumerable<IEntity> GetCollidingEntities(IPhysBody body, Vector2 offset, bool approximate = true);
+        IEnumerable<IPhysicsComponent> GetCollidingComponents(IPhysBody body, bool approximate = true);
 
-        IEnumerable<IPhysBody> GetCollidingEntities(MapId mapId, in Box2 worldBox);
+        IEnumerable<IPhysBody> GetCollidingBodies(MapId mapId, Box2 worldBox);
 
         /// <summary>
         ///     Checks whether a body is colliding
         /// </summary>
         /// <param name="body"></param>
-        /// <param name="offset"></param>
+        /// <param name="approx"></param>
         /// <returns></returns>
-        bool IsColliding(IPhysBody body, Vector2 offset, bool approx);
-
-        void AddBody(IPhysBody physBody);
-        void RemoveBody(IPhysBody physBody);
+        bool IsColliding(IPhysBody body, bool approx);
 
         /// <summary>
         ///     Casts a ray in the world and returns the first entity it hits, or a list of all entities it hits.
@@ -60,7 +58,6 @@ namespace Robust.Shared.Interfaces.Physics
         /// <param name="returnOnFirstHit">If false, will return a list of everything it hits, otherwise will just return a list of the first entity hit</param>
         /// <returns>An enumerable of either the first entity hit or everything hit</returns>
         IEnumerable<RayCastResults> IntersectRay(MapId mapId, CollisionRay ray, float maxLength = 50, IEntity? ignoredEnt = null, bool returnOnFirstHit = true);
-
 
         /// <summary>
         ///     Casts a ray in the world and returns the distance the ray traveled while colliding with entities
@@ -95,10 +92,6 @@ namespace Robust.Shared.Interfaces.Physics
 
         event Action<DebugRayData> DebugDrawRay;
 
-        bool Update(IPhysBody collider);
-
-        void RemovedFromMap(IPhysBody body, MapId mapId);
-        void AddedToMap(IPhysBody body, MapId mapId);
         int SleepTimeThreshold { get; set; }
     }
 
