@@ -15,9 +15,9 @@ namespace Robust.Server.Interfaces.GameObjects
         List<EntityState>? GetEntityStates(GameTick fromTick);
 
         /// <summary>
-        ///     Gets all entity states within an AABB that have been modified after and including the provided tick.
+        ///     Gets all entity states that have been modified after and including the provided tick for a particular session.
         /// </summary>
-        List<EntityState>? UpdatePlayerSeenEntityStates(GameTick fromTick, IPlayerSession player, float range);
+        List<EntityState>? GetEntityStates(GameTick fromTick, IPlayerSession session, float range);
 
         // Keep track of deleted entities so we can sync deletions with the client.
         /// <summary>
@@ -30,12 +30,6 @@ namespace Robust.Server.Interfaces.GameObjects
         /// </summary>
         /// <param name="toTick">The last tick to delete the history for. Inclusive.</param>
         void CullDeletionHistory(GameTick toTick);
-
-        /// <summary>
-        ///     Removes entity state persistence information from the entity manager for a player.
-        /// </summary>
-        /// <param name="player"></param>
-        void DropPlayerState(IPlayerSession player);
 
         float MaxUpdateRange { get; }
 

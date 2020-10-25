@@ -65,13 +65,6 @@ namespace Robust.Server.GameStates
         private void HandleClientDisconnect(object? sender, NetChannelArgs e)
         {
             _ackedStates.Remove(e.Channel.ConnectionId);
-
-            if (!_playerManager.TryGetSessionByChannel(e.Channel, out var session))
-            {
-                return;
-            }
-
-            _entityManager.DropPlayerState(session);
         }
 
         private void HandleStateAck(MsgStateAck msg)
@@ -144,7 +137,7 @@ namespace Robust.Server.GameStates
 
                 var entStates = lastAck == GameTick.Zero || !PvsEnabled
                     ? _entityManager.GetEntityStates(lastAck)
-                    : _entityManager.UpdatePlayerSeenEntityStates(lastAck, session, _entityManager.MaxUpdateRange);
+                    : _entityManager.GetEntityStates(lastAck, session, _entityManager.MaxUpdateRange);
                 var playerStates = _playerManager.GetPlayerStates(lastAck);
                 var deletions = _entityManager.GetDeletedEntities(lastAck);
                 var mapData = _mapManager.GetStateData(lastAck);
