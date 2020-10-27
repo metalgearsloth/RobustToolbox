@@ -81,7 +81,7 @@ namespace Robust.Shared.Physics
         float InvMass { get; }
 
         /// <summary>
-        /// Inverse moment of inertia, in 
+        /// Inverse moment of inertia, in
         /// </summary>
         float InvI { get; }
 
@@ -112,6 +112,11 @@ namespace Robust.Shared.Physics
         /// Ice is 0.03, steel is 0.4, rubber is 1.
         /// </remarks>
         float Friction { get; set; }
+
+        /// <summary>
+        ///     Collision elasticity
+        /// </summary>
+        float Restitution { get; set; }
 
         /// <summary>
         ///     Current linear velocity of the entity in meters per second.

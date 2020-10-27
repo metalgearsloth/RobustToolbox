@@ -105,8 +105,9 @@ namespace Robust.Shared.Physics
 
             if (!aP.CanMove() && !bP.CanMove()) return Vector2.Zero;
 
+            // TODO: SUSS ME OUT
             var restitution = 0.01f;
-            var normal = CalculateNormal(manifold.A, manifold.B);
+            var normal = manifold.Normal;
             var rV = bP.LinearVelocity - aP.LinearVelocity;
 
             var vAlongNormal = Vector2.Dot(rV, normal);
@@ -123,7 +124,7 @@ namespace Robust.Shared.Physics
             // Needs further testing.
             impulse /= aP.InvMass + bP.InvMass;
 
-            return manifold.Normal * impulse;
+            return normal * impulse;
         }
 
         public IEnumerable<IEntity> GetCollidingEntities(IPhysBody physBody, Vector2 offset, bool approximate = true)

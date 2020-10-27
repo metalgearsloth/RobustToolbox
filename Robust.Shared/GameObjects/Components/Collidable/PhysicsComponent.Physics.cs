@@ -174,7 +174,6 @@ namespace Robust.Shared.GameObjects.Components
         private float _angVelocity;
         private Dictionary<Type, VirtualController> _controllers = new Dictionary<Type, VirtualController>();
         private bool _anchored = true;
-        private float _friction = 1;
 
         /// <summary>
         ///     Current mass of the entity in kilograms.
@@ -246,11 +245,9 @@ namespace Robust.Shared.GameObjects.Components
         public float Torque { get; set; }
 
         [ViewVariables(VVAccess.ReadWrite)]
-        public float Friction
-        {
-            get => _friction;
-            set => _friction = value;
-        }
+        public float Friction { get; set; } = 0.3f;
+
+        public float Restitution { get; set; } = 0.2f;
 
         public void ApplyImpulse(Vector2 impulse)
         {
@@ -266,11 +263,13 @@ namespace Robust.Shared.GameObjects.Components
             get => _linVelocity;
             set
             {
-                if (_linVelocity == value)
+                if (value != Vector2.Zero)
+                    WakeBody();
+
+                if (_linVelocity.EqualsApprox(value, 0.0001))
                     return;
 
                 _linVelocity = value;
-                WakeBody();
                 Dirty();
             }
         }

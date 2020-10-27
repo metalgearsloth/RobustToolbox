@@ -1,4 +1,5 @@
-﻿using Robust.Shared.GameObjects.Components;
+﻿using System;
+using Robust.Shared.GameObjects.Components;
 using Robust.Shared.Maths;
 using Robust.Shared.ViewVariables;
 
@@ -15,6 +16,7 @@ namespace Robust.Shared.Physics
         ///     Current contribution to the linear velocity of the entity in meters per second.
         /// </summary>
         [ViewVariables(VVAccess.ReadWrite)]
+        [Obsolete("Not used at all")]
         public virtual Vector2 LinearVelocity
         {
             get => _linearVelocity;
@@ -33,7 +35,32 @@ namespace Robust.Shared.Physics
             }
         }
 
+        public virtual Vector2 Force
+        {
+            get => _force;
+            set
+            {
+                if (value != Vector2.Zero)
+                    ControlledComponent?.WakeBody();
+
+                if (_force == value)
+                    return;
+
+                _force = value;
+                ControlledComponent?.Dirty();
+            }
+        }
+
+        private Vector2 _force;
+
         public virtual IPhysicsComponent? ControlledComponent { protected get; set; }
+
+        public void ApplyAcceleration(Vector2 acceleration)
+        {
+            var mass = ControlledComponent?.Mass;
+            mass ??= 0.0f;
+            Force = acceleration * mass.Value;
+        }
 
         /// <summary>
         ///     Tries to set this controller's linear velocity to zero.
@@ -41,7 +68,7 @@ namespace Robust.Shared.Physics
         /// <returns>True if successful, false otherwise.</returns>
         public virtual bool Stop()
         {
-            LinearVelocity = Vector2.Zero;
+            Force = Vector2.Zero;
             return true;
         }
 

@@ -128,24 +128,13 @@ namespace Robust.Shared.Interfaces.Physics
         public readonly Vector2 Normal;
         public readonly bool Hard;
 
-        public Vector2 RelativeVelocity
-        {
-            get
-            {
-                if (A != null)
-                {
-                    if (B != null)
-                        return B.LinearVelocity - A.LinearVelocity;
-                    return -A.LinearVelocity;
-                }
-
-                if (B != null)
-                    return B.LinearVelocity;
-                return Vector2.Zero;
-            }
-        }
+        public Vector2 RelativeVelocity => B.LinearVelocity - A.LinearVelocity;
 
         public bool Unresolved => Vector2.Dot(RelativeVelocity, Normal) < 0 && Hard;
+
+        public float Restitution => Math.Min(A.Restitution, B.Restitution);
+
+        public float Friction => MathF.Sqrt(A.Friction * B.Friction);
 
         public Manifold(IPhysicsComponent a, IPhysicsComponent b, bool hard)
         {

@@ -6,6 +6,7 @@ using Robust.Shared.Interfaces.Map;
 using Robust.Shared.Interfaces.Physics;
 using Robust.Shared.Interfaces.Random;
 using Robust.Shared.Interfaces.Timing;
+using Robust.Shared.Map;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics;
 using DependencyAttribute = Robust.Shared.IoC.DependencyAttribute;
@@ -123,19 +124,11 @@ namespace Robust.Shared.GameObjects.Systems
                 if(!body.CanMove())
                     continue;
 
-                var linearVelocity = Vector2.Zero;
-
                 foreach (var controller in body.Controllers.Values)
                 {
                     controller.UpdateBeforeProcessing();
-                    linearVelocity += controller.LinearVelocity;
+                    body.Force += controller.Force;
                 }
-
-                // i'm not sure if this is the proper way to solve this, but
-                // these are not kinematic bodies, so we need to preserve the previous
-                // velocity.
-                //if (body.LinearVelocity.LengthSquared < linearVelocity.LengthSquared)
-                    body.LinearVelocity = linearVelocity;
 
                 // Integrate forces
                 body.LinearVelocity += body.Force * body.InvMass * deltaTime;
@@ -154,7 +147,7 @@ namespace Robust.Shared.GameObjects.Systems
             // Remove all entities that were deleted during collision handling
             ProcessQueue();
 
-            // Process frictional forces
+            // Process gravity friction (i.e. not for collisions).
             foreach (var physics in _awakeBodies)
             {
                 ProcessFriction(physics, deltaTime);
@@ -332,7 +325,7 @@ namespace Robust.Shared.GameObjects.Systems
 
         private void ProcessFriction(IPhysicsComponent body, float deltaTime)
         {
-            if (body.LinearVelocity == Vector2.Zero) return;
+            if (body.LinearVelocity == Vector2.Zero || body.Status == BodyStatus.InAir || !body.CanMove()) return;
 
             // sliding friction coefficient, and current gravity at current location
             var (friction, gravity) = GetFriction(body);
@@ -431,10 +424,10 @@ namespace Robust.Shared.GameObjects.Systems
 
         private (float friction, float gravity) GetFriction(IPhysicsComponent body)
         {
-            if (!body.OnGround)
-                return (0f, 0f);
-
             var location = body.Owner.Transform;
+            if (location.Coordinates == EntityCoordinates.Invalid)
+                return (0.0f, 0.0f);
+
             var grid = _mapManager.GetGrid(location.Coordinates.GetGridId(EntityManager));
             var tile = grid.GetTileRef(location.Coordinates);
             var tileDef = _tileDefinitionManager[tile.Tile.TypeId];
