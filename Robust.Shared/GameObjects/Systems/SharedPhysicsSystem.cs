@@ -297,14 +297,17 @@ namespace Robust.Shared.GameObjects.Systems
 
         private void VelocitySolver()
         {
+            if (_collisionCache.Count == 0) return;
+
             const int iterations = 4;
-            var offset = 0;
 
             for (var i = 0; i < iterations; i++)
             {
-                for (var j = offset; j < _collisionCache.Count; j++)
+                var offset = _random.Next(_collisionCache.Count - 1);
+
+                for (var j = 0; j < _collisionCache.Count; j++)
                 {
-                    var collision = _collisionCache[j];
+                    var collision = _collisionCache[(j + offset) % _collisionCache.Count];
                     if (!collision.Unresolved) continue;
 
                     collision.A.WakeBody();
