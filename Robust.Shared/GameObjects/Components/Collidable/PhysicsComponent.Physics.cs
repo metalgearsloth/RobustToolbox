@@ -225,6 +225,9 @@ namespace Robust.Shared.GameObjects.Components
             set => I = value > 0 ? 1 / value : 0f;
         }
 
+        [ViewVariables(VVAccess.ReadWrite)]
+        public float Restitution { get; set; } = 0.2f;
+
         /// <summary>
         /// Current Force being applied to this entity in Newtons.
         /// </summary>
@@ -266,11 +269,13 @@ namespace Robust.Shared.GameObjects.Components
             get => _linVelocity;
             set
             {
-                if (_linVelocity == value)
+                if (value != Vector2.Zero)
+                    WakeBody();
+
+                if (_linVelocity.EqualsApprox(value, 0.0001))
                     return;
 
                 _linVelocity = value;
-                WakeBody();
                 Dirty();
             }
         }

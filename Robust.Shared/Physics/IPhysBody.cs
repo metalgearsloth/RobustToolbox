@@ -81,9 +81,14 @@ namespace Robust.Shared.Physics
         float InvMass { get; }
 
         /// <summary>
-        /// Inverse moment of inertia, in 
+        /// Inverse moment of inertia, in
         /// </summary>
         float InvI { get; }
+
+        /// <summary>
+        /// 0 -> Object stops at a wall, 1.0 -> Object will bounce off of the wall.
+        /// </summary>
+        float Restitution { get; }
 
         /// <summary>
         /// Current Force being applied to this entity in Newtons.

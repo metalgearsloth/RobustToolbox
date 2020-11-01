@@ -506,8 +506,10 @@ namespace Robust.Shared.GameObjects.Components
     [Serializable, NetSerializable]
     public enum BodyStatus
     {
+        // Full friction
         OnGround,
-        InAir
+        // Minimal friction
+        InAir,
     }
 
     /// <summary>

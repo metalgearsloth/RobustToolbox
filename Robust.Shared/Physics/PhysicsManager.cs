@@ -110,9 +110,8 @@ namespace Robust.Shared.Physics
 
             // AKA relative
             var rV = bP.LinearVelocity - aP.LinearVelocity;
-            // TODO: Should be based on bodies.
-            var restitution = 0.00f;
-            var normal = CalculateNormal(manifold.A, manifold.B);
+            var restitution = MathF.Sqrt(aP.Restitution * bP.Restitution);
+            var normal = manifold.Normal;
 
             var vAlongNormal = Vector2.Dot(rV, normal);
             if (vAlongNormal > 0)
@@ -123,7 +122,7 @@ namespace Robust.Shared.Physics
             var impulse = -(1.0f + restitution) * vAlongNormal;
             impulse /= aP.InvMass + bP.InvMass;
 
-            return manifold.Normal * impulse;
+            return normal * impulse;
         }
 
         public IEnumerable<IEntity> GetCollidingEntities(IPhysBody physBody, Vector2 offset, bool approximate = true)

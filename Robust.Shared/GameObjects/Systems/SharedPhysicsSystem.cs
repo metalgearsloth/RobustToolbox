@@ -121,22 +121,21 @@ namespace Robust.Shared.GameObjects.Systems
                     body.SleepAccumulator++;
 
                 // if the body cannot move, nothing to do here
-                if(!body.CanMove())
+                if (!body.CanMove())
+                {
+                    body.LinearVelocity = Vector2.Zero;
                     continue;
+                }
 
                 var linearVelocity = Vector2.Zero;
 
                 foreach (var controller in body.Controllers.Values)
                 {
                     controller.UpdateBeforeProcessing();
-                    linearVelocity += controller.LinearVelocity;
+                    linearVelocity += controller.LinearVelocity * body.InvMass;
                 }
 
-                // i'm not sure if this is the proper way to solve this, but
-                // these are not kinematic bodies, so we need to preserve the previous
-                // velocity.
-                //if (body.LinearVelocity.LengthSquared < linearVelocity.LengthSquared)
-                    body.LinearVelocity = linearVelocity;
+                body.LinearVelocity += linearVelocity;
 
                 // Integrate forces
                 body.LinearVelocity += body.Force * body.InvMass * deltaTime;
@@ -147,12 +146,6 @@ namespace Robust.Shared.GameObjects.Systems
                 // it has to be re-applied every tick.
                 body.Force = Vector2.Zero;
                 body.Torque = 0f;
-
-                // TODO: Need to update DynamiCtree positions for all moving bodies
-                if (linearVelocity != Vector2.Zero)
-                {
-
-                }
             }
 
             // Calculate collisions and store them in the cache
@@ -310,18 +303,17 @@ namespace Robust.Shared.GameObjects.Systems
                     var collision = _collisionCache[(j + offset) % _collisionCache.Count];
                     if (!collision.Unresolved) continue;
 
-                    collision.A.WakeBody();
-                    collision.B.WakeBody();
-
                     var impulse = _physicsManager.SolveCollisionImpulse(collision);
 
                     if (collision.A.CanMove())
                     {
+                        collision.A.WakeBody();
                         collision.A.ApplyImpulse(-impulse);
                     }
 
                     if (collision.B.CanMove())
                     {
+                        collision.B.WakeBody();
                         collision.B.ApplyImpulse(impulse);
                     }
                 }
@@ -336,7 +328,7 @@ namespace Robust.Shared.GameObjects.Systems
             var (friction, gravity) = GetFriction(body);
 
             // friction between the two objects
-            var effectiveFriction = friction * body.Friction;
+            var effectiveFriction = MathF.Sqrt(friction * body.Friction);
 
             // current acceleration due to friction
             var fAcceleration = effectiveFriction * gravity;
@@ -355,6 +347,7 @@ namespace Robust.Shared.GameObjects.Systems
             // No multiplication/division by mass here since that would be redundant.
             var frictionVelocityChange = body.LinearVelocity.Normalized * -friction;
 
+            // This is always gonna be against the ground so just apply it straight up
             body.LinearVelocity += frictionVelocityChange;
         }
 
@@ -441,8 +434,8 @@ namespace Robust.Shared.GameObjects.Systems
 
         private (float friction, float gravity) GetFriction(IPhysicsComponent body)
         {
-            if (!body.OnGround)
-                return (0f, 0f);
+            if (body.Status == BodyStatus.InAir)
+                return (0.02f, 0f);
 
             var location = body.Owner.Transform;
             var grid = _mapManager.GetGrid(location.Coordinates.GetGridId(EntityManager));
