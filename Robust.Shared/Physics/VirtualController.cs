@@ -9,24 +9,24 @@ namespace Robust.Shared.Physics
     /// </summary>
     public abstract class VirtualController
     {
-        private Vector2 _linearVelocity;
+        private Vector2 _impulse;
 
         /// <summary>
         ///     Current contribution to the linear velocity of the entity in meters per second.
         /// </summary>
         [ViewVariables(VVAccess.ReadWrite)]
-        public virtual Vector2 LinearVelocity
+        public virtual Vector2 Impulse
         {
-            get => _linearVelocity;
+            get => _impulse;
             set
             {
                 if (value != Vector2.Zero)
                     ControlledComponent?.WakeBody();
 
-                if (_linearVelocity.EqualsApprox(value, 0.0001))
+                if (_impulse.EqualsApprox(value, 0.0001))
                     return;
 
-                _linearVelocity = value;
+                _impulse = value;
 
                 ControlledComponent?.Dirty();
             }
@@ -40,7 +40,7 @@ namespace Robust.Shared.Physics
         /// <returns>True if successful, false otherwise.</returns>
         public virtual bool Stop()
         {
-            LinearVelocity = Vector2.Zero;
+            Impulse = Vector2.Zero;
             return true;
         }
 

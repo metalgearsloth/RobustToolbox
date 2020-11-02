@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using Robust.Shared.Containers;
 using Robust.Shared.GameObjects.Components;
@@ -7,6 +8,7 @@ using Robust.Shared.Interfaces.Map;
 using Robust.Shared.Interfaces.Physics;
 using Robust.Shared.Interfaces.Random;
 using Robust.Shared.Interfaces.Timing;
+using Robust.Shared.Map;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics;
 using DependencyAttribute = Robust.Shared.IoC.DependencyAttribute;
@@ -114,6 +116,7 @@ namespace Robust.Shared.GameObjects.Systems
 
             ProcessQueue();
 
+            // TODO: 33:20 of EC's video for warm start
             foreach (var body in simulatedBodies)
             {
                 // running prediction updates will not cause a body to go to sleep.
@@ -127,15 +130,15 @@ namespace Robust.Shared.GameObjects.Systems
                     continue;
                 }
 
-                var linearVelocity = Vector2.Zero;
+                var delta = Vector2.Zero;
 
                 foreach (var controller in body.Controllers.Values)
                 {
                     controller.UpdateBeforeProcessing();
-                    linearVelocity += controller.LinearVelocity * body.InvMass;
+                    delta += controller.Impulse * body.InvMass;
                 }
 
-                body.LinearVelocity += linearVelocity;
+                body.LinearVelocity += delta;
 
                 // Integrate forces
                 body.LinearVelocity += body.Force * body.InvMass * deltaTime;
@@ -434,7 +437,7 @@ namespace Robust.Shared.GameObjects.Systems
 
         private (float friction, float gravity) GetFriction(IPhysicsComponent body)
         {
-            if (body.Status == BodyStatus.InAir)
+            if (body.Status == BodyStatus.InAir || body.Owner.Transform.GridID == GridId.Invalid)
                 return (0.02f, 0f);
 
             var location = body.Owner.Transform;
