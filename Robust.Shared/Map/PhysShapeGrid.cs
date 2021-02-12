@@ -84,7 +84,7 @@ namespace Robust.Shared.Map
         }
 
         /// <inheritdoc />
-        public void ExposeData(ObjectSerializer serializer)
+        void IExposeData.ExposeData(ObjectSerializer serializer)
         {
             serializer.DataField(ref _gridId, "grid", GridId.Invalid);
 

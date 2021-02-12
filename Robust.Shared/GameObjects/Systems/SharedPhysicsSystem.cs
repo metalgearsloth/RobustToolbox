@@ -12,7 +12,7 @@ using Robust.Shared.Physics.Dynamics;
 using DependencyAttribute = Robust.Shared.IoC.DependencyAttribute;
 using Logger = Robust.Shared.Log.Logger;
 
-namespace Robust.Shared.GameObjects.Systems
+namespace Robust.Shared.GameObjects
 {
     public abstract class SharedPhysicsSystem : EntitySystem
     {

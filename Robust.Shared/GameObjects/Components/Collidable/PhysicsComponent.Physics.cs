@@ -14,7 +14,7 @@ using Robust.Shared.Physics.Dynamics;
 using Robust.Shared.Utility;
 using Robust.Shared.ViewVariables;
 
-namespace Robust.Shared.GameObjects.Components
+namespace Robust.Shared.GameObjects
 {
     public partial interface IPhysicsComponent
     {
