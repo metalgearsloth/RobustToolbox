@@ -3,7 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using Robust.Client.Graphics;
 using Robust.Client.Input;
+using Robust.Client.Player;
 using Robust.Client.ResourceManagement;
+using Robust.Shared;
+using Robust.Shared.Configuration;
 using Robust.Shared.GameObjects;
 using Robust.Shared.IoC;
 using Robust.Shared.Maths;
@@ -160,15 +163,12 @@ namespace Robust.Client.Debugging
                 var sleepThreshold = IoCManager.Resolve<IConfigurationManager>().GetCVar(CVars.TimeToSleep);
                 var player = IoCManager.Resolve<IPlayerManager>().LocalPlayer?.ControlledEntity;
                 if (player == null) return;
-                foreach (var comp in EntitySystem.Get<SharedBroadPhaseSystem>().GetCollidingEntities(player.Transform.MapID, viewport))
-                {
-                    var physBody = (IPhysBody) comp;
 
                 if (viewport.IsEmpty()) return;
 
                 var mapId = _eyeManager.CurrentMap;
 
-                foreach (var physBody in _physicsManager.GetCollidingEntities(mapId, viewport))
+                foreach (var physBody in EntitySystem.Get<SharedBroadPhaseSystem>().GetCollidingEntities(mapId, viewport))
                 {
                     // all entities have a TransformComponent
                     var transform = physBody.Entity.Transform;
@@ -180,11 +180,9 @@ namespace Robust.Client.Debugging
                     var worldBox = physBody.GetWorldAABB();
                     var colorEdge = Color.Red.WithAlpha(0.33f);
 
-                    var colorEdge = Color.Red.WithAlpha(0.33f);
-
-                    foreach (var fixture in comp.Fixtures)
+                    foreach (var fixture in physBody.Fixtures)
                     {
-                        fixture.Shape.DebugDraw(drawing, transform.WorldMatrix, in viewport, MathF.Max(0.0f, 1.0f - comp.SleepTime / sleepThreshold));
+                        fixture.Shape.DebugDraw(drawing, transform.WorldMatrix, in viewport, MathF.Max(0.0f, 1.0f - physBody.SleepTime / sleepThreshold));
                     }
 
                     if (worldBox.Contains(mouseWorldPos))

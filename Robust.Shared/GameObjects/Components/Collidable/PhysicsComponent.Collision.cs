@@ -1,9 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using Robust.Shared.Containers;
-using Robust.Shared.GameObjects.Systems;
-using Robust.Shared.Interfaces.GameObjects;
-using Robust.Shared.Interfaces.Map;
 using Robust.Shared.IoC;
 using Robust.Shared.Log;
 using Robust.Shared.Map;
@@ -545,6 +542,8 @@ namespace Robust.Shared.GameObjects
                 if (_canCollide == value)
                     return;
 
+                _canCollide = value;
+
                 if (value)
                 {
                     // Create Proxies
@@ -568,8 +567,7 @@ namespace Robust.Shared.GameObjects
                     ContactEdges = null;
                 }
 
-                _canCollide = value;
-
+                Owner.EntityManager.EventBus.RaiseEvent(EventSource.Local, new CollisionChangeMessage(this, Owner.Uid, _canCollide));
                 Dirty();
             }
         }
@@ -655,17 +653,11 @@ namespace Robust.Shared.GameObjects
             // Yeah yeah TODO Combine these
             // Implicitly assume that stuff doesn't cover if a non-collidable is initialized.
 
-            if (CanCollide)
+            if (CanCollide && !Owner.IsInContainer())
             {
-                if (!Owner.IsInContainer())
-                {
-                    Owner.EntityManager.EventBus.RaiseEvent(EventSource.Local, new CollisionChangeMessage(this, Owner.Uid, _canCollide));
-                }
-                else
-                {
-                    _canCollide = false;
-                }
-                Owner.EntityManager.EventBus.RaiseEvent(EventSource.Local, new PhysicsUpdateMessage(this));
+                // As ExposeData sets the field directly we'll just reset it here.
+                _canCollide = false;
+                CanCollide = true;
             }
         }
 

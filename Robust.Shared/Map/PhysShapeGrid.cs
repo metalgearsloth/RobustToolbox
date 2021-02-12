@@ -1,7 +1,5 @@
 ﻿using System;
-using JetBrains.Annotations;
-using Robust.Shared.Interfaces.Configuration;
-using Robust.Shared.Interfaces.Map;
+using Robust.Shared.Configuration;
 using Robust.Shared.IoC;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics;

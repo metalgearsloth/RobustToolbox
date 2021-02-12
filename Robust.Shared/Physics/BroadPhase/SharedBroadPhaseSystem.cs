@@ -1,18 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
+using Robust.Server.GameObjects;
 using Robust.Shared.GameObjects;
-using Robust.Shared.GameObjects.Components;
-using Robust.Shared.GameObjects.Components.Map;
-using Robust.Shared.GameObjects.Components.Transform;
-using Robust.Shared.GameObjects.EntitySystemMessages;
-using Robust.Shared.GameObjects.Systems;
-using Robust.Shared.Interfaces.GameObjects;
-using Robust.Shared.Interfaces.Map;
-using Robust.Shared.Interfaces.Physics;
 using Robust.Shared.IoC;
-using Robust.Shared.Log;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics.Dynamics;
@@ -44,8 +35,6 @@ namespace Robust.Shared.Physics.Broadphase
         private Queue<EntMapIdChangedMessage> _queuedMapChanges = new();
 
         private Queue<FixtureUpdateMessage> _queuedFixtureUpdates = new();
-
-        private Queue<CollisionChangeMessage> _queuedCollisionChanges = new();
 
         private Queue<EntInsertedIntoContainerMessage> _queuedContainerInsert = new();
 
@@ -118,7 +107,6 @@ namespace Robust.Shared.Physics.Broadphase
         public override void Initialize()
         {
             base.Initialize();
-            SubscribeLocalEvent<CollisionChangeMessage>(QueueCollisionChange);
             SubscribeLocalEvent<MoveEvent>(HandlePhysicsMove);
             SubscribeLocalEvent<RotateEvent>(HandlePhysicsRotate);
             SubscribeLocalEvent<EntMapIdChangedMessage>(QueueMapChange);
@@ -149,19 +137,6 @@ namespace Robust.Shared.Physics.Broadphase
             while (_queuedContainerRemove.Count > 0)
             {
                 HandleContainerRemove(_queuedContainerRemove.Dequeue());
-            }
-
-            while (_queuedCollisionChanges.Count > 0)
-            {
-                var message = _queuedCollisionChanges.Dequeue();
-                if (message.CanCollide && !message.Body.Deleted)
-                {
-                    AddBody(message.Body);
-                }
-                else
-                {
-                    RemoveBody(message.Body);
-                }
             }
 
             while (_queuedFixtureUpdates.Count > 0)
@@ -200,11 +175,6 @@ namespace Robust.Shared.Physics.Broadphase
                 return;
 
             SynchronizeFixtures(physicsComponent, Vector2.Zero);
-        }
-
-        private void QueueCollisionChange(CollisionChangeMessage message)
-        {
-            _queuedCollisionChanges.Enqueue(message);
         }
 
         private void QueueMapChange(EntMapIdChangedMessage message)

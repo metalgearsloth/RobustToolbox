@@ -1,8 +1,6 @@
 using System;
-using Robust.Client.Graphics.Drawing;
-using Robust.Client.Graphics.Overlays;
-using Robust.Client.Interfaces.Graphics.Overlays;
-using Robust.Shared.GameObjects.Systems;
+using Robust.Client.Graphics;
+using Robust.Shared.GameObjects;
 using Robust.Shared.IoC;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics.Collision;
@@ -21,7 +19,7 @@ namespace Robust.Client.Debugging
         private const int MaxContactPoints = 2048;
         internal int PointCount;
 
-        internal ContactPoint[] _points = new ContactPoint[MaxContactPoints];
+        internal ContactPoint[] Points = new ContactPoint[MaxContactPoints];
 
         public PhysicsDebugFlags Flags
         {
@@ -72,13 +70,13 @@ namespace Robust.Client.Debugging
                 for (int i = 0; i < manifold.PointCount && PointCount < MaxContactPoints; ++i)
                 {
                     if (fixtureA == null)
-                        _points[i] = new ContactPoint();
+                        Points[i] = new ContactPoint();
 
-                    ContactPoint cp = _points[PointCount];
+                    ContactPoint cp = Points[PointCount];
                     cp.Position = points[i];
                     cp.Normal = normal;
                     cp.State = state2[i];
-                    _points[PointCount] = cp;
+                    Points[PointCount] = cp;
                     ++PointCount;
                 }
             }
@@ -129,7 +127,7 @@ namespace Robust.Client.Debugging
 
                 for (int i = 0; i < _physics.PointCount; ++i)
                 {
-                    DebugPhysicsSystem.ContactPoint point = _physics._points[i];
+                    DebugPhysicsSystem.ContactPoint point = _physics.Points[i];
 
                     if (point.State == PointState.Add)
                         worldHandle.DrawCircle(point.Position, 0.5f, new Color(255, 77, 243, 77));

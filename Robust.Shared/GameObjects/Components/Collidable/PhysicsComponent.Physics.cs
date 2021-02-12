@@ -2,9 +2,6 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
-using Robust.Shared.GameObjects.Systems;
-using Robust.Shared.Interfaces.Map;
-using Robust.Shared.Interfaces.Physics;
 using Robust.Shared.IoC;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
@@ -739,6 +736,7 @@ namespace Robust.Shared.GameObjects
         /// <param name="mapManager"></param>
         public void CreateProxies(IMapManager? mapManager = null)
         {
+            DebugTools.Assert(_canCollide);
             DebugTools.Assert(Fixtures.Count(fix => fix.Proxies.Count != 0) == 0);
 
             var broadPhaseSystem = EntitySystem.Get<SharedBroadPhaseSystem>();
