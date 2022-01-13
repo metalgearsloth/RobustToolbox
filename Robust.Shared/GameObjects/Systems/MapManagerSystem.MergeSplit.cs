@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using Robust.Shared.Console;
 using Robust.Shared.IoC;
 using Robust.Shared.Map;
@@ -8,19 +9,53 @@ using Robust.Shared.Utility;
 
 namespace Robust.Shared.GameObjects;
 
-public class MapManagerSystem : EntitySystem
+public sealed class MergeGridsCommand : IConsoleCommand
 {
-    public sealed class MergeGridsCommand : IConsoleCommand
+    public string Command => "mergegrids";
+    public string Description => "Merges the two specified grids together";
+    public string Help => $"{Command} <gridone> <gridtwo> <origin X> <origin Y>";
+    public void Execute(IConsoleShell shell, string argStr, string[] args)
     {
-        public string Command => "mergegrids";
-        public string Description => "Merges the two specified grids together";
-        public string Help => $"{Command}";
-        public void Execute(IConsoleShell shell, string argStr, string[] args)
+        if (args.Length != 4)
         {
-            throw new System.NotImplementedException();
+            shell.WriteError("Invalid number of args supplied");
+            return;
         }
-    }
 
+        var mapManager = IoCManager.Resolve<IMapManager>();
+
+        if (!int.TryParse(args[0], out var gridOneInt) ||
+            !mapManager.TryGetGrid(new GridId(gridOneInt), out var gridOne))
+        {
+            shell.WriteError($"Unable to find grid {args[0]}");
+            return;
+        }
+
+        if (!int.TryParse(args[1], out var gridTwoInt) ||
+            !mapManager.TryGetGrid(new GridId(gridTwoInt), out var gridTwo))
+        {
+            shell.WriteError($"Unable to find grid {args[1]}");
+            return;
+        }
+
+        if (!int.TryParse(args[2], out var originX))
+        {
+            shell.WriteError($"Unable to parse origin X");
+            return;
+        }
+
+        if (!int.TryParse(args[3], out var originY))
+        {
+            shell.WriteError($"Unable to parse origin Y");
+            return;
+        }
+
+        EntitySystem.Get<MapManagerSystem>().MergeGrids(gridOne, gridTwo, new Vector2i(originX, originY));
+    }
+}
+
+public sealed class MapManagerSystem : EntitySystem
+{
     /// <summary>
     /// Combine two grids into the larger one.
     /// </summary>
@@ -75,6 +110,9 @@ public class MapManagerSystem : EntitySystem
         var gridOneComp = EntityManager.GetComponent<MapGridComponent>(gridOne.GridEntityId);
         var gridTwoXform = EntityManager.GetComponent<TransformComponent>(gridTwo.GridEntityId);
 
+        var originVec = (Vector2) origin;
+        var angle = new Angle();
+
         // TODO: This is probably going to be the most expensive bit with slamming entity events all over the place.
         // and general code quality issues.
         foreach (var child in gridTwoXform.ChildEntities)
@@ -82,7 +120,7 @@ public class MapManagerSystem : EntitySystem
             var childXform = EntityManager.GetComponent<TransformComponent>(child);
 
             // Need to do local position relative to the specified grid-one origin PLUS consider rotation too
-            var newLocalPos = GetNewLocalPos(childXform.LocalPosition, origin, direction);
+            var newLocalPos = GetNewLocalPos(childXform.LocalPosition, originVec, angle);
             childXform.LocalPosition = newLocalPos;
 
             if (childXform.Anchored)
@@ -104,6 +142,7 @@ public class MapManagerSystem : EntitySystem
         return gridId;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private Vector2i GetAdjustedIndex(Vector2i index, DirectionFlag direction)
     {
         return direction switch
@@ -116,8 +155,10 @@ public class MapManagerSystem : EntitySystem
         };
     }
 
-    private Vector2 GetNewLocalPos(Vector2 oldLocalPos, Vector2i origin, DirectionFlag direction)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private Vector2 GetNewLocalPos(Vector2 oldLocalPos, Vector2 origin, Angle angle)
     {
-        throw new NotImplementedException();
+        var localPos = angle.RotateVec(oldLocalPos);
+        return localPos + origin;
     }
 }
