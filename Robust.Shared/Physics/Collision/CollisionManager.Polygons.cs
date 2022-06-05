@@ -138,6 +138,7 @@ internal sealed partial class CollisionManager
     public void CollidePolygons(ref Manifold manifold, PolygonShape polyA, in Transform transformA,
         PolygonShape polyB, in Transform transformB)
     {
+        manifold.Type = ManifoldType.Invalid;
         manifold.PointCount = 0;
         var totalRadius = polyA.Radius + polyB.Radius;
 

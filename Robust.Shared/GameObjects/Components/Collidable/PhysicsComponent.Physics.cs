@@ -835,12 +835,12 @@ namespace Robust.Shared.GameObjects
             }
 
             var preventCollideMessage = new PreventCollideEvent(this, other);
-            _entMan.EventBus.RaiseLocalEvent(Owner, preventCollideMessage);
+            _entMan.EventBus.RaiseLocalEvent(Owner, ref preventCollideMessage);
 
             if (preventCollideMessage.Cancelled) return false;
 
             preventCollideMessage = new PreventCollideEvent(other, this);
-            _entMan.EventBus.RaiseLocalEvent(other.Owner, preventCollideMessage);
+            _entMan.EventBus.RaiseLocalEvent(other.Owner, ref preventCollideMessage);
 
             if (preventCollideMessage.Cancelled) return false;
 

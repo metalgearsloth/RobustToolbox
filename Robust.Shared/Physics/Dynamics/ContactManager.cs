@@ -293,8 +293,11 @@ namespace Robust.Shared.Physics.Dynamics
 
             if (contact.IsTouching)
             {
-                _entityManager.EventBus.RaiseLocalEvent(bodyA.Owner, new EndCollideEvent(fixtureA, fixtureB));
-                _entityManager.EventBus.RaiseLocalEvent(bodyB.Owner, new EndCollideEvent(fixtureB, fixtureA));
+                var evA = new EndCollideEvent(fixtureA, fixtureB, contact);
+                var evB = new EndCollideEvent(fixtureB, fixtureA, contact);
+
+                _entityManager.EventBus.RaiseLocalEvent(bodyA.Owner, ref evA);
+                _entityManager.EventBus.RaiseLocalEvent(bodyB.Owner, ref evB);
             }
 
             if (contact.Manifold.PointCount > 0 && contact.FixtureA?.Hard == true && contact.FixtureB?.Hard == true)
@@ -495,10 +498,11 @@ namespace Robust.Shared.Physics.Dynamics
                         var fixtureB = contact.FixtureB!;
                         var bodyA = fixtureA.Body;
                         var bodyB = fixtureB.Body;
-                        var worldPoint = Transform.Mul(_physicsManager.EnsureTransform(bodyA), contact.Manifold.LocalPoint);
+                        var bodyAEv = new StartCollideEvent(fixtureA, fixtureB, contact);
+                        var bodyBEv = new StartCollideEvent(fixtureB, fixtureA, contact);
 
-                        _entityManager.EventBus.RaiseLocalEvent(bodyA.Owner, new StartCollideEvent(fixtureA, fixtureB, worldPoint));
-                        _entityManager.EventBus.RaiseLocalEvent(bodyB.Owner, new StartCollideEvent(fixtureB, fixtureA, worldPoint));
+                        _entityManager.EventBus.RaiseLocalEvent(bodyA.Owner, ref bodyAEv);
+                        _entityManager.EventBus.RaiseLocalEvent(bodyB.Owner, ref bodyBEv);
                         break;
                     }
                     case ContactStatus.Touching:
@@ -514,9 +518,11 @@ namespace Robust.Shared.Physics.Dynamics
 
                         var bodyA = fixtureA.Body;
                         var bodyB = fixtureB.Body;
+                        var bodyAEv = new EndCollideEvent(fixtureA, fixtureB, contact);
+                        var bodyBEv = new EndCollideEvent(fixtureB, fixtureA, contact);
 
-                        _entityManager.EventBus.RaiseLocalEvent(bodyA.Owner, new EndCollideEvent(fixtureA, fixtureB));
-                        _entityManager.EventBus.RaiseLocalEvent(bodyB.Owner, new EndCollideEvent(fixtureB, fixtureA));
+                        _entityManager.EventBus.RaiseLocalEvent(bodyA.Owner, ref bodyAEv);
+                        _entityManager.EventBus.RaiseLocalEvent(bodyB.Owner, ref bodyBEv);
                         break;
                     }
                     case ContactStatus.NoContact:
@@ -613,48 +619,53 @@ namespace Robust.Shared.Physics.Dynamics
         }
     }
 
-    #region Collide Events Classes
+    #region Collide Events
 
-    public abstract class CollideEvent : EntityEventArgs
+    [ByRefEvent]
+    public readonly struct StartCollideEvent
     {
-        public Fixture OurFixture { get; }
-        public Fixture OtherFixture { get; }
+        public readonly Fixture OurFixture;
+        public readonly Fixture OtherFixture;
+        public readonly Contact Contact;
 
-        public CollideEvent(Fixture ourFixture, Fixture otherFixture)
+        public StartCollideEvent(Fixture ourFixture, Fixture otherFixture, Contact contact)
         {
             OurFixture = ourFixture;
             OtherFixture = otherFixture;
+            Contact = contact;
         }
     }
 
-    public sealed class StartCollideEvent : CollideEvent
+    [ByRefEvent]
+    public readonly struct EndCollideEvent
     {
-        public Vector2 WorldPoint;
+        public readonly Fixture OurFixture;
+        public readonly Fixture OtherFixture;
+        public readonly Contact Contact;
 
-        public StartCollideEvent(Fixture ourFixture, Fixture otherFixture, Vector2 worldPoint)
-            : base(ourFixture, otherFixture)
+        public EndCollideEvent(Fixture ourFixture, Fixture otherFixture, Contact contact)
         {
-            WorldPoint = worldPoint;
+            OurFixture = ourFixture;
+            OtherFixture = otherFixture;
+            Contact = contact;
         }
     }
 
-    public sealed class EndCollideEvent : CollideEvent
+    /// <summary>
+    /// Raised when 2 events are colliding to allow you to prevent a collision between 2 specific bodies.
+    /// </summary>
+    [ByRefEvent]
+    public struct PreventCollideEvent
     {
-        public EndCollideEvent(Fixture ourFixture, Fixture otherFixture)
-            : base(ourFixture, otherFixture)
-        {
-        }
-    }
+        public readonly PhysicsComponent BodyA;
+        public readonly PhysicsComponent BodyB;
+        public bool Cancelled;
 
-    public sealed class PreventCollideEvent : CancellableEntityEventArgs
-    {
-        public IPhysBody BodyA;
-        public IPhysBody BodyB;
-
-        public PreventCollideEvent(IPhysBody ourBody, IPhysBody otherBody)
+        public PreventCollideEvent(PhysicsComponent ourBody, PhysicsComponent otherBody)
         {
             BodyA = ourBody;
             BodyB = otherBody;
+            Cancelled = false;
         }
     }
 

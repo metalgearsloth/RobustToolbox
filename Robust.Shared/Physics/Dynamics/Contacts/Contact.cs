@@ -119,6 +119,22 @@ namespace Robust.Shared.Physics.Dynamics.Contacts
         /// <summary>
         /// Gets the world manifold.
         /// </summary>
+        public void GetWorldManifold(IPhysicsManager physicsManager, out Vector2 normal)
+        {
+            PhysicsComponent bodyA = FixtureA?.Body!;
+            PhysicsComponent bodyB = FixtureB?.Body!;
+            IPhysShape shapeA = FixtureA?.Shape!;
+            IPhysShape shapeB = FixtureB?.Shape!;
+            var bodyATransform = physicsManager.EnsureTransform(bodyA);
+            var bodyBTransform = physicsManager.EnsureTransform(bodyB);
+            Span<Vector2> points = stackalloc Vector2[2];
+
+            ContactSolver.InitializeManifold(ref Manifold, bodyATransform, bodyBTransform, shapeA.Radius, shapeB.Radius, out normal, points);
+        }
+
+        /// <summary>
+        /// Gets the world manifold.
+        /// </summary>
         public void GetWorldManifold(IPhysicsManager physicsManager, out Vector2 normal, Span<Vector2> points)
         {
             PhysicsComponent bodyA = FixtureA?.Body!;
