@@ -16,8 +16,7 @@ namespace Robust.Client.UserInterface.CustomControls
 {
     public sealed class TileSpawnWindow : DefaultWindow
     {
-        private readonly ITileDefinitionManager __tileDefinitionManager;
-        private readonly IPlacementManager _placementManager;
+        private readonly ITileDefinitionManager _tileDefinitionManager;
         private readonly IResourceCache _resourceCache;
 
         private ItemList TileList;
@@ -28,11 +27,9 @@ namespace Robust.Client.UserInterface.CustomControls
 
         private bool _clearingSelections;
 
-        public TileSpawnWindow(ITileDefinitionManager tileDefinitionManager, IPlacementManager placementManager,
-            IResourceCache resourceCache)
+        public TileSpawnWindow(ITileDefinitionManager tileDefinitionManager, IResourceCache resourceCache)
         {
-            __tileDefinitionManager = tileDefinitionManager;
-            _placementManager = placementManager;
+            _tileDefinitionManager = tileDefinitionManager;
             _resourceCache = resourceCache;
 
             var vBox = new BoxContainer
@@ -60,8 +57,6 @@ namespace Robust.Client.UserInterface.CustomControls
 
             BuildTileList();
 
-            _placementManager.PlacementChanged += OnPlacementCanceled;
-
             OnClose += OnWindowClosed;
 
             Title = "Place Tiles";
@@ -70,20 +65,9 @@ namespace Robust.Client.UserInterface.CustomControls
             SetSize = (300, 300);
         }
 
-        protected override void Dispose(bool disposing)
-        {
-            base.Dispose(disposing);
-
-            if (disposing)
-            {
-                _placementManager.PlacementChanged -= OnPlacementCanceled;
-            }
-        }
-
         private void OnClearButtonPressed(BaseButton.ButtonEventArgs args)
         {
             TileList.ClearSelected();
-            _placementManager.Clear();
             SearchBar.Clear();
             BuildTileList("");
             ClearButton.Disabled = true;
@@ -92,7 +76,6 @@ namespace Robust.Client.UserInterface.CustomControls
         private void OnSearchBarTextChanged(LineEdit.LineEditEventArgs args)
         {
             TileList.ClearSelected();
-            _placementManager.Clear();
             BuildTileList(args.Text);
             ClearButton.Disabled = string.IsNullOrEmpty(args.Text);
         }
@@ -101,7 +84,7 @@ namespace Robust.Client.UserInterface.CustomControls
         {
             TileList.Clear();
 
-            IEnumerable<ITileDefinition> tileDefs = __tileDefinitionManager;
+            IEnumerable<ITileDefinition> tileDefs = _tileDefinitionManager;
 
             if (!string.IsNullOrEmpty(searchStr))
             {
@@ -129,7 +112,6 @@ namespace Robust.Client.UserInterface.CustomControls
         private void OnWindowClosed()
         {
             TileList.ClearSelected();
-            _placementManager.Clear();
         }
 
         private void OnPlacementCanceled(object? sender, EventArgs e)
@@ -138,19 +120,10 @@ namespace Robust.Client.UserInterface.CustomControls
             TileList.ClearSelected();
             _clearingSelections = false;
         }
+
         private void TileListOnOnItemSelected(ItemList.ItemListSelectedEventArgs args)
         {
-            var definition = _shownItems[args.ItemIndex];
 
-            var newObjInfo = new PlacementInformation
-            {
-                PlacementOption = "AlignTileAny",
-                TileType = definition.TileId,
-                Range = 400,
-                IsTile = true
-            };
-
-            _placementManager.BeginPlacing(newObjInfo);
         }
 
         private void TileListOnOnItemDeselected(ItemList.ItemListDeselectedEventArgs args)
@@ -159,8 +132,6 @@ namespace Robust.Client.UserInterface.CustomControls
             {
                 return;
             }
-
-            _placementManager.Clear();
         }
     }
 }
