@@ -868,6 +868,9 @@ namespace Robust.Shared
         public static readonly CVarDef<int> AudioAttenuation =
             CVarDef.Create("audio.attenuation", (int) Attenuation.Default, CVar.REPLICATED | CVar.ARCHIVE);
 
+        public static readonly CVarDef<float> AudioSpeedOfSound =
+            CVarDef.Create("audio.speed_of_sound", 343.3f, CVar.REPLICATED | CVar.ARCHIVE);
+
         public static readonly CVarDef<float> AudioMaxDistance =
             CVarDef.Create("audio.max_distance", 25f, CVar.REPLICATED | CVar.ARCHIVE);
 
