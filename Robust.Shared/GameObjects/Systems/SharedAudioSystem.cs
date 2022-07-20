@@ -7,7 +7,7 @@ namespace Robust.Shared.GameObjects
 {
     public abstract class SharedAudioSystem : EntitySystem
     {
-        [Dependency] private readonly IConfigurationManager _configManager = default!;
+        [Dependency] protected readonly IConfigurationManager _configManager = default!;
         [Dependency] private readonly IMapManager _mapManager = default!;
 
         /// <summary>
@@ -35,6 +35,14 @@ namespace Robust.Shared.GameObjects
             _configManager.OnValueChanged(CVars.AudioMaxDistance, SetAudioMaxDistance, true);
             _configManager.OnValueChanged(CVars.AudioRolloffFactor, SetAudioRolloffFactor, true);
             _configManager.OnValueChanged(CVars.AudioReferenceDistance, SetAudioReferenceDistance, true);
+        }
+
+        public override void Shutdown()
+        {
+            base.Shutdown();
+            _configManager.UnsubValueChanged(CVars.AudioMaxDistance, SetAudioMaxDistance);
+            _configManager.UnsubValueChanged(CVars.AudioRolloffFactor, SetAudioRolloffFactor);
+            _configManager.UnsubValueChanged(CVars.AudioReferenceDistance, SetAudioReferenceDistance);
         }
 
         private void SetAudioReferenceDistance(float obj)

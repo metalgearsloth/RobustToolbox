@@ -2,9 +2,11 @@ using System;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using JetBrains.Annotations;
+using OpenToolkit.Audio.OpenAL;
 using Robust.Client.Audio;
 using Robust.Client.Graphics;
 using Robust.Client.ResourceManagement;
+using Robust.Shared;
 using Robust.Shared.Audio;
 using Robust.Shared.GameObjects;
 using Robust.Shared.IoC;
@@ -29,6 +31,8 @@ namespace Robust.Client.GameObjects
 
         private readonly List<PlayingStream> _playingClydeStreams = new();
 
+        public float SpeedOfSound { get; private set; }
+
         /// <inheritdoc />
         public override void Initialize()
         {
@@ -39,6 +43,19 @@ namespace Robust.Client.GameObjects
             SubscribeNetworkEvent<StopAudioMessageClient>(StopAudioMessageHandler);
 
             SubscribeLocalEvent<SoundSystem.QueryAudioSystem>((ev => ev.Audio = this));
+            _configManager.OnValueChanged(CVars.AudioSpeedOfSound, SetSpeedOfSound);
+        }
+
+        public override void Shutdown()
+        {
+            base.Shutdown();
+            _configManager.UnsubValueChanged(CVars.AudioSpeedOfSound, SetSpeedOfSound);
+        }
+
+        private void SetSpeedOfSound(float obj)
+        {
+            AL.SpeedOfSound(obj);
+            SpeedOfSound = obj;
         }
 
         private void StopAudioMessageHandler(StopAudioMessageClient ev)
