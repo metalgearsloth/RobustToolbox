@@ -6,6 +6,12 @@ namespace Robust.Client.Graphics
 {
     public interface IClydeAudioSource : IDisposable
     {
+        float RolloffFactor { get; set; }
+        float ReferenceDistance { get; set; }
+        float MaxDistance { get; set; }
+        float Pitch { get; set; }
+        Vector2 Velocity { get; set; }
+
         void StartPlaying();
         void StopPlaying();
 
@@ -15,15 +21,10 @@ namespace Robust.Client.Graphics
 
         [MustUseReturnValue]
         bool SetPosition(Vector2 position);
-        void SetPitch(float pitch);
         void SetGlobal();
         void SetVolume(float decibels);
         void SetVolumeDirect(float decibels);
-        void SetMaxDistance(float maxDistance);
-        void SetRolloffFactor(float rolloffFactor);
-        void SetReferenceDistance(float refDistance);
         void SetOcclusion(float blocks);
         void SetPlaybackPosition(float seconds);
-        void SetVelocity(Vector2 velocity);
     }
 }

@@ -340,7 +340,7 @@ internal sealed partial class MidiManager : IMidiManager
 
                 if (trackingEntity)
                 {
-                    renderer.Source.SetVelocity(renderer.TrackingEntity!.Value.GlobalLinearVelocity());
+                    renderer.Source.Velocity = renderer.TrackingEntity!.Value.GlobalLinearVelocity();
                 }
             }
             else

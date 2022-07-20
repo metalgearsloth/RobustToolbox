@@ -32,12 +32,6 @@ namespace Robust.Shared.Audio
     public struct AudioParams : IPopulateDefaultValues
     {
         /// <summary>
-        ///     The DistanceModel to use for this specific source.
-        /// </summary>
-        [DataField("attenuation")]
-        public Attenuation Attenuation { get; set; }
-
-        /// <summary>
         ///     Base volume to play the audio at, in dB.
         /// </summary>
         [DataField("volume")]
@@ -204,18 +198,6 @@ namespace Robust.Shared.Audio
             return me;
         }
 
-        /// <summary>
-        ///     Returns a copy of this instance with attenuation set, for easy chaining.
-        /// </summary>
-        /// <param name="attenuation">The new attenuation.</param>
-        [Pure]
-        public AudioParams WithAttenuation(Attenuation attenuation)
-        {
-            var me = this;
-            me.Attenuation = attenuation;
-            return me;
-        }
-
         [Pure]
         public AudioParams WithPlayOffset(float offset)
         {
@@ -226,7 +208,6 @@ namespace Robust.Shared.Audio
 
         public void PopulateDefaultValues()
         {
-            Attenuation = Default.Attenuation;
             Volume = Default.Volume;
             PitchScale = Default.PitchScale;
             BusName = Default.BusName;

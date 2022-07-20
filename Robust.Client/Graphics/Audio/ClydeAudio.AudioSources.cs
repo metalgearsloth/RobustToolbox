@@ -1,18 +1,8 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Runtime.CompilerServices;
-using System.Threading;
 using OpenToolkit.Audio.OpenAL;
 using OpenToolkit.Audio.OpenAL.Extensions.Creative.EFX;
-using OpenToolkit.Mathematics;
 using Robust.Client.Audio;
-using Robust.Shared;
-using Robust.Shared.Configuration;
-using Robust.Shared.IoC;
-using Robust.Shared.Audio;
 using Robust.Shared.Log;
 using Vector2 = Robust.Shared.Maths.Vector2;
 using Robust.Shared.Utility;
@@ -41,6 +31,91 @@ namespace Robust.Client.Graphics.Audio
                 SourceHandle = sourceHandle;
                 _sourceStream = sourceStream;
                 AL.GetSource(SourceHandle, ALSourcef.Gain, out _gain);
+            }
+
+            public float RolloffFactor
+            {
+                get
+                {
+                    _checkDisposed();
+                    AL.GetSource(SourceHandle, ALSourcef.RolloffFactor, out var rolloff);
+                    return rolloff;
+                }
+                set
+                {
+                    _checkDisposed();
+                    AL.Source(SourceHandle, ALSourcef.RolloffFactor, value);
+                    _master._checkAlError();
+                }
+            }
+
+            public float ReferenceDistance
+            {
+                get
+                {
+                    _checkDisposed();
+                    AL.GetSource(SourceHandle, ALSourcef.ReferenceDistance, out var refDistance);
+                    return refDistance;
+                }
+                set
+                {
+                    _checkDisposed();
+                    AL.Source(SourceHandle, ALSourcef.ReferenceDistance, value);
+                    _master._checkAlError();
+                }
+            }
+
+            public float MaxDistance
+            {
+                get
+                {
+                    _checkDisposed();
+                    AL.GetSource(SourceHandle, ALSourcef.MaxDistance, out var maxDistance);
+                    return maxDistance;
+                }
+                set
+                {
+                    _checkDisposed();
+                    AL.Source(SourceHandle, ALSourcef.MaxDistance, value);
+                     _master._checkAlError();
+                }
+            }
+
+            public float Pitch
+            {
+                get
+                {
+                    _checkDisposed();
+                    AL.GetSource(SourceHandle, ALSourcef.Pitch, out var pitch);
+                    return pitch;
+                }
+                set
+                {
+                    _checkDisposed();
+                    AL.Source(SourceHandle, ALSourcef.Pitch, value);
+                     _master._checkAlError();
+                }
+            }
+
+            public Vector2 Velocity
+            {
+                get
+                {
+                    _checkDisposed();
+                    AL.GetSource(SourceHandle, ALSource3f.Velocity, out var value);
+                    return new Vector2(value.X, value.Y);
+                }
+                set
+                {
+                    _checkDisposed();
+
+                    var (x, y) = value;
+
+                    if (!AreFinite(x, y)) return;
+
+                    AL.Source(SourceHandle, ALSource3f.Velocity, x, y, 0);
+                    _master._checkAlError();
+                }
             }
 
             public void StartPlaying()
@@ -105,7 +180,7 @@ namespace Robust.Client.Graphics.Audio
                 _master._checkAlError();
             }
 
-            public void SetVolumeDirect(float scale)
+            public void SetVolumeDirect(float gain)
             {
                 _checkDisposed();
                 var priorOcclusion = 1f;
@@ -114,29 +189,8 @@ namespace Robust.Client.Graphics.Audio
                     AL.GetSource(SourceHandle, ALSourcef.Gain, out var priorGain);
                     priorOcclusion = priorGain / _gain;
                 }
-                _gain = scale;
+                _gain = gain;
                 AL.Source(SourceHandle, ALSourcef.Gain, _gain * priorOcclusion);
-                _master._checkAlError();
-            }
-
-            public void SetMaxDistance(float distance)
-            {
-                _checkDisposed();
-                AL.Source(SourceHandle, ALSourcef.MaxDistance, distance);
-                _master._checkAlError();
-            }
-
-            public void SetRolloffFactor(float rolloffFactor)
-            {
-                _checkDisposed();
-                AL.Source(SourceHandle, ALSourcef.RolloffFactor, rolloffFactor);
-                _master._checkAlError();
-            }
-
-            public void SetReferenceDistance(float refDistance)
-            {
-                _checkDisposed();
-                AL.Source(SourceHandle, ALSourcef.ReferenceDistance, refDistance);
                 _master._checkAlError();
             }
 
@@ -214,22 +268,6 @@ namespace Robust.Client.Graphics.Audio
                 }
 
                 return false;
-            }
-
-            public void SetVelocity(Vector2 velocity)
-            {
-                _checkDisposed();
-
-                var (x, y) = velocity;
-
-                if (!AreFinite(x, y))
-                {
-                    return;
-                }
-
-                AL.Source(SourceHandle, ALSource3f.Velocity, x, y, 0);
-
-                _master._checkAlError();
             }
 
             public void SetPitch(float pitch)
@@ -312,6 +350,91 @@ namespace Robust.Client.Graphics.Audio
                 AL.GetSource(sourceHandle, ALSourcef.Gain, out _gain);
             }
 
+            public float RolloffFactor
+            {
+                get
+                {
+                    _checkDisposed();
+                    AL.GetSource(SourceHandle!.Value, ALSourcef.RolloffFactor, out var rolloff);
+                    return rolloff;
+                }
+                set
+                {
+                    _checkDisposed();
+                    AL.Source(SourceHandle!.Value, ALSourcef.RolloffFactor, value);
+                    _master._checkAlError();
+                }
+            }
+
+            public float ReferenceDistance
+            {
+                get
+                {
+                    _checkDisposed();
+                    AL.GetSource(SourceHandle!.Value, ALSourcef.ReferenceDistance, out var refDistance);
+                    return refDistance;
+                }
+                set
+                {
+                    _checkDisposed();
+                    AL.Source(SourceHandle!.Value, ALSourcef.ReferenceDistance, value);
+                    _master._checkAlError();
+                }
+            }
+
+            public float MaxDistance
+            {
+                get
+                {
+                    _checkDisposed();
+                    AL.GetSource(SourceHandle!.Value, ALSourcef.MaxDistance, out var maxDistance);
+                    return maxDistance;
+                }
+                set
+                {
+                    _checkDisposed();
+                    AL.Source(SourceHandle!.Value, ALSourcef.MaxDistance, value);
+                     _master._checkAlError();
+                }
+            }
+
+            public float Pitch
+            {
+                get
+                {
+                    _checkDisposed();
+                    AL.GetSource(SourceHandle!.Value, ALSourcef.Pitch, out var pitch);
+                    return pitch;
+                }
+                set
+                {
+                    _checkDisposed();
+                    AL.Source(SourceHandle!.Value, ALSourcef.Pitch, value);
+                     _master._checkAlError();
+                }
+            }
+
+            public Vector2 Velocity
+            {
+                get
+                {
+                    _checkDisposed();
+                    AL.GetSource(SourceHandle!.Value, ALSource3f.Velocity, out var value);
+                    return new Vector2(value.X, value.Y);
+                }
+                set
+                {
+                    _checkDisposed();
+
+                    var (x, y) = value;
+
+                    if (!AreFinite(x, y)) return;
+
+                    AL.Source(SourceHandle!.Value, ALSource3f.Velocity, x, y, 0);
+                    _master._checkAlError();
+                }
+            }
+
             public void StartPlaying()
             {
                 _checkDisposed();
@@ -354,11 +477,6 @@ namespace Robust.Client.Graphics.Audio
                 _master._checkAlError();
             }
 
-            public void SetLooping()
-            {
-                // TODO?waaaaddDDDDD
-            }
-
             public void SetVolume(float decibels)
             {
                 _checkDisposed();
@@ -384,27 +502,6 @@ namespace Robust.Client.Graphics.Audio
                 }
                 _gain = scale;
                 AL.Source(SourceHandle!.Value, ALSourcef.Gain, _gain * priorOcclusion);
-                _master._checkAlError();
-            }
-
-            public void SetMaxDistance(float distance)
-            {
-                _checkDisposed();
-                AL.Source(SourceHandle!.Value, ALSourcef.MaxDistance, distance);
-                _master._checkAlError();
-            }
-
-            public void SetRolloffFactor(float rolloffFactor)
-            {
-                _checkDisposed();
-                AL.Source(SourceHandle!.Value, ALSourcef.RolloffFactor, rolloffFactor);
-                _master._checkAlError();
-            }
-
-            public void SetReferenceDistance(float refDistance)
-            {
-                _checkDisposed();
-                AL.Source(SourceHandle!.Value, ALSourcef.ReferenceDistance, refDistance);
                 _master._checkAlError();
             }
 
@@ -472,30 +569,6 @@ namespace Robust.Client.Graphics.Audio
                 }
 
                 return false;
-            }
-
-            public void SetVelocity(Vector2 velocity)
-            {
-                _checkDisposed();
-
-                var (x, y) = velocity;
-
-                if (!AreFinite(x, y))
-                {
-                    return;
-                }
-
-                AL.Source(SourceHandle!.Value, ALSource3f.Velocity, x, y, 0);
-
-                _master._checkAlError();
-            }
-
-            public void SetPitch(float pitch)
-            {
-                _checkDisposed();
-                // ReSharper disable once PossibleInvalidOperationException
-                AL.Source(SourceHandle!.Value, ALSourcef.Pitch, pitch);
-                _master._checkAlError();
             }
 
             ~BufferedAudioSource()

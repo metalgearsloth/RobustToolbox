@@ -31,6 +31,12 @@ namespace Robust.Client.Graphics.Audio
             // Nada.
         }
 
+        public float RolloffFactor { get; set; }
+        public float ReferenceDistance { get; set; }
+        public float MaxDistance { get; set; }
+        public float Pitch { get; set; }
+        public Vector2 Velocity { get; set; }
+
         public void StartPlaying()
         {
             // Nada.

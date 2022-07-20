@@ -2,7 +2,6 @@ using System;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using JetBrains.Annotations;
-using OpenToolkit.Audio.OpenAL;
 using Robust.Client.Audio;
 using Robust.Client.Graphics;
 using Robust.Client.ResourceManagement;
@@ -15,7 +14,6 @@ using Robust.Shared.Maths;
 using Robust.Shared.Physics;
 using Robust.Shared.Player;
 using Robust.Shared.Utility;
-using Robust.Shared.Threading;
 
 namespace Robust.Client.GameObjects
 {
@@ -27,7 +25,7 @@ namespace Robust.Client.GameObjects
         [Dependency] private readonly IClydeAudio _clyde = default!;
         [Dependency] private readonly IEyeManager _eyeManager = default!;
         [Dependency] private readonly IEntityManager _entityManager = default!;
-        [Dependency] private readonly SharedPhysicsSystem _broadPhaseSystem = default!;
+        [Dependency] private readonly SharedPhysicsSystem _physics = default!;
 
         private readonly List<PlayingStream> _playingClydeStreams = new();
 
@@ -191,7 +189,7 @@ namespace Robust.Client.GameObjects
                         var occlusion = 0f;
                         if (sourceRelative.Length > 0)
                         {
-                            occlusion = _broadPhaseSystem.IntersectRayPenetration(
+                            occlusion = _physics.IntersectRayPenetration(
                                 pos.MapId,
                                 new CollisionRay(
                                     pos.Position,
@@ -219,7 +217,7 @@ namespace Robust.Client.GameObjects
 
                 if (pos.MapId != _eyeManager.CurrentMap)
                 {
-                    stream.Source.SetVolume(-10000000);
+                    stream.Source.SetVolumeDirect(0f);
                 }
                 else
                 {
@@ -230,7 +228,7 @@ namespace Robust.Client.GameObjects
                     // we don't need the OpenAL behaviour.
                     if (sourceRelative.Length > stream.MaxDistance)
                     {
-                        stream.Source.SetVolume(-10000000);
+                        stream.Source.SetVolumeDirect(0f);
                     }
                     else
                     {
@@ -240,9 +238,13 @@ namespace Robust.Client.GameObjects
                             stream.Source.StopPlaying();
                         }
 
-                        if (stream.TrackingEntity != default)
+                        if (TryComp<PhysicsComponent>(stream.TrackingEntity, out var body))
                         {
-                            stream.Source.SetVelocity(stream.TrackingEntity.GlobalLinearVelocity());
+                            stream.Source.Velocity = _physics.GetMapLinearVelocity(stream.TrackingEntity, body);
+                        }
+                        else
+                        {
+                            stream.Source.Velocity = Vector2.Zero;
                         }
 
                         stream.Source.SetVolume(stream.Volume);
@@ -434,11 +436,11 @@ namespace Robust.Client.GameObjects
                 return;
             }
 
-            source.SetPitch(audioParams.Value.PitchScale);
+            source.Pitch = audioParams.Value.PitchScale;
             source.SetVolume(audioParams.Value.Volume);
-            source.SetRolloffFactor(audioParams.Value.RolloffFactor);
-            source.SetMaxDistance(audioParams.Value.MaxDistance);
-            source.SetReferenceDistance(audioParams.Value.ReferenceDistance);
+            source.RolloffFactor = audioParams.Value.RolloffFactor;
+            source.MaxDistance = audioParams.Value.MaxDistance;
+            source.ReferenceDistance = audioParams.Value.ReferenceDistance;
             source.SetPlaybackPosition(audioParams.Value.PlayOffsetSeconds);
             source.IsLooping = audioParams.Value.Loop;
         }
