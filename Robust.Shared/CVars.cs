@@ -868,6 +868,15 @@ namespace Robust.Shared
         public static readonly CVarDef<int> AudioAttenuation =
             CVarDef.Create("audio.attenuation", (int) Attenuation.Default, CVar.REPLICATED | CVar.ARCHIVE);
 
+        public static readonly CVarDef<float> AudioMaxDistance =
+            CVarDef.Create("audio.max_distance", 25f, CVar.REPLICATED | CVar.ARCHIVE);
+
+        public static readonly CVarDef<float> AudioRolloffFactor =
+            CVarDef.Create("audio.rolloff_factor", 2f, CVar.REPLICATED | CVar.ARCHIVE);
+
+        public static readonly CVarDef<float> AudioReferenceDistance =
+            CVarDef.Create("audio.reference_distance", 1f, CVar.REPLICATED | CVar.ARCHIVE);
+
         /// <summary>
         /// Audio device to try to output audio to by default.
         /// </summary>
