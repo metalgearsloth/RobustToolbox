@@ -1,4 +1,5 @@
-﻿using Robust.Shared.Audio;
+﻿using JetBrains.Annotations;
+using Robust.Shared.Audio;
 using Robust.Shared.Configuration;
 using Robust.Shared.IoC;
 using Robust.Shared.Map;
@@ -7,7 +8,7 @@ namespace Robust.Shared.GameObjects
 {
     public abstract class SharedAudioSystem : EntitySystem
     {
-        [Dependency] protected readonly IConfigurationManager _configManager = default!;
+        [Dependency] protected readonly IConfigurationManager ConfigManager = default!;
         [Dependency] private readonly IMapManager _mapManager = default!;
 
         /// <summary>
@@ -32,17 +33,17 @@ namespace Robust.Shared.GameObjects
         public override void Initialize()
         {
             base.Initialize();
-            _configManager.OnValueChanged(CVars.AudioMaxDistance, SetAudioMaxDistance, true);
-            _configManager.OnValueChanged(CVars.AudioRolloffFactor, SetAudioRolloffFactor, true);
-            _configManager.OnValueChanged(CVars.AudioReferenceDistance, SetAudioReferenceDistance, true);
+            ConfigManager.OnValueChanged(CVars.AudioMaxDistance, SetAudioMaxDistance, true);
+            ConfigManager.OnValueChanged(CVars.AudioRolloffFactor, SetAudioRolloffFactor, true);
+            ConfigManager.OnValueChanged(CVars.AudioReferenceDistance, SetAudioReferenceDistance, true);
         }
 
         public override void Shutdown()
         {
             base.Shutdown();
-            _configManager.UnsubValueChanged(CVars.AudioMaxDistance, SetAudioMaxDistance);
-            _configManager.UnsubValueChanged(CVars.AudioRolloffFactor, SetAudioRolloffFactor);
-            _configManager.UnsubValueChanged(CVars.AudioReferenceDistance, SetAudioReferenceDistance);
+            ConfigManager.UnsubValueChanged(CVars.AudioMaxDistance, SetAudioMaxDistance);
+            ConfigManager.UnsubValueChanged(CVars.AudioRolloffFactor, SetAudioRolloffFactor);
+            ConfigManager.UnsubValueChanged(CVars.AudioReferenceDistance, SetAudioReferenceDistance);
         }
 
         private void SetAudioReferenceDistance(float obj)

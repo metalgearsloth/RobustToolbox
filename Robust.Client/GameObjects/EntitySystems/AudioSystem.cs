@@ -31,7 +31,7 @@ namespace Robust.Client.GameObjects
 
         private readonly List<PlayingStream> _playingClydeStreams = new();
 
-        public float SpeedOfSound { get; private set; }
+
 
         /// <inheritdoc />
         public override void Initialize()
@@ -43,19 +43,18 @@ namespace Robust.Client.GameObjects
             SubscribeNetworkEvent<StopAudioMessageClient>(StopAudioMessageHandler);
 
             SubscribeLocalEvent<SoundSystem.QueryAudioSystem>((ev => ev.Audio = this));
-            _configManager.OnValueChanged(CVars.AudioSpeedOfSound, SetSpeedOfSound);
+            ConfigManager.OnValueChanged(CVars.AudioSpeedOfSound, SetSpeedOfSound);
         }
 
         public override void Shutdown()
         {
             base.Shutdown();
-            _configManager.UnsubValueChanged(CVars.AudioSpeedOfSound, SetSpeedOfSound);
+            ConfigManager.UnsubValueChanged(CVars.AudioSpeedOfSound, SetSpeedOfSound);
         }
 
         private void SetSpeedOfSound(float obj)
         {
             AL.SpeedOfSound(obj);
-            SpeedOfSound = obj;
         }
 
         private void StopAudioMessageHandler(StopAudioMessageClient ev)
