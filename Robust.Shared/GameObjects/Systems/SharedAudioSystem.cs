@@ -12,6 +12,10 @@ namespace Robust.Shared.GameObjects
         /// </summary>
         public const int DefaultSoundRange = 25;
 
+        public const float DefaultRolloffFactor = 2f;
+
+        public const float DefaultReferenceDistance = 3f;
+
         protected EntityCoordinates GetFallbackCoordinates(MapCoordinates mapCoordinates)
         {
             if (_mapManager.TryFindGridAt(mapCoordinates, out var mapGrid))

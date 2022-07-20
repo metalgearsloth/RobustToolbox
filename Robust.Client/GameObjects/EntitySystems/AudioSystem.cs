@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using JetBrains.Annotations;
+using OpenToolkit.Audio.OpenAL;
 using Robust.Client.Audio;
 using Robust.Client.Graphics;
 using Robust.Client.ResourceManagement;
@@ -233,49 +234,7 @@ namespace Robust.Client.GameObjects
                     }
                     else
                     {
-                        // OpenAL also limits the distance to <= AL_MAX_DISTANCE, but since we cull
-                        // sources that are further away than stream.MaxDistance, we don't do that.
-                        var distance = MathF.Max(stream.ReferenceDistance, sourceRelative.Length);
-                        float gain;
-
-                        // Technically these are formulas for gain not decibels but EHHHHHHHH.
-                        switch (stream.Attenuation)
-                        {
-                            case Attenuation.Default:
-                                gain = 1f;
-                                break;
-                            // You thought I'd implement clamping per source? Hell no that's just for the overall OpenAL setting
-                            // I didn't even wanna implement this much for linear but figured it'd be cleaner.
-                            case Attenuation.InverseDistanceClamped:
-                            case Attenuation.InverseDistance:
-                                gain = stream.ReferenceDistance /
-                                       (stream.ReferenceDistance + stream.RolloffFactor *
-                                           (distance - stream.ReferenceDistance));
-
-                                break;
-                            case Attenuation.LinearDistanceClamped:
-                            case Attenuation.LinearDistance:
-                                gain = 1f - stream.RolloffFactor * (distance - stream.ReferenceDistance) /
-                                    (stream.MaxDistance - stream.ReferenceDistance);
-
-                                break;
-                            case Attenuation.ExponentDistanceClamped:
-                            case Attenuation.ExponentDistance:
-                                gain = MathF.Pow((distance / stream.ReferenceDistance),
-                                    (-stream.RolloffFactor));
-                                break;
-                            default:
-                                throw new ArgumentOutOfRangeException(
-                                    $"No implemented attenuation for {stream.Attenuation.ToString()}");
-                        }
-
-                        var volume = MathF.Pow(10, stream.Volume / 10);
-                        var actualGain = MathF.Max(0f, volume * gain);
-
-                        stream.Source.SetVolumeDirect(actualGain);
-                        var audioPos = stream.Attenuation != Attenuation.NoAttenuation ? pos.Position : ourPos;
-
-                        if (!stream.Source.SetPosition(audioPos))
+                        if (!stream.Source.SetPosition(pos.Position))
                         {
                             Logger.Warning($"Interrupting positional audio, can't set position.");
                             stream.Source.StopPlaying();
@@ -285,6 +244,8 @@ namespace Robust.Client.GameObjects
                         {
                             stream.Source.SetVelocity(stream.TrackingEntity.GlobalLinearVelocity());
                         }
+
+                        stream.Source.SetVolume(stream.Volume);
                     }
                 }
             }
@@ -334,7 +295,6 @@ namespace Robust.Client.GameObjects
             var playing = new PlayingStream
             {
                 Source = source,
-                Attenuation = audioParams?.Attenuation ?? Attenuation.Default,
                 MaxDistance = audioParams?.MaxDistance ?? float.MaxValue,
                 ReferenceDistance = audioParams?.ReferenceDistance ?? 1f,
                 RolloffFactor = audioParams?.RolloffFactor ?? 1f,
@@ -393,7 +353,6 @@ namespace Robust.Client.GameObjects
                 Source = source,
                 TrackingEntity = entity,
                 TrackingFallbackCoordinates = fallbackCoordinates != EntityCoordinates.Invalid ? fallbackCoordinates : null,
-                Attenuation = audioParams?.Attenuation ?? Attenuation.Default,
                 MaxDistance = audioParams?.MaxDistance ?? float.MaxValue,
                 ReferenceDistance = audioParams?.ReferenceDistance ?? 1f,
                 RolloffFactor = audioParams?.RolloffFactor ?? 1f,
@@ -459,7 +418,6 @@ namespace Robust.Client.GameObjects
                 Source = source,
                 TrackingCoordinates = coordinates,
                 TrackingFallbackCoordinates = fallbackCoordinates != EntityCoordinates.Invalid ? fallbackCoordinates : null,
-                Attenuation = audioParams?.Attenuation ?? Attenuation.Default,
                 MaxDistance = audioParams?.MaxDistance ?? float.MaxValue,
                 ReferenceDistance = audioParams?.ReferenceDistance ?? 1f,
                 RolloffFactor = audioParams?.RolloffFactor ?? 1f,
@@ -517,23 +475,6 @@ namespace Robust.Client.GameObjects
             public float MaxDistance;
             public float ReferenceDistance;
             public float RolloffFactor;
-
-            public Attenuation Attenuation
-            {
-                get => _attenuation;
-                set
-                {
-                    if (value == _attenuation) return;
-                    _attenuation = value;
-                    if (_attenuation != Attenuation.Default)
-                    {
-                        // Need to disable default attenuation when using a custom one
-                        // Damn Sloth wanting linear ambience sounds so they smoothly cut-off and are short-range
-                        Source.SetRolloffFactor(0f);
-                    }
-                }
-            }
-            private Attenuation _attenuation = Attenuation.Default;
 
             public void Stop()
             {

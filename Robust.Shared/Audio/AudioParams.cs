@@ -12,16 +12,16 @@ namespace Robust.Shared.Audio
         // https://hackage.haskell.org/package/OpenAL-1.7.0.5/docs/Sound-OpenAL-AL-Attenuation.html
 
         /// <summary>
-        /// Default to the overall attenuation. If set project-wide will use InverseDistanceClamped. This is what you typically want for an audio source.
+        /// Default to the overall attenuation.
         /// </summary>
         Default = 0,
-        NoAttenuation = 1 << 0,
-        InverseDistance = 1 << 1,
-        InverseDistanceClamped = 1 << 2,
-        LinearDistance = 1 << 3,
-        LinearDistanceClamped = 1 << 4,
-        ExponentDistance = 1 << 5,
-        ExponentDistanceClamped = 1 << 6,
+        NoAttenuation = 1,
+        InverseDistance = 2,
+        InverseDistanceClamped = 4,
+        LinearDistance = 8,
+        LinearDistanceClamped = 16,
+        ExponentDistance = 32,
+        ExponentDistanceClamped = 64,
     }
 
     /// <summary>
@@ -85,7 +85,15 @@ namespace Robust.Shared.Audio
         /// <summary>
         ///     The "default" audio configuration.
         /// </summary>
-        public static readonly AudioParams Default = new(0, 1, "Master", SharedAudioSystem.DefaultSoundRange, 1, 1, false, 0f);
+        public static AudioParams Default { get; internal set; } = new(
+            0,
+            1,
+            "Master",
+            SharedAudioSystem.DefaultSoundRange,
+            SharedAudioSystem.DefaultRolloffFactor,
+            SharedAudioSystem.DefaultReferenceDistance,
+            false,
+            0f);
 
         public AudioParams(
             float volume,

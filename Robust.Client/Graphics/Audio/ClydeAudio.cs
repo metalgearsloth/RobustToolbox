@@ -190,10 +190,10 @@ namespace Robust.Client.Graphics.Audio
                 case Attenuation.InverseDistance:
                     AL.DistanceModel(ALDistanceModel.InverseDistance);
                     break;
-                case Attenuation.Default:
                 case Attenuation.InverseDistanceClamped:
                     AL.DistanceModel(ALDistanceModel.InverseDistanceClamped);
                     break;
+                case Attenuation.Default:
                 case Attenuation.LinearDistance:
                     AL.DistanceModel(ALDistanceModel.LinearDistance);
                     break;
