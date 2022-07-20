@@ -85,6 +85,7 @@ namespace Robust.Shared.Audio
         /// <summary>
         ///     The "default" audio configuration.
         /// </summary>
+        [Obsolete("Use the default audioparams on SharedAudioSystem")]
         public static AudioParams Default { get; internal set; } = new(
             0,
             1,

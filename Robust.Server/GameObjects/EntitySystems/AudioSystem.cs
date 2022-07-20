@@ -38,6 +38,7 @@ namespace Robust.Server.GameObjects
         /// <inheritdoc />
         public override void Initialize()
         {
+            base.Initialize();
             SubscribeLocalEvent<SoundSystem.QueryAudioSystem>((ev => ev.Audio = this));
         }
 
