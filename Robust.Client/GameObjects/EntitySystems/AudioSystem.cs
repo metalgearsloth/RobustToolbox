@@ -20,7 +20,7 @@ using Robust.Shared.Utility;
 namespace Robust.Client.GameObjects
 {
     [UsedImplicitly]
-    public sealed class AudioSystem : SharedAudioSystem, IAudioSystem
+    public sealed partial class AudioSystem : SharedAudioSystem, IAudioSystem
     {
         [Dependency] private readonly IResourceCache _resourceCache = default!;
         [Dependency] private readonly IMapManager _mapManager = default!;
@@ -31,12 +31,11 @@ namespace Robust.Client.GameObjects
 
         private readonly List<PlayingStream> _playingClydeStreams = new();
 
-
-
         /// <inheritdoc />
         public override void Initialize()
         {
             base.Initialize();
+            InitializeEffects();
             SubscribeNetworkEvent<PlayAudioEntityMessage>(PlayAudioEntityHandler);
             SubscribeNetworkEvent<PlayAudioGlobalMessage>(PlayAudioGlobalHandler);
             SubscribeNetworkEvent<PlayAudioPositionalMessage>(PlayAudioPositionalHandler);
@@ -49,6 +48,7 @@ namespace Robust.Client.GameObjects
         public override void Shutdown()
         {
             base.Shutdown();
+            ShutdownEffects();
             ConfigManager.UnsubValueChanged(CVars.AudioSpeedOfSound, SetSpeedOfSound);
         }
 

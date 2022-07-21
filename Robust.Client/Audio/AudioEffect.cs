@@ -1,25 +1,20 @@
 using System;
-using OpenToolkit.Audio.OpenAL;
 using OpenToolkit.Audio.OpenAL.Extensions.Creative.EFX;
+using Robust.Shared.Audio;
+using Robust.Shared.Serialization;
+using ReverbProperties = Robust.Shared.Audio.ReverbProperties;
 
 namespace Robust.Client.Audio;
 
 /// <summary>
 /// Reverb presets for audio. These are reusable across as many sources as you like and can be referred to by ID.
 /// </summary>
+[Serializable, NetSerializable]
 public struct AudioEffect : IDisposable
 {
     private ReverbProperties _properties = new();
 
-    internal readonly int EffectHandle;
-
-    public AudioEffect()
-    {
-        EffectHandle = EFX.GenEffect();
-        // TODO:
-        //EFX.AuxiliaryEffectSlot(0, );
-        EFX.Source(0, EFXSourceInteger3.AuxiliarySendFilter, new[] { EffectHandle, 0 });
-    }
+    public AudioEffect() {}
 
     public void SetPreset(ReverbPreset preset)
     {
@@ -410,125 +405,4 @@ public struct AudioEffect : IDisposable
 
         // TODO: AL.GetError();
     }
-}
-
-/// <summary>
-/// EAX reverb presets.
-/// </summary>
-public enum ReverbPreset : byte
-{
-    None = 0,
-    Alley,
-    Arena,
-    Auditorium,
-    Bathroom,
-    Carpettedhallway,
-    CastleAlcove,
-    CastleCourtyard,
-    CastleCupboard,
-    CastleHall,
-    CastleLargeroom,
-    CastleLongpassage,
-    CastleMediumroom,
-    CastleShortPassage,
-    CastleSmallRoom,
-    Cave,
-    Chapel,
-    City,
-    CityAbandoned,
-    CityLibrary,
-    CityMuseum,
-    CityStreets,
-    CitySubway,
-    CityUnderpass,
-    Concerthall,
-    Dizzy,
-    DomeSaintPauls,
-    DomeTomb,
-    DrivingCommentator,
-    DrivingEmptygrandstand,
-    DrivingFullgrandstand,
-    DrivingIncarLuxury,
-    DrivingIncarRacer,
-    DrivingIncarSports,
-    DrivingPitgarage,
-    DrivingTunnel,
-    Drugged,
-    Dustyroom,
-    FactoryAlcove,
-    FactoryCourtyard,
-    FactoryCupboard,
-    FactoryHall,
-    FactoryLargeroom,
-    FactoryLongpassage,
-    FactoryMediumroom,
-    FactoryShortpassage,
-    FactorySmallroom,
-    Forest,
-    Generic,
-    Hallway,
-    Hangar,
-    IcepalaceAlcove,
-    IcepalaceCourtyard,
-    IcepalaceCupboard,
-    IcepalaceHall,
-    IcepalaceLargeroom,
-    IcepalaceLongpassage,
-    IcepalaceMediumroom,
-    IcepalaceShortpassage,
-    IcepalaceSmallroom,
-    Livingroom,
-    MoodHeaven,
-    MoodHell,
-    MoodMemory,
-    Mountains,
-    OutdoorsBackyard,
-    OutdoorsCreek,
-    OutdoorsDeepcanyon,
-    OutdoorsRollingplains,
-    OutdoorsValley,
-    Paddedcell,
-    Parkinglot,
-    PipeLarge,
-    PipeLongthin,
-    PipeResonant,
-    PipeSmall,
-    Plain,
-    PrefabCaravan,
-    PrefabOuthouse,
-    PrefabPractiseroom,
-    PrefabSchoolroom,
-    PrefabWorkshop,
-    Psychotic,
-    Quarry,
-    Room,
-    Sewerpipe,
-    Smallwaterroom,
-    SpacestationAlcove,
-    SpacestationCupboard,
-    SpacestationHall,
-    SpacestationLargeroom,
-    SpacestationLongpassage,
-    SpacestationMediumroom,
-    SpacestationShortpassage,
-    SpacestationSmallroom,
-    SportEmptystadium,
-    SportFullstadium,
-    SportGynmasium,
-    SportLargeswimmingpool,
-    SportSmallswimmingpool,
-    SportSquashcourt,
-    SportStadimtannoy,
-    Stonecorridor,
-    Stoneroom,
-    Underwater,
-    WoodenAlcove,
-    WoodenCourtyard,
-    WoodenCupboard,
-    WoodenHall,
-    WoodenLargeroom,
-    WoodenLongpassage,
-    WoodenMediumroom,
-    WoodenShortpassage,
-    WoodenSmallroom,
 }

@@ -1,7 +1,7 @@
 using System;
 using OpenToolkit.Audio.OpenAL;
 using OpenToolkit.Audio.OpenAL.Extensions.Creative.EFX;
-using Robust.Shared.Maths;
+using Robust.Shared.Audio;
 
 namespace Robust.Client.Audio;
 
@@ -9,7 +9,7 @@ namespace Robust.Client.Audio;
 /// Auxiliary effect slot for audio. Can be set to a specific effect.
 /// You can also set audio sources to this auxiliary audio effect slot.
 /// </summary>
-public struct AuxiliaryAudioEffect : IDisposable
+internal struct AuxiliaryAudioEffect : IDisposable
 {
     internal readonly int AuxiliaryHandle;
 
@@ -22,7 +22,6 @@ public struct AuxiliaryAudioEffect : IDisposable
     {
         // TODO: Suss this shit out
         EFX.GetSource(0, EFXSourceInteger3.AuxiliarySendFilter, out var value1, out var value2, out var value3);
-        AL.Source(0, Auxi);
 
         if (!EFX.IsEffect(effect.EffectHandle))
             throw new InvalidOperationException($"Tried to set an invalid effect handle for auxiliary audio!");

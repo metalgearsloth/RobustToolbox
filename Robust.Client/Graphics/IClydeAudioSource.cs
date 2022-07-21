@@ -1,6 +1,7 @@
 using System;
 using JetBrains.Annotations;
 using Robust.Client.Audio;
+using Robust.Shared.Audio;
 using Robust.Shared.Maths;
 
 namespace Robust.Client.Graphics
@@ -8,10 +9,9 @@ namespace Robust.Client.Graphics
     public interface IClydeAudioSource : IDisposable
     {
         /// <summary>
-        /// Auxiliary audio effect. If you wish to have a specific effect play then you need to bind
-        /// the auxiliary audio effect to an effect.
+        /// Audio effect to use. The Auxiliary audio effect for OpenAL is handled by the engine.
         /// </summary>
-        AuxiliaryAudioEffect? Effect {get; set; }
+        AudioEffect? Effect { get; }
         float RolloffFactor { get; set; }
         float ReferenceDistance { get; set; }
         float MaxDistance { get; set; }

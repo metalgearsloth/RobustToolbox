@@ -1,4 +1,5 @@
-﻿using JetBrains.Annotations;
+﻿using System.Collections.Generic;
+using JetBrains.Annotations;
 using Robust.Shared.Audio;
 using Robust.Shared.Configuration;
 using Robust.Shared.IoC;
@@ -66,6 +67,8 @@ namespace Robust.Shared.GameObjects
             Default = Default.WithMaxDistance(obj);
             AudioParams.Default = AudioParams.Default.WithMaxDistance(obj);
         }
+
+        public IPlayingAudioStream
 
         protected EntityCoordinates GetFallbackCoordinates(MapCoordinates mapCoordinates)
         {

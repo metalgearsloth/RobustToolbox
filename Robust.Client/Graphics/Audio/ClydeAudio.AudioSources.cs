@@ -34,26 +34,7 @@ namespace Robust.Client.Graphics.Audio
             }
 
             /// <inheritdoc />
-            public AuxiliaryAudioEffect? Effect
-            {
-                get => _effect;
-                set
-                {
-                    if (_effect.Equals(value) || !IsEfxSupported) return;
-                    _effect = value;
-
-                    if (_effect == null)
-                    {
-                        EFX.Source(SourceHandle, EFXSourceInteger3.AuxiliarySendFilter, -1, -1, -1);
-                    }
-                    else
-                    {
-                        EFX.Source(SourceHandle, EFXSourceInteger3.AuxiliarySendFilter, _effect.Value.AuxiliaryHandle, 0, FilterHandle);
-                    }
-                }
-            }
-
-            private AuxiliaryAudioEffect? _effect;
+            public AudioEffect? Effect { get; internal set; }
 
             public float RolloffFactor
             {
@@ -372,27 +353,7 @@ namespace Robust.Client.Graphics.Audio
                 AL.GetSource(sourceHandle, ALSourcef.Gain, out _gain);
             }
 
-            /// <inheritdoc />
-            public AuxiliaryAudioEffect? Effect
-            {
-                get => _effect;
-                set
-                {
-                    if (_effect.Equals(value) || !IsEfxSupported) return;
-                    _effect = value;
-
-                    if (_effect == null)
-                    {
-                        EFX.Source(SourceHandle!.Value, EFXSourceInteger3.AuxiliarySendFilter, -1, -1, -1);
-                    }
-                    else
-                    {
-                        EFX.Source(SourceHandle!.Value, EFXSourceInteger3.AuxiliarySendFilter, _effect.Value.AuxiliaryHandle, 0, FilterHandle);
-                    }
-                }
-            }
-
-            private AuxiliaryAudioEffect? _effect;
+            public AudioEffect? Effect { get; }
 
             public float RolloffFactor
             {

@@ -32,6 +32,12 @@ namespace Robust.Shared.Audio
     public struct AudioParams : IPopulateDefaultValues
     {
         /// <summary>
+        /// ID of the effect to be used.
+        /// </summary>
+        [DataField("effect")]
+        public string? Effect { get; set; }
+
+        /// <summary>
         ///     Base volume to play the audio at, in dB.
         /// </summary>
         [DataField("volume")]
