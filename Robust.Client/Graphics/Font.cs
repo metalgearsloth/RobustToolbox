@@ -166,7 +166,7 @@ namespace Robust.Client.Graphics
                 return metrics.Value.Advance;
             }
 
-            baseline += new Vector2(metrics.Value.BearingX, -metrics.Value.BearingY) / EyeManager.PixelsPerMeter;
+            baseline += new Vector2(metrics.Value.BearingX, -metrics.Value.BearingY);
 
             switch (handle)
             {
@@ -174,7 +174,7 @@ namespace Robust.Client.Graphics
                     screen.DrawTexture(texture, baseline, color);
                     break;
                 case DrawingHandleWorld world:
-                    world.DrawTexture(texture, baseline, color);
+                    world.DrawTexture(texture, new Vector2(baseline.X / EyeManager.PixelsPerMeter, baseline.Y), color);
                     break;
             }
 
