@@ -166,7 +166,7 @@ namespace Robust.Client.Graphics
                 return metrics.Value.Advance;
             }
 
-            baseline += new Vector2(metrics.Value.BearingX, -metrics.Value.BearingY);
+            baseline += new Vector2(metrics.Value.BearingX, -metrics.Value.BearingY) / EyeManager.PixelsPerMeter;
 
             switch (handle)
             {
