@@ -25,6 +25,7 @@ using System.Collections.Generic;
 using Robust.Shared.Configuration;
 using Robust.Shared.IoC;
 using Robust.Shared.Maths;
+using Robust.Shared.Physics.Serializers;
 using Robust.Shared.Serialization;
 using Robust.Shared.Serialization.Manager.Attributes;
 using Robust.Shared.Utility;
@@ -34,7 +35,7 @@ namespace Robust.Shared.Physics.Collision.Shapes
 {
     [Serializable, NetSerializable]
     [DataDefinition]
-    public sealed class PolygonShape : IPhysShape, ISerializationHooks, IApproxEquatable<PolygonShape>
+    public sealed class PolygonShape : IPhysShape, IApproxEquatable<PolygonShape>
     {
         [ViewVariables]
         public int VertexCount => Vertices.Length;
@@ -43,10 +44,10 @@ namespace Robust.Shared.Physics.Collision.Shapes
         /// This is public so engine code can manipulate it directly.
         /// NOTE! If you wish to manipulate this then you need to update the normals and centroid yourself!
         /// </summary>
-        [DataField("vertices")]
+        [DataField("vertices", customTypeSerializer:typeof(PolygonVerticesSerializer))]
         public Vector2[] Vertices = Array.Empty<Vector2>();
 
-        [ViewVariables]
+        [ViewVariables, DataField("normals")]
         public Vector2[] Normals = Array.Empty<Vector2>();
 
         [ViewVariables]
@@ -83,9 +84,9 @@ namespace Robust.Shared.Physics.Collision.Shapes
             SetVertices(verts);
         }
 
-        public void SetVertices(Span<Vector2> vertices)
+        public void SetVertices(Span<Vector2> vertices, IConfigurationManager? configManager = null)
         {
-            var configManager = IoCManager.Resolve<IConfigurationManager>();
+            IoCManager.Resolve(ref configManager);
             DebugTools.Assert(vertices.Length >= 3 && vertices.Length <= configManager.GetCVar(CVars.MaxPolygonVertices));
             SetVertices(vertices, configManager.GetCVar(CVars.ConvexHullPolygons));
         }
