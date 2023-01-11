@@ -278,8 +278,7 @@ namespace Robust.Client.Graphics.Clyde
             DrawQuadWithVao(QuadVAO, a, b, modelMatrix, program);
         }
 
-        private void DrawQuadWithVao(GLHandle vao, Vector2 a, Vector2 b, in Matrix3 modelMatrix,
-            GLShaderProgram program)
+        private void DrawQuadWithVao(GLHandle vao, Vector2 a, Vector2 b, in Matrix3 modelMatrix, GLShaderProgram program)
         {
             BindVertexArray(vao.Handle);
             CheckGlError();

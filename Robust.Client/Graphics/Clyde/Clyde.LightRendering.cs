@@ -423,88 +423,15 @@ namespace Robust.Client.Graphics.Clyde
             GL.StencilOp(TKStencilOp.Keep, TKStencilOp.Keep, TKStencilOp.Keep);
             CheckGlError();
 
-            var lastRange = float.NaN;
-            var lastPower = float.NaN;
-            var lastColor = new Color(float.NaN, float.NaN, float.NaN, float.NaN);
-            var lastSoftness = float.NaN;
-            Texture? lastMask = null;
-
             using (_prof.Group("Draw Lights"))
             {
-                for (var i = 0; i < count; i++)
-                {
-                    var (component, lightPos, _) = lights[i];
-
-                    var transform = _entityManager.GetComponent<TransformComponent>(component.Owner);
-
-                    Texture? mask = null;
-                    var rotation = Angle.Zero;
-                    if (component.Mask != null)
-                    {
-                        mask = component.Mask;
-                        rotation = component.Rotation;
-
-                        if (component.MaskAutoRotate)
-                        {
-                            rotation += transform.WorldRotation;
-                        }
-                    }
-
-                    var maskTexture = mask ?? Texture.White;
-                    if (lastMask != maskTexture)
-                    {
-                        SetTexture(TextureUnit.Texture0, maskTexture);
-                        lastMask = maskTexture;
-                        lightShader.SetUniformTextureMaybe(UniIMainTexture, TextureUnit.Texture0);
-                    }
-
-                    if (!MathHelper.CloseToPercent(lastRange, component.Radius))
-                    {
-                        lastRange = component.Radius;
-                        lightShader.SetUniformMaybe("lightRange", lastRange);
-                    }
-
-                    if (!MathHelper.CloseToPercent(lastPower, component.Energy))
-                    {
-                        lastPower = component.Energy;
-                        lightShader.SetUniformMaybe("lightPower", lastPower);
-                    }
-
-                    if (lastColor != component.Color)
-                    {
-                        lastColor = component.Color;
-                        lightShader.SetUniformMaybe("lightColor", lastColor);
-                    }
-
-                    if (_enableSoftShadows && !MathHelper.CloseToPercent(lastSoftness, component.Softness))
-                    {
-                        lastSoftness = component.Softness;
-                        lightShader.SetUniformMaybe("lightSoftness", lastSoftness);
-                    }
-
-                    lightShader.SetUniformMaybe("lightCenter", lightPos);
-                    lightShader.SetUniformMaybe("lightIndex",
-                        component.CastShadows ? (i + 0.5f) / ShadowTexture.Height : -1);
-
-                    var offset = new Vector2(component.Radius, component.Radius);
-
-                    Matrix3 matrix;
-                    if (mask == null)
-                    {
-                        matrix = Matrix3.Identity;
-                    }
-                    else
-                    {
-                        // Only apply rotation if a mask is said, because else it doesn't matter.
-                        matrix = Matrix3.CreateRotation(rotation);
-                    }
-
-                    (matrix.R0C2, matrix.R1C2) = lightPos;
-
-                    _drawQuad(-offset, offset, matrix, lightShader);
-
-                    _debugStats.TotalLights += 1;
-                }
+                var lastRange = float.NaN;
+                var lastPower = float.NaN;
+                var lastColor = new Color(float.NaN, float.NaN, float.NaN, float.NaN);
+                var lastSoftness = float.NaN;
+                Texture? lastMask = null;
+                DrawPointLights(count, lights, ref lastMask, ref lastRange, ref lastPower, ref lastColor, ref lastSoftness, lightShader);
+                DrawTileLights(mapId, worldAABB, ref lastMask, ref lastRange, ref lastPower, ref lastColor, ref lastSoftness, lightShader);
             }
 
             ResetBlendFunc();
@@ -533,6 +460,156 @@ namespace Robust.Client.Graphics.Clyde
             Array.Clear(lights, 0, count);
 
             _lightingReady = true;
+        }
+
+        private void DrawPointLights(
+            int count,
+            (PointLightComponent light, Vector2 pos, float distanceSquared)[] lights,
+            ref Texture? lastMask,
+            ref float lastRange,
+            ref float lastPower,
+            ref Color lastColor,
+            ref float lastSoftness,
+            GLShaderProgram lightShader)
+        {
+            for (var i = 0; i < count; i++)
+            {
+                var (component, lightPos, _) = lights[i];
+
+                var transform = _entityManager.GetComponent<TransformComponent>(component.Owner);
+
+                Texture? mask = null;
+                var rotation = Angle.Zero;
+                if (component.Mask != null)
+                {
+                    mask = component.Mask;
+                    rotation = component.Rotation;
+
+                    if (component.MaskAutoRotate)
+                    {
+                        rotation += transform.WorldRotation;
+                    }
+                }
+
+                var maskTexture = mask ?? Texture.White;
+                if (lastMask != maskTexture)
+                {
+                    SetTexture(TextureUnit.Texture0, maskTexture);
+                    lastMask = maskTexture;
+                    lightShader.SetUniformTextureMaybe(UniIMainTexture, TextureUnit.Texture0);
+                }
+
+                if (!MathHelper.CloseToPercent(lastRange, component.Radius))
+                {
+                    lastRange = component.Radius;
+                    lightShader.SetUniformMaybe("lightRange", lastRange);
+                }
+
+                if (!MathHelper.CloseToPercent(lastPower, component.Energy))
+                {
+                    lastPower = component.Energy;
+                    lightShader.SetUniformMaybe("lightPower", lastPower);
+                }
+
+                if (lastColor != component.Color)
+                {
+                    lastColor = component.Color;
+                    lightShader.SetUniformMaybe("lightColor", lastColor);
+                }
+
+                if (_enableSoftShadows && !MathHelper.CloseToPercent(lastSoftness, component.Softness))
+                {
+                    lastSoftness = component.Softness;
+                    lightShader.SetUniformMaybe("lightSoftness", lastSoftness);
+                }
+
+                lightShader.SetUniformMaybe("lightCenter", lightPos);
+                lightShader.SetUniformMaybe("lightIndex",
+                    component.CastShadows ? (i + 0.5f) / ShadowTexture.Height : -1);
+
+                var offset = new Vector2(component.Radius, component.Radius);
+
+                Matrix3 matrix;
+                if (mask == null)
+                {
+                    matrix = Matrix3.Identity;
+                }
+                else
+                {
+                    // Only apply rotation if a mask is said, because else it doesn't matter.
+                    matrix = Matrix3.CreateRotation(rotation);
+                }
+
+                (matrix.R0C2, matrix.R1C2) = lightPos;
+
+                _drawQuad(-offset, offset, matrix, lightShader);
+
+                _debugStats.TotalLights += 1;
+            }
+        }
+
+        private void DrawTileLights(
+            MapId mapId,
+            Box2 worldAABB,
+            ref Texture? lastMask,
+            ref float lastRange,
+            ref float lastPower,
+            ref Color lastColor,
+            ref float lastSoftness,
+            GLShaderProgram lightShader)
+        {
+            // TODO: Do the diff stuff
+            _sawmillOgl.Debug($"Drawing tile lights");
+
+            foreach (var grid in _mapManager.FindGridsIntersecting(mapId, worldAABB))
+            {
+                lightShader.SetUniformMaybe("lightRange", (float) grid.TileSize);
+
+                var worldMatrix = _entityManager.GetComponent<TransformComponent>(grid.Owner).WorldMatrix;
+                var tileDimensions = new Vector2(grid.TileSize / 2f, grid.TileSize / 2f);
+
+                foreach (var tile in grid.GetTilesIntersecting(worldAABB))
+                {
+                    var position = (Vector2)tile.GridIndices;
+
+                    Texture? mask = null;
+                    var maskTexture = mask ?? Texture.White;
+                    if (lastMask != maskTexture)
+                    {
+                        SetTexture(TextureUnit.Texture0, maskTexture);
+                        lightShader.SetUniformTextureMaybe(UniIMainTexture, TextureUnit.Texture0);
+                    }
+
+                    if (!MathHelper.CloseToPercent(lastRange, grid.TileSize))
+                    {
+                        lastRange = grid.TileSize;
+                        lightShader.SetUniformMaybe("lightRange", lastRange);
+                    }
+
+                    if (!MathHelper.CloseToPercent(lastPower, 1.5f))
+                    {
+                        lastPower = 1.5f;
+                        lightShader.SetUniformMaybe("lightPower", lastPower);
+                    }
+
+                    if (lastColor != Color.White)
+                    {
+                        lastColor = Color.White;
+                        lightShader.SetUniformMaybe("lightColor", lastColor);
+                    }
+
+                    if (_enableSoftShadows && !MathHelper.CloseToPercent(lastSoftness, 1f))
+                    {
+                        lastSoftness = 1f;
+                        lightShader.SetUniformMaybe("lightSoftness", lastSoftness);
+                    }
+
+                    lightShader.SetUniformMaybe("lightCenter", worldMatrix.Transform(position + grid.TileSize / 2f));
+                    lightShader.SetUniformMaybe("lightIndex", 0.5f);
+
+                    _drawQuad(position, position + tileDimensions * 2f, in worldMatrix, lightShader);
+                }
+            }
         }
 
         private ((PointLightComponent light, Vector2 pos, float distanceSquared)[] lights, int count, Box2
