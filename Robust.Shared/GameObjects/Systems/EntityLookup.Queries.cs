@@ -1,9 +1,12 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using Microsoft.Extensions.ObjectPool;
 using Robust.Shared.Collections;
 using Robust.Shared.Containers;
 using Robust.Shared.Map;
+using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics;
 using Robust.Shared.Physics.Dynamics;
@@ -18,6 +21,9 @@ public sealed partial class EntityLookupSystem
      */
 
     // Internal API messy for now but mainly want external to be fairly stable for a while and optimise it later.
+
+    private readonly ObjectPool<HashSet<EntityUid>> _queryPool =
+        new DefaultObjectPool<HashSet<EntityUid>>(new SetPolicy<EntityUid>(), 64);
 
     #region Private
 
@@ -353,6 +359,59 @@ public sealed partial class EntityLookupSystem
         return AnyEntitiesIntersecting(mapUid, worldAABB, flags, lookupQuery, xformQuery);
     }
 
+    public void GetEntitiesIntersectingCallback(EntityUidQueryCallback callback, MapId mapId, Box2 worldAABB, LookupFlags flags = DefaultFlags)
+    {
+        if (mapId == MapId.Nullspace) return;
+
+        var lookupQuery = GetEntityQuery<BroadphaseComponent>();
+        var xformQuery = GetEntityQuery<TransformComponent>();
+
+        var intersecting = _queryPool.Get();
+
+        // Get grid entities
+        var state = (this, intersecting, worldAABB, flags, lookupQuery, xformQuery);
+
+        _mapManager.FindGridsIntersectingApprox(mapId, worldAABB, ref state,
+            static (MapGridComponent grid,
+                ref (EntityLookupSystem system,
+                    HashSet<EntityUid> intersecting,
+                    Box2 worldAABB,
+                    LookupFlags flags,
+                    EntityQuery<BroadphaseComponent> lookupQuery,
+                    EntityQuery<TransformComponent> xformQuery) tuple) =>
+            {
+                tuple.system.AddEntitiesIntersecting(grid.Owner, tuple.intersecting, tuple.worldAABB, tuple.flags, tuple.lookupQuery, tuple.xformQuery);
+
+                if ((tuple.flags & LookupFlags.Static) != 0x0)
+                {
+                    foreach (var uid in grid.GetAnchoredEntities(tuple.worldAABB))
+                    {
+                        if (tuple.system.Deleted(uid))
+                        {
+                            DebugTools.Assert(false);
+                            continue;
+                        }
+
+                        tuple.intersecting.Add(uid);
+                    }
+                }
+
+                return true;
+            });
+
+        // Get map entities
+        var mapUid = _mapManager.GetMapEntityId(mapId);
+        AddEntitiesIntersecting(mapUid, intersecting, worldAABB, flags, lookupQuery, xformQuery);
+        AddContained(intersecting, flags, xformQuery);
+
+        foreach (var uid in intersecting)
+        {
+            callback(uid);
+        }
+
+        _queryPool.Return(intersecting);
+    }
+
     public HashSet<EntityUid> GetEntitiesIntersecting(MapId mapId, Box2 worldAABB, LookupFlags flags = DefaultFlags)
     {
         if (mapId == MapId.Nullspace) return new HashSet<EntityUid>();
@@ -474,6 +533,7 @@ public sealed partial class EntityLookupSystem
         return AnyEntitiesIntersecting(mapUid, worldAABB, flags, lookupQuery, xformQuery, uid);
     }
 
+    [Obsolete("Use the callback version and check the uid yourself")]
     public HashSet<EntityUid> GetEntitiesInRange(EntityUid uid, float range, LookupFlags flags = DefaultFlags)
     {
         var mapPos = Transform(uid).MapPosition;
@@ -570,8 +630,19 @@ public sealed partial class EntityLookupSystem
 
     #region MapId
 
+    public void GetEntitiesInRangeCallback(EntityUidQueryCallback callback, MapId mapId, Vector2 worldPos, float range, LookupFlags flags = DefaultFlags)
+    {
+        DebugTools.Assert(range > 0, "Range must be a positive float");
+
+        if (mapId == MapId.Nullspace) return;
+
+        // TODO: Actual circles
+        var worldAABB = new Box2(worldPos - range, worldPos + range);
+        GetEntitiesIntersectingCallback(callback, mapId, worldAABB, flags);
+    }
+
     public HashSet<EntityUid> GetEntitiesInRange(MapId mapId, Vector2 worldPos, float range,
-        LookupFlags flags = DefaultFlags)
+            LookupFlags flags = DefaultFlags)
     {
         DebugTools.Assert(range > 0, "Range must be a positive float");
 
