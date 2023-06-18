@@ -130,6 +130,9 @@ namespace Robust.Shared.Map
 
         void FindGridsIntersecting<TState>(MapId mapId, Box2 worldAABB, ref TState state, GridCallback<TState> callback, bool approx = false, bool includeMap = true);
 
+        void FindGridsIntersecting<TState>(MapId mapId, Box2Rotated worldBounds, ref TState state, GridCallback<TState> callback, bool approx = false, bool includeMap = true);
+
+
         /// <summary>
         /// Returns the grids intersecting this AABB.
         /// </summary>
