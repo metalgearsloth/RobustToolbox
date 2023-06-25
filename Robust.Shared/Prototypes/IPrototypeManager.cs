@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using Robust.Shared.Random;
 using Robust.Shared.Serialization.Markdown;
 using Robust.Shared.Serialization.Markdown.Mapping;
 using Robust.Shared.Serialization.Markdown.Validation;
@@ -26,6 +27,10 @@ public interface IPrototypeManager
     /// Returns an <see cref="IEnumerable{T}"/> of all registered prototype kinds by their ID.
     /// </summary>
     IEnumerable<string> GetPrototypeKinds();
+
+    T Random<T>(IRobustRandom random) where T : class, IPrototype;
+
+    T Random<T>(System.Random random) where T : class, IPrototype;
 
     /// <summary>
     /// Returns the count of the specified prototype.

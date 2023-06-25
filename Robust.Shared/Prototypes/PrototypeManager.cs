@@ -63,6 +63,26 @@ namespace Robust.Shared.Prototypes
             return _kindNames.Keys;
         }
 
+        public T Random<T>(IRobustRandom random) where T : class, IPrototype
+        {
+            var count = Count<T>();
+            var index = random.Next(count);
+            return Random<T>(index);
+        }
+
+        public T Random<T>(System.Random random) where T : class, IPrototype
+        {
+            var count = Count<T>();
+            var index = random.Next(count);
+            return Random<T>(index);
+        }
+
+        private T Random<T>(int index) where T : class, IPrototype
+        {
+            var data = _kinds[typeof(T)].Instances;
+            return (T) data.Values.ElementAt(index);
+        }
+
         /// <inheritdoc />
         public int Count<T>() where T : class, IPrototype
         {
