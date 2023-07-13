@@ -1282,11 +1282,9 @@ namespace Robust.Shared.GameObjects
             }
             else
             {
-                var metaQuery = GetEntityQuery<MetaDataComponent>();
-
                 foreach (var comp in comps.Values)
                 {
-                    if (comp.Deleted || !metaQuery.TryGetComponent(comp.Owner, out var meta) || meta.EntityPaused) continue;
+                    if (comp.Deleted || !_metaQuery.TryGetComponent(comp.Owner, out var meta) || meta.EntityPaused) continue;
 
                     yield return comp;
                 }
