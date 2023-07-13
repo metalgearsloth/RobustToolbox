@@ -189,11 +189,11 @@ public sealed partial class EntityLookupSystem
 
             // Get map entities
             var mapUid = _mapManager.GetMapEntityId(mapId);
-            AddComponentsIntersecting(mapUid, intersecting, worldAABB, flags, query);
+            AddComponentsIntersecting(mapUid, callback, worldAABB, flags, query);
             AddContained(intersecting, flags, query);
         }
 
-        return intersecting.Count > 0;
+        return false;
     }
 
     public void GetComponentsIntersecting(Type type, MapId mapId, Box2 worldAABB, ComponentQueryCallback callback, LookupFlags flags = DefaultFlags)
@@ -245,15 +245,18 @@ public sealed partial class EntityLookupSystem
         {
             var query = AllEntityQuery<T, TransformComponent>();
 
-            while (query.MoveNext(out var comp, out var xform))
+            while (query.MoveNext(out var uid, out var comp, out var xform))
             {
                 if (xform.MapID != mapId || !worldAABB.Contains(_transform.GetWorldPosition(xform))) continue;
-                intersecting.Add(comp);
+                callback(uid, comp);
             }
         }
         else
         {
             var query = GetEntityQuery<T>();
+            var state = (callback, worldAABB, flags, query);
+
+            _mapManager.FindGridsIntersecting(mapId, worldAABB, ref state, )
 
             // Get grid entities
             foreach (var grid in _mapManager.FindGridsIntersecting(mapId, worldAABB))
