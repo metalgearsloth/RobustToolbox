@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using Robust.Shared.Threading;
 
 namespace Robust.UnitTesting;
@@ -8,6 +9,7 @@ namespace Robust.UnitTesting;
 /// </summary>
 public sealed class TestingParallelManager : IParallelManager
 {
+    public ParallelOptions Options { get; } = new();
     public event Action? ParallelCountChanged;
     public int ParallelProcessCount => 1;
     public void AddAndInvokeParallelCountChanged(Action changed)

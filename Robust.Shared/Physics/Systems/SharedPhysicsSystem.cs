@@ -63,6 +63,7 @@ namespace Robust.Shared.Physics.Systems
         public bool MetricsEnabled { get; protected set; }
 
         private EntityQuery<FixturesComponent> _fixturesQuery;
+        private EntityQuery<MetaDataComponent> _metaQuery;
         protected EntityQuery<PhysicsComponent> PhysicsQuery;
         private EntityQuery<TransformComponent> _xformQuery;
 
@@ -71,6 +72,7 @@ namespace Robust.Shared.Physics.Systems
             base.Initialize();
 
             _fixturesQuery = GetEntityQuery<FixturesComponent>();
+            _metaQuery = GetEntityQuery<MetaDataComponent>();
             PhysicsQuery = GetEntityQuery<PhysicsComponent>();
             _xformQuery = GetEntityQuery<TransformComponent>();
 

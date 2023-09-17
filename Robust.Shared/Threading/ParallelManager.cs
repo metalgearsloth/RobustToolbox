@@ -10,6 +10,8 @@ namespace Robust.Shared.Threading;
 
 public interface IParallelManager
 {
+    ParallelOptions Options { get; }
+
     event Action ParallelCountChanged;
 
     int ParallelProcessCount { get; }
@@ -29,6 +31,8 @@ internal sealed class ParallelManager : IParallelManagerInternal
 {
     [Dependency] private readonly IConfigurationManager _cfg = default!;
 
+    public ParallelOptions Options { get; private set; } = new();
+
     public event Action? ParallelCountChanged;
     public int ParallelProcessCount { get; private set; }
 
@@ -47,6 +51,10 @@ internal sealed class ParallelManager : IParallelManagerInternal
     {
         var oldCount = ParallelProcessCount;
         ParallelProcessCount = value == 0 ? Environment.ProcessorCount : value;
+        Options = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = ParallelProcessCount,
+        };
 
         if (oldCount != ParallelProcessCount)
             ParallelCountChanged?.Invoke();
