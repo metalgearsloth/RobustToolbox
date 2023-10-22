@@ -1,8 +1,8 @@
-using Robust.Shared.GameStates;
 using Robust.Shared.IoC;
 using Robust.Shared.Map;
 using Robust.Shared.Physics;
 using Robust.Shared.Physics.Components;
+using Robust.Shared.Physics.Events;
 using Robust.Shared.Physics.Systems;
 
 namespace Robust.Shared.GameObjects
@@ -14,10 +14,10 @@ namespace Robust.Shared.GameObjects
         public override void Initialize()
         {
             base.Initialize();
-            SubscribeLocalEvent<CollisionWakeComponent, ComponentShutdown>(OnRemove);
 
-            SubscribeLocalEvent<CollisionWakeComponent, ComponentGetState>(OnGetState);
-            SubscribeLocalEvent<CollisionWakeComponent, ComponentHandleState>(OnHandleState);
+            SubscribeLocalEvent<CollisionWakeComponent, StartCollideEvent>(OnWakeStartCollide);
+            SubscribeLocalEvent<CollisionWakeComponent, EndCollideEvent>(OnWakeEndCollide);
+            SubscribeLocalEvent<CollisionWakeComponent, ComponentShutdown>(OnRemove);
 
             SubscribeLocalEvent<CollisionWakeComponent, PhysicsWakeEvent>(OnWake);
             SubscribeLocalEvent<CollisionWakeComponent, PhysicsSleepEvent>(OnSleep);
@@ -28,6 +28,27 @@ namespace Robust.Shared.GameObjects
             SubscribeLocalEvent<CollisionWakeComponent, EntParentChangedMessage>(OnParentChange);
         }
 
+        private void OnWakeStartCollide(Entity<CollisionWakeComponent> ent, ref StartCollideEvent args)
+        {
+            // Disable CollisionWake if there's a contact.
+            if (!ent.Comp.Enabled)
+                return;
+
+            ent.Comp.Enabled = false;
+            Dirty(ent);
+        }
+
+        private void OnWakeEndCollide(Entity<CollisionWakeComponent> entity, ref EndCollideEvent args)
+        {
+            // If collision ended check if we can re-apply CollisionWake.
+            if (entity.Comp.Enabled || !CanSleep(entity))
+                return;
+
+            entity.Comp.Enabled = true;
+            Dirty(entity);
+            UpdateCanCollide(entity, args.OurBody);
+        }
+
         public void SetEnabled(EntityUid uid, bool enabled, CollisionWakeComponent? component = null)
         {
             if (!Resolve(uid, ref component) || component.Enabled == enabled)
@@ -36,27 +57,35 @@ namespace Robust.Shared.GameObjects
             component.Enabled = enabled;
 
             if (component.Enabled)
-                UpdateCanCollide(uid, component);
+                UpdateCanCollide((uid, component));
             else if (TryComp(uid, out PhysicsComponent? physics))
                 _physics.SetCanCollide(uid, true, body: physics);
 
             Dirty(uid, component);
         }
 
-        private void OnHandleState(EntityUid uid, CollisionWakeComponent component, ref ComponentHandleState args)
+        /// <summary>
+        /// Returns whether CollisionWake can be applied.
+        /// </summary>
+        private bool CanSleep(Entity<CollisionWakeComponent> entity, PhysicsComponent? body = null, JointComponent? joints = null)
         {
-            if (args.Current is CollisionWakeComponent.CollisionWakeState state)
-                component.Enabled = state.Enabled;
+            if (Resolve(entity, ref body))
+            {
+                if (body.ContactCount > 0)
+                {
+                    return false;
+                }
+            }
 
-            // Note, this explicitly does not update PhysicsComponent.CanCollide. The physics component should perform
-            // its own state-handling logic. Additionally, if we wanted to set it you would have to ensure that things
-            // like the join-component and physics component have already handled their states, otherwise CanCollide may
-            // be set incorrectly and leave the client with a bad state.
-        }
+            if (Resolve(entity, ref joints, false))
+            {
+                if (joints.JointCount > 0)
+                {
+                    return false;
+                }
+            }
 
-        private void OnGetState(EntityUid uid, CollisionWakeComponent component, ref ComponentGetState args)
-        {
-            args.State = new CollisionWakeComponent.CollisionWakeState(component.Enabled);
+            return true;
         }
 
         private void OnRemove(EntityUid uid, CollisionWakeComponent component, ComponentShutdown args)
@@ -69,17 +98,22 @@ namespace Robust.Shared.GameObjects
             }
         }
 
-        private void OnParentChange(EntityUid uid, CollisionWakeComponent component, ref EntParentChangedMessage args)
+        private void OnParentChange(Entity<CollisionWakeComponent> entity, ref EntParentChangedMessage args)
         {
-            if (component.LifeStage < ComponentLifeStage.Initialized)
+            if (entity.Comp.LifeStage < ComponentLifeStage.Initialized)
                 return;
 
-            UpdateCanCollide(uid, component, xform: args.Transform);
+            UpdateCanCollide(entity, xform: args.Transform);
         }
 
         private void OnJointRemove(EntityUid uid, CollisionWakeComponent component, JointRemovedEvent args)
         {
-            UpdateCanCollide(uid, component, args.OurBody);
+            Entity<CollisionWakeComponent> entity = (uid, component);
+
+            if (!CanSleep(entity, args.OurBody))
+                return;
+
+            UpdateCanCollide(entity);
         }
 
         private void OnJointAdd(EntityUid uid, CollisionWakeComponent component, JointAddedEvent args)
@@ -89,41 +123,42 @@ namespace Robust.Shared.GameObjects
                 _physics.SetCanCollide(uid, true);
         }
 
-        private void OnWake(EntityUid uid, CollisionWakeComponent component, ref PhysicsWakeEvent args)
+        private void OnWake(Entity<CollisionWakeComponent> entity, ref PhysicsWakeEvent args)
         {
-            UpdateCanCollide(uid, component, args.Body, checkTerminating: false);
+            UpdateCanCollide(entity, args.Body, checkTerminating: false);
         }
 
-        private void OnSleep(EntityUid uid, CollisionWakeComponent component, ref PhysicsSleepEvent args)
+        private void OnSleep(Entity<CollisionWakeComponent> entity, ref PhysicsSleepEvent args)
         {
-            UpdateCanCollide(uid, component, args.Body);
+            UpdateCanCollide(entity, args.Body);
         }
 
         private void UpdateCanCollide(
-            EntityUid uid,
-            CollisionWakeComponent component,
+            Entity<CollisionWakeComponent> entity,
             PhysicsComponent? body = null,
             TransformComponent? xform = null,
             bool checkTerminating = true,
             bool dirty = true)
         {
-            if (!component.Enabled)
+            if (!entity.Comp.Enabled)
                 return;
 
-            if (checkTerminating && Terminating(uid))
+            if (checkTerminating && Terminating(entity))
                 return;
 
-            if (!Resolve(uid, ref body, false) ||
-                !Resolve(uid, ref xform) ||
+            if (!Resolve(entity, ref body, ref xform, false) ||
                 xform.MapID == MapId.Nullspace)
+            {
                 return;
+            }
 
             // If we're attached to the map we'll also just never disable collision due to how grid movement works.
             var canCollide = body.Awake ||
-                              (TryComp(uid, out JointComponent? jointComponent) && jointComponent.JointCount > 0) ||
+                             body.ContactCount > 0 ||
+                              (TryComp(entity, out JointComponent? jointComponent) && jointComponent.JointCount > 0) ||
                               xform.GridUid == null;
 
-            _physics.SetCanCollide(uid, canCollide, dirty, body: body);
+            _physics.SetCanCollide(entity, canCollide, dirty, body: body);
         }
     }
 }

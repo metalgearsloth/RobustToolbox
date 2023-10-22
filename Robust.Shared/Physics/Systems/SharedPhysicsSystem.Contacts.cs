@@ -324,6 +324,22 @@ public abstract partial class SharedPhysicsSystem
         var bUid = contact.EntityB;
         contact.Flags |= ContactFlags.Deleting;
 
+        // Do these up front so ContactCount is correct.
+
+        // Remove from the world
+        _activeContacts.Remove(contact.MapNode);
+
+        // Remove from body 1
+        DebugTools.Assert(fixtureA.Contacts.ContainsKey(fixtureB));
+        fixtureA.Contacts.Remove(fixtureB);
+        DebugTools.Assert(bodyA.Contacts.Contains(contact.BodyANode!.Value));
+        bodyA.Contacts.Remove(contact.BodyANode);
+
+        // Remove from body 2
+        DebugTools.Assert(fixtureB.Contacts.ContainsKey(fixtureA));
+        fixtureB.Contacts.Remove(fixtureA);
+        bodyB.Contacts.Remove(contact.BodyBNode);
+
         if (contact.IsTouching)
         {
             var ev1 = new EndCollideEvent(aUid, bUid, contact.FixtureAId, contact.FixtureBId ,fixtureA, fixtureB, bodyA, bodyB);
@@ -340,20 +356,6 @@ public abstract partial class SharedPhysicsSystem
             if (bodyB.CanCollide)
                 SetAwake(bUid, bodyB, true);
         }
-
-        // Remove from the world
-        _activeContacts.Remove(contact.MapNode);
-
-        // Remove from body 1
-        DebugTools.Assert(fixtureA.Contacts.ContainsKey(fixtureB));
-        fixtureA.Contacts.Remove(fixtureB);
-        DebugTools.Assert(bodyA.Contacts.Contains(contact.BodyANode!.Value));
-        bodyA.Contacts.Remove(contact.BodyANode);
-
-        // Remove from body 2
-        DebugTools.Assert(fixtureB.Contacts.ContainsKey(fixtureA));
-        fixtureB.Contacts.Remove(fixtureA);
-        bodyB.Contacts.Remove(contact.BodyBNode);
 
         // Insert into the pool.
         _contactPool.Return(contact);
