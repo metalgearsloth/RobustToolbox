@@ -11,7 +11,7 @@ namespace Robust.Server.GameObjects
     /// <summary>
     ///     Server side processing of incoming user commands.
     /// </summary>
-    public sealed class InputSystem : SharedInputSystem
+    public sealed partial class InputSystem : SharedInputSystem
     {
         [Dependency] private readonly IPlayerManager _playerManager = default!;
 
@@ -57,6 +57,8 @@ namespace Robust.Server.GameObjects
             var states = GetInputStates(session);
             states.SetState(function, msg.State);
 
+            ValidateInput(eventArgs.SenderSession, msg.Tick, msg.InputFunctionId);
+
             // route the cmdMessage to the proper bind
             //Client Sanitization: unbound command, just ignore
             foreach (var handler in BindRegistry.GetHandlers(function))
@@ -80,11 +82,13 @@ namespace Robust.Server.GameObjects
             switch (args.NewStatus)
             {
                 case SessionStatus.Connected:
+                    _lastValidatedInputs.Add(args.Session, new InputValidator());
                     _playerInputs.Add(args.Session, new PlayerCommandStates());
                     _lastProcessedInputCmd.Add(args.Session, 0);
                     break;
 
                 case SessionStatus.Disconnected:
+                    _lastValidatedInputs.Remove(args.Session);
                     _playerInputs.Remove(args.Session);
                     _lastProcessedInputCmd.Remove(args.Session);
                     break;
