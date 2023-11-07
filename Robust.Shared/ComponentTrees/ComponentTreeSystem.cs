@@ -190,9 +190,9 @@ public abstract class ComponentTreeSystem<TTreeComp, TComp> : EntitySystem
             if (comp.TreeUid == newTree)
             {
                 (pos, rot) = XformSystem.GetRelativePositionRotation(
-                    entry.Transform,
+                    entry.Uid,
                     newTree!.Value,
-                    xforms);
+                    entry.Transform);
 
                 newTreeComp!.Tree.Update(entry, ExtractAabb(entry, pos, rot));
                 continue;
@@ -207,9 +207,9 @@ public abstract class ComponentTreeSystem<TTreeComp, TComp> : EntitySystem
             comp.Tree = newTreeComp.Tree;
 
             (pos, rot) = XformSystem.GetRelativePositionRotation(
-                entry.Transform,
+                entry.Uid,
                 newTree!.Value,
-                xforms);
+                entry.Transform);
 
             newTreeComp.Tree.Add(entry, ExtractAabb(entry, pos, rot));
         }

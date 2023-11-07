@@ -59,6 +59,7 @@ namespace Robust.Shared.GameObjects
                 return _localMatrix;
             }
         }
+
         public Matrix3 InvLocalMatrix
         {
             get
@@ -415,7 +416,7 @@ namespace Robust.Shared.GameObjects
         [Obsolete("Use TransformSystem.SetParent() instead")]
         public void AttachParent(TransformComponent newParent)
         {
-            _entMan.EntitySysManager.GetEntitySystem<SharedTransformSystem>().SetParent(Owner, this, newParent.Owner, newParent);
+            _entMan.EntitySysManager.GetEntitySystem<SharedTransformSystem>().SetParent(Owner, newParent.Owner, this, newParent);
         }
 
         internal void ChangeMapId(MapId newMapId, EntityQuery<TransformComponent> xformQuery)
@@ -463,130 +464,6 @@ namespace Robust.Shared.GameObjects
                     concrete.UpdateChildMapIdsRecursive(newMapId, newUid, mapPaused, xformQuery, metaQuery, system);
                 }
             }
-        }
-
-        [Obsolete("Use TransformSystem.SetParent() instead")]
-        public void AttachParent(EntityUid parent)
-        {
-            _entMan.EntitySysManager.GetEntitySystem<SharedTransformSystem>().SetParent(Owner, this, parent, _entMan.GetEntityQuery<TransformComponent>());
-        }
-
-        /// <summary>
-        /// Get the WorldPosition and WorldRotation of this entity faster than each individually.
-        /// </summary>
-        [Obsolete("Use the system method instead")]
-        public (Vector2 WorldPosition, Angle WorldRotation) GetWorldPositionRotation()
-        {
-            // Worldmatrix needs calculating anyway for worldpos so we'll just drop it.
-            var (worldPos, worldRot, _) = GetWorldPositionRotationMatrix();
-            return (worldPos, worldRot);
-        }
-
-        /// <see cref="GetWorldPositionRotation()"/>
-        [Obsolete("Use the system method instead")]
-        public (Vector2 WorldPosition, Angle WorldRotation) GetWorldPositionRotation(EntityQuery<TransformComponent> xforms)
-        {
-            var (worldPos, worldRot, _) = GetWorldPositionRotationMatrix(xforms);
-            return (worldPos, worldRot);
-        }
-
-        /// <summary>
-        /// Get the WorldPosition, WorldRotation, and WorldMatrix of this entity faster than each individually.
-        /// </summary>
-        [Obsolete("Use the system method instead")]
-        public (Vector2 WorldPosition, Angle WorldRotation, Matrix3 WorldMatrix) GetWorldPositionRotationMatrix(EntityQuery<TransformComponent> xforms)
-        {
-            var parent = _parent;
-            var worldRot = _localRotation;
-            var worldMatrix = LocalMatrix;
-
-            // By doing these all at once we can elide multiple IsValid + GetComponent calls
-            while (parent.IsValid())
-            {
-                var xform = xforms.GetComponent(parent);
-                worldRot += xform.LocalRotation;
-                var parentMatrix = xform.LocalMatrix;
-                Matrix3.Multiply(in worldMatrix, in parentMatrix, out var result);
-                worldMatrix = result;
-                parent = xform.ParentUid;
-            }
-
-            var worldPosition = new Vector2(worldMatrix.R0C2, worldMatrix.R1C2);
-
-            return (worldPosition, worldRot, worldMatrix);
-        }
-
-        /// <summary>
-        /// Get the WorldPosition, WorldRotation, and WorldMatrix of this entity faster than each individually.
-        /// </summary>
-        [Obsolete("Use the system method instead")]
-        public (Vector2 WorldPosition, Angle WorldRotation, Matrix3 WorldMatrix) GetWorldPositionRotationMatrix()
-        {
-            var xforms = _entMan.GetEntityQuery<TransformComponent>();
-            return GetWorldPositionRotationMatrix(xforms);
-        }
-
-        /// <summary>
-        /// Get the WorldPosition, WorldRotation, and InvWorldMatrix of this entity faster than each individually.
-        /// </summary>
-        [Obsolete("Use the system method instead")]
-        public (Vector2 WorldPosition, Angle WorldRotation, Matrix3 InvWorldMatrix) GetWorldPositionRotationInvMatrix()
-        {
-            var xformQuery = _entMan.GetEntityQuery<TransformComponent>();
-            return GetWorldPositionRotationInvMatrix(xformQuery);
-        }
-
-        /// <summary>
-        /// Get the WorldPosition, WorldRotation, and InvWorldMatrix of this entity faster than each individually.
-        /// </summary>
-        [Obsolete("Use the system method instead")]
-        public (Vector2 WorldPosition, Angle WorldRotation, Matrix3 InvWorldMatrix) GetWorldPositionRotationInvMatrix(EntityQuery<TransformComponent> xformQuery)
-        {
-            var (worldPos, worldRot, _, invWorldMatrix) = GetWorldPositionRotationMatrixWithInv(xformQuery);
-            return (worldPos, worldRot, invWorldMatrix);
-        }
-
-        /// <summary>
-        /// Get the WorldPosition, WorldRotation, WorldMatrix, and InvWorldMatrix of this entity faster than each individually.
-        /// </summary>
-        [Obsolete("Use the system method instead")]
-        public (Vector2 WorldPosition, Angle WorldRotation, Matrix3 WorldMatrix, Matrix3 InvWorldMatrix) GetWorldPositionRotationMatrixWithInv()
-        {
-            var xformQuery = _entMan.GetEntityQuery<TransformComponent>();
-            return GetWorldPositionRotationMatrixWithInv(xformQuery);
-        }
-
-        /// <summary>
-        /// Get the WorldPosition, WorldRotation, WorldMatrix, and InvWorldMatrix of this entity faster than each individually.
-        /// </summary>
-        [Obsolete("Use the system method instead")]
-        public (Vector2 WorldPosition, Angle WorldRotation, Matrix3 WorldMatrix, Matrix3 InvWorldMatrix) GetWorldPositionRotationMatrixWithInv(EntityQuery<TransformComponent> xformQuery)
-        {
-            var parent = _parent;
-            var worldRot = _localRotation;
-            var invMatrix = InvLocalMatrix;
-            var worldMatrix = LocalMatrix;
-
-            // By doing these all at once we can avoid multiple IsValid + GetComponent calls
-            while (parent.IsValid())
-            {
-                var xform = xformQuery.GetComponent(parent);
-                worldRot += xform.LocalRotation;
-
-                var parentMatrix = xform.LocalMatrix;
-                Matrix3.Multiply(in worldMatrix, in parentMatrix, out var result);
-                worldMatrix = result;
-
-                var parentInvMatrix = xform.InvLocalMatrix;
-                Matrix3.Multiply(in parentInvMatrix, in invMatrix, out var invResult);
-                invMatrix = invResult;
-
-                parent = xform.ParentUid;
-            }
-
-            var worldPosition = new Vector2(worldMatrix.R0C2, worldMatrix.R1C2);
-
-            return (worldPosition, worldRot, worldMatrix, invMatrix);
         }
 
         public void RebuildMatrices()

@@ -61,7 +61,7 @@ internal sealed class TeleportCommand : LocalizedCommands
         else
         {
             var mapEnt = _map.GetMapEntityIdOrThrow(mapId);
-            xformSystem.SetWorldPosition(transform, position);
+            xformSystem.SetWorldPosition(entity, position, transform);
             xformSystem.SetParent(entity, transform, mapEnt);
         }
 
