@@ -183,11 +183,10 @@ namespace Robust.Shared
             CVarDef.Create("net.pvs", true, CVar.ARCHIVE | CVar.REPLICATED | CVar.SERVER);
 
         /// <summary>
-        /// View size to take for PVS calculations,
-        /// as the size of the sides of a square centered on the view points of clients.
+        /// Additional range from the client's viewport for PVS.
         /// </summary>
-        public static readonly CVarDef<float> NetMaxUpdateRange =
-            CVarDef.Create("net.maxupdaterange", 12.5f, CVar.ARCHIVE | CVar.REPLICATED | CVar.SERVER);
+        public static readonly CVarDef<float> NetBufferRange =
+            CVarDef.Create("net.pvs_buffer_range", 3f, CVar.ARCHIVE | CVar.REPLICATED | CVar.SERVER);
 
         /// <summary>
         /// Maximum allowed delay between the current tick and a client's last acknowledged tick before we send the

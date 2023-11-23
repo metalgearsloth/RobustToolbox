@@ -57,9 +57,9 @@ internal sealed partial class PvsSystem : EntitySystem
     public bool CullingEnabled { get; private set; }
 
     /// <summary>
-    /// Size of the side of the view bounds square.
+    /// Buffer size of the side of the view bounds square.
     /// </summary>
-    private float _viewSize;
+    private float _viewBufferSize;
 
     /// <summary>
     /// If PVS disabled then we'll track if we've dumped all entities on the player.
@@ -145,7 +145,7 @@ internal sealed partial class PvsSystem : EntitySystem
         EntityManager.EntityDeleted += OnEntityDeleted;
 
         _configManager.OnValueChanged(CVars.NetPVS, SetPvs, true);
-        _configManager.OnValueChanged(CVars.NetMaxUpdateRange, OnViewsizeChanged, true);
+        _configManager.OnValueChanged(CVars.NetBufferRange, OnViewsizeChanged, true);
         _configManager.OnValueChanged(CVars.NetForceAckThreshold, OnForceAckChanged, true);
 
         _serverGameStateManager.ClientAck += OnClientAck;
@@ -163,7 +163,7 @@ internal sealed partial class PvsSystem : EntitySystem
         EntityManager.EntityDeleted -= OnEntityDeleted;
 
         _configManager.UnsubValueChanged(CVars.NetPVS, SetPvs);
-        _configManager.UnsubValueChanged(CVars.NetMaxUpdateRange, OnViewsizeChanged);
+        _configManager.UnsubValueChanged(CVars.NetBufferRange, OnViewsizeChanged);
         _configManager.UnsubValueChanged(CVars.NetForceAckThreshold, OnForceAckChanged);
 
         _serverGameStateManager.ClientAck -= OnClientAck;
@@ -218,7 +218,7 @@ internal sealed partial class PvsSystem : EntitySystem
 
     private void OnViewsizeChanged(float obj)
     {
-        _viewSize = obj * 2;
+        _viewBufferSize = obj * 2;
     }
 
     private void OnForceAckChanged(int value)
@@ -1361,7 +1361,15 @@ Transform last modified: {Transform(uid).LastModifiedTick}");
     private (Vector2 worldPos, float range, MapId mapId) CalcViewBounds(in EntityUid euid)
     {
         var xform = _xformQuery.GetComponent(euid);
-        return (_transform.GetWorldPosition(xform, _xformQuery), _viewSize / 2f, xform.MapID);
+        var range = 10f;
+
+        if (_eyeQuery.TryGetComponent(euid, out var eyeComp))
+        {
+            // TODO: Box2 instead of worldpos + range, would also need to consider rotate
+            range = eyeComp.Zoom.X * 32f;
+        }
+
+        return (_transform.GetWorldPosition(xform, _xformQuery), range + _viewBufferSize, xform.MapID);
     }
 
     public sealed class TreePolicy<T> : PooledObjectPolicy<RobustTree<T>> where T : notnull

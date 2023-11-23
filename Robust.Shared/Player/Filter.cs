@@ -76,7 +76,7 @@ namespace Robust.Shared.Player
             if (!cfgMan.GetCVar(CVars.NetPVS))
                 return AddAllPlayers();
 
-            var pvsRange = cfgMan.GetCVar(CVars.NetMaxUpdateRange) * rangeMultiplier;
+            var pvsRange = cfgMan.GetCVar(CVars.NetBufferRange) * rangeMultiplier;
 
             return AddInRange(origin, pvsRange, playerMan, entManager);
         }
