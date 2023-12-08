@@ -185,6 +185,68 @@ namespace Robust.Shared.GameObjects
             return true;
         }
 
+        private void RecursiveGetChildren(EntityUid uid, EntityUid newId, Dictionary<EntityUid, EntityUid> remapped, List<EntityUid> remapOrder, TransformComponent xform)
+        {
+            remapped[uid] = newId;
+            remapOrder.Add(uid);
+
+            var enumerator = xform.ChildEnumerator;
+
+            while (enumerator.MoveNext(out var child))
+            {
+                var childXform = TransformQuery.GetComponent(child.Value);
+                var copiedChild = SpawnAtPosition(null, new EntityCoordinates(newId, childXform.LocalPosition));
+
+                RecursiveGetChildren(child.Value, copiedChild, remapped, remapOrder, childXform);
+            }
+        }
+
+        /// <summary>
+        /// Copies source entity over to the target entity, without modifying transformcomponent.
+        /// Note that this makes no guarantees that the target entity won't explode, use at your own risk.
+        /// </summary>
+        public void Copy(EntityUid target, EntityUid copyTarget)
+        {
+            DebugTools.Assert(EntityExists(target) && EntityExists(copyTarget));
+
+            // First we iterate all children that might need copying in the context.
+            // This won't be completely
+            var remapped = new Dictionary<EntityUid, EntityUid>();
+            // Copy top-down. Dictionaries do not guarantee ordering!
+            // Use the original UIDs so we don't need 2 dictionaries.
+            var remapOrder = new List<EntityUid>();
+
+            RecursiveGetChildren(target, copyTarget, remapped, remapOrder, TransformQuery.GetComponent(target));
+
+            var copyContext = new EntityCopyContext(remapped);
+
+            foreach (var ent in remapOrder)
+            {
+                var copy = remapped[ent];
+
+                foreach (var comp in GetComponents(ent))
+                {
+                    var compRef = _componentFactory.GetRegistration(comp);
+
+                    if (compRef.Type == typeof(TransformComponent))
+                        continue;
+
+                    // Protected
+                    if (compRef.Type == typeof(MetaDataComponent))
+                    {
+                        var meta = (IComponent) MetaQuery.GetComponent(copy);
+                        _serManager.CopyTo(comp, ref meta, notNullableOverride: true, context: copyContext);
+                        continue;
+                    }
+
+                    var targetComp = _componentFactory.GetComponent(compRef);
+
+                    _serManager.CopyTo(comp, ref targetComp, notNullableOverride: true, context: copyContext);
+                    AddComponent(copy, targetComp, overwrite: true);
+                }
+            }
+        }
+
         public virtual void Startup()
         {
             if(!Initialized)
