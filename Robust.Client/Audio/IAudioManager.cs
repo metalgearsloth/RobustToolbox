@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Robust.Client.Audio;
 
 /// <summary>
@@ -6,4 +8,8 @@ namespace Robust.Client.Audio;
 public interface IAudioManager
 {
     void SetMasterGain(float gain);
+
+    IEnumerable<string> GetAudioDevices();
+
+    bool SetAudioDevice(string? device);
 }

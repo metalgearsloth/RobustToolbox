@@ -394,6 +394,16 @@ internal abstract class BaseAudioSource : IAudioSource
 
     protected abstract void Dispose(bool disposing);
 
+    internal void SetSource(int sourceHandle)
+    {
+        SourceHandle = sourceHandle;
+    }
+
+    internal virtual bool ClearHandles()
+    {
+        return false;
+    }
+
     protected bool _isDisposed()
     {
         return SourceHandle == -1;

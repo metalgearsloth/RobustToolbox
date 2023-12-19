@@ -42,65 +42,17 @@ internal sealed partial class AudioManager : IAudioInternal
 
     internal ISawmill OpenALSawmill = default!;
 
-    private void _audioCreateContext()
-    {
-        unsafe
-        {
-            _openALContext = ALC.CreateContext(_openALDevice, (int*) 0);
-        }
-
-        ALC.MakeContextCurrent(_openALContext);
-        _checkAlcError(_openALDevice);
-        _checkAlError();
-
-        // Load up AL context extensions.
-        var s = ALC.GetString(ALDevice.Null, AlcGetString.Extensions) ?? "";
-        foreach (var extension in s.Split(' '))
-        {
-            _alContextExtensions.Add(extension);
-        }
-
-        OpenALSawmill.Debug("OpenAL Vendor: {0}", AL.Get(ALGetString.Vendor));
-        OpenALSawmill.Debug("OpenAL Renderer: {0}", AL.Get(ALGetString.Renderer));
-        OpenALSawmill.Debug("OpenAL Version: {0}", AL.Get(ALGetString.Version));
-    }
-
     private bool _audioOpenDevice()
     {
-        var preferredDevice = _cfg.GetCVar(CVars.AudioDevice);
+        string? preferredDevice = _cfg.GetCVar(CVars.AudioDevice);
 
         // Open device.
-        if (!string.IsNullOrEmpty(preferredDevice))
+        if (string.IsNullOrEmpty(preferredDevice))
         {
-            _openALDevice = ALC.OpenDevice(preferredDevice);
-            if (_openALDevice == IntPtr.Zero)
-            {
-                OpenALSawmill.Warning("Unable to open preferred audio device '{0}': {1}. Falling back default.",
-                    preferredDevice, ALC.GetError(ALDevice.Null));
-
-                _openALDevice = ALC.OpenDevice(null);
-            }
-        }
-        else
-        {
-            _openALDevice = ALC.OpenDevice(null);
+            preferredDevice = null;
         }
 
-        _checkAlcError(_openALDevice);
-
-        if (_openALDevice == IntPtr.Zero)
-        {
-            OpenALSawmill.Error("Unable to open OpenAL device! {1}", ALC.GetError(ALDevice.Null));
-            return false;
-        }
-
-        // Load up ALC extensions.
-        var s = ALC.GetString(_openALDevice, AlcGetString.Extensions) ?? "";
-        foreach (var extension in s.Split(' '))
-        {
-            _alcDeviceExtensions.Add(extension);
-        }
-        return true;
+        return SetAudioDevice(preferredDevice);
     }
 
     private void InitializeAudio()
@@ -109,11 +61,6 @@ internal sealed partial class AudioManager : IAudioInternal
 
         if (!_audioOpenDevice())
             return;
-
-        // Create OpenAL context.
-        _audioCreateContext();
-
-        IsEfxSupported = HasAlDeviceExtension("ALC_EXT_EFX");
 
         _cfg.OnValueChanged(CVars.AudioMasterVolume, SetMasterGain, true);
     }

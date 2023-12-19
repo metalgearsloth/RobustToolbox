@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
 using Robust.Shared.Audio;
@@ -58,6 +59,18 @@ internal sealed class HeadlessAudioManager : IAudioInternal
     /// <inheritdoc />
     public void SetMasterGain(float newGain)
     {
+    }
+
+    /// <inheritdoc />
+    public IEnumerable<string> GetAudioDevices()
+    {
+        yield break;
+    }
+
+    /// <inheritdoc />
+    public bool SetAudioDevice(string? device)
+    {
+        return false;
     }
 
     /// <inheritdoc />

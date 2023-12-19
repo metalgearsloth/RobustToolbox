@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
 using System.Threading;
@@ -7,6 +8,7 @@ using Robust.Client.Audio.Sources;
 using Robust.Client.Graphics;
 using Robust.Shared.Audio;
 using Robust.Shared.Audio.AudioLoading;
+using Robust.Shared.Audio.Effects;
 using Robust.Shared.Audio.Sources;
 using Robust.Shared.Maths;
 
@@ -15,6 +17,11 @@ namespace Robust.Client.Audio;
 internal partial class AudioManager
 {
     private float _zOffset;
+
+    /// <summary>
+    /// If changing devices we'll cache audio values.
+    /// </summary>
+    private Dictionary<BaseAudioSource, DummyAudioSource> _cachedValues = new();
 
     public void SetZOffset(float offset)
     {
@@ -214,6 +221,7 @@ internal partial class AudioManager
         return new AudioStream(handle, length, channels, name);
     }
 
+    /// <inheritdoc />
     public void SetMasterGain(float newGain)
     {
         if (newGain < 0f)
@@ -238,6 +246,97 @@ internal partial class AudioManager
         AL.Listener(ALListenerf.Gain, newGain);
     }
 
+    /// <inheritdoc />
+    public bool SetAudioDevice(string? device)
+    {
+        // Close old device.
+        if (_openALDevice != IntPtr.Zero)
+        {
+            CacheAudio();
+            _alcDeviceExtensions.Clear();
+            _alContextExtensions.Clear();
+            ALC.CloseDevice(_openALDevice);
+            ALC.DestroyContext(_openALContext);
+        }
+
+        _openALDevice = ALC.OpenDevice(device);
+
+        if (_openALDevice == IntPtr.Zero)
+        {
+            OpenALSawmill.Warning("Unable to open preferred audio device '{0}': {1}. Falling back default.",
+                device, ALC.GetError(ALDevice.Null));
+
+            _openALDevice = ALC.OpenDevice(null);
+        }
+
+        _checkAlcError(_openALDevice);
+
+        if (_openALDevice == IntPtr.Zero)
+        {
+            OpenALSawmill.Error("Unable to open OpenAL device! {1}", ALC.GetError(ALDevice.Null));
+            ClearAudio();
+            return false;
+        }
+
+        // Load up ALC extensions.
+        var deviceExtensions = ALC.GetString(_openALDevice, AlcGetString.Extensions) ?? "";
+        foreach (var extension in deviceExtensions.Split(' '))
+        {
+            _alcDeviceExtensions.Add(extension);
+        }
+
+        unsafe
+        {
+            _openALContext = ALC.CreateContext(_openALDevice, (int*) 0);
+        }
+
+        ALC.MakeContextCurrent(_openALContext);
+        _checkAlcError(_openALDevice);
+        _checkAlError();
+
+        // Load up AL context extensions.
+        var contextExtensions = ALC.GetString(ALDevice.Null, AlcGetString.Extensions) ?? "";
+        foreach (var extension in contextExtensions.Split(' '))
+        {
+            _alContextExtensions.Add(extension);
+        }
+
+        OpenALSawmill.Debug("OpenAL Vendor: {0}", AL.Get(ALGetString.Vendor));
+        OpenALSawmill.Debug("OpenAL Renderer: {0}", AL.Get(ALGetString.Renderer));
+        OpenALSawmill.Debug("OpenAL Version: {0}", AL.Get(ALGetString.Version));
+
+        IsEfxSupported = HasAlDeviceExtension("ALC_EXT_EFX");
+        RecontextAudio();
+        OpenALSawmill.Info($"Set audio device to {device}");
+
+        return true;
+    }
+
+    /// <inheritdoc />
+    public IEnumerable<string> GetAudioDevices()
+    {
+        if (ALC.IsExtensionPresent(ALDevice.Null, "ALC_ENUMERATION_EXT"))
+        {
+            List<string>? devices;
+
+            if (ALC.IsExtensionPresent(ALDevice.Null, "ALC_ENUMERATE_ALL_EXT"))
+            {
+                devices = ALC.GetString(ALDevice.Null, AlcGetStringList.AllDevicesSpecifier);
+                // default_playback_device = ALC.GetString(_openALDevice, AlcGetString.DefaultAllDevicesSpecifier);
+            }
+            else
+            {
+                devices = ALC.GetString(ALDevice.Null, AlcGetStringList.DeviceSpecifier);
+                // default_playback_device = Alc.GetString(IntPtr.Zero, AlcGetString.DefaultDeviceSpecifier);
+            }
+
+            return devices;
+        }
+
+        return Array.Empty<string>();
+    }
+
+    /// <inheritdoc />
     public void SetAttenuation(Attenuation attenuation)
     {
         switch (attenuation)
@@ -284,6 +383,7 @@ internal partial class AudioManager
     IAudioSource? IAudioInternal.CreateAudioSource(AudioStream stream)
     {
         var source = AL.GenSource();
+        _checkAlError();
 
         if (!AL.IsSource(source))
         {
@@ -294,6 +394,7 @@ internal partial class AudioManager
         // ReSharper disable once PossibleInvalidOperationException
         // TODO: This really shouldn't be indexing based on the ClydeHandle...
         AL.Source(source, ALSourcei.Buffer, _audioSampleBuffers[(int) stream.ClydeHandle!.Value].BufferHandle);
+        _checkAlError();
 
         var audioSource = new AudioSource(this, source, stream);
         _audioSources.Add(source, new WeakReference<BaseAudioSource>(audioSource));
@@ -302,9 +403,10 @@ internal partial class AudioManager
     }
 
     /// <inheritdoc/>
-    IBufferedAudioSource? IAudioInternal.CreateBufferedAudioSource(int buffers, bool floatAudio=false)
+    IBufferedAudioSource? IAudioInternal.CreateBufferedAudioSource(int buffers, bool floatAudio)
     {
         var source = AL.GenSource();
+        _checkAlError();
 
         if (!AL.IsSource(source))
         {
@@ -312,9 +414,8 @@ internal partial class AudioManager
             return null;
         }
 
-        // ReSharper disable once PossibleInvalidOperationException
-
         var audioSource = new BufferedAudioSource(this, source, AL.GenBuffers(buffers), floatAudio);
+        _checkAlError();
         _bufferedAudioSources.Add(source, new WeakReference<BufferedAudioSource>(audioSource));
         ApplyDefaultParams(audioSource);
         return audioSource;
@@ -370,5 +471,136 @@ internal partial class AudioManager
         }
 
         _bufferedAudioSources.Clear();
+    }
+
+    private void ClearAudio()
+    {
+        _cachedValues.Clear();
+
+        foreach (var source in _audioSources.Values)
+        {
+            if (source.TryGetTarget(out var target))
+            {
+                target.ClearHandles();
+            }
+        }
+
+        foreach (var source in _bufferedAudioSources.Values)
+        {
+            if (source.TryGetTarget(out var target))
+            {
+                target.ClearHandles();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Caches audio from our old context as we can't re-use them across devices.
+    /// Need to do this before removing the context.
+    /// </summary>
+    private void CacheAudio()
+    {
+        foreach (var baseSource in _audioSources.Values)
+        {
+            if (!baseSource.TryGetTarget(out var target))
+                continue;
+
+            var dummy = new DummyAudioSource();
+            ApplySource(target, dummy);
+
+            if (!target.ClearHandles())
+                continue;
+
+            _cachedValues[target] = dummy;
+        }
+
+        foreach (var baseSource in _bufferedAudioSources.Values)
+        {
+            if (!baseSource.TryGetTarget(out var target))
+                continue;
+
+            var dummy = new DummyAudioSource();
+            ApplySource(target, dummy);
+
+            // TODO: Figure out some way to copy buffers.
+            if (!target.ClearHandles())
+                continue;
+
+            _cachedValues[target] = dummy;
+        }
+    }
+
+    private void RecontextAudio()
+    {
+        // TODO: Need to re-load clyde audio.
+
+        foreach (var baseSource in _audioSources.Values)
+        {
+            if (!baseSource.TryGetTarget(out var target) || !_cachedValues.TryGetValue(target, out var dummy))
+                continue;
+
+            var source = AL.GenSource();
+
+            if (!AL.IsSource(source))
+            {
+                OpenALSawmill.Error("Failed to generate source. Too many simultaneous audio streams? {0}", Environment.StackTrace);
+                continue;
+            }
+
+            target.SetSource(source);
+            _checkAlError();
+
+            // ReSharper disable once PossibleInvalidOperationException
+            // TODO: This really shouldn't be indexing based on the ClydeHandle...
+
+            if (target is AudioSource aSource)
+            {
+                AL.Source(source, ALSourcei.Buffer, _audioSampleBuffers[(int) aSource.SourceStream.ClydeHandle!.Value].BufferHandle);
+            }
+
+            ApplySource(dummy, target);
+        }
+
+        foreach (var baseSource in _bufferedAudioSources.Values)
+        {
+            if (baseSource.TryGetTarget(out var target))
+            {
+                // TODO: Figure out some way to copy buffers.
+                if (!target.ClearHandles() || !_cachedValues.TryGetValue(target, out var dummy))
+                    continue;
+
+                var source = AL.GenSource();
+
+                if (!AL.IsSource(source))
+                {
+                    OpenALSawmill.Error("Failed to generate source. Too many simultaneous audio streams? {0}", Environment.StackTrace);
+                    continue;
+                }
+
+                target.SetSource(source);
+                _checkAlError();
+                target.SetBuffers(AL.GenBuffers(target.BufferMap.Count), target.Float);
+                _checkAlError();
+                ApplySource(dummy, target);
+            }
+        }
+
+        _cachedValues.Clear();
+    }
+
+    private void ApplySource(IAudioSource source, IAudioSource target)
+    {
+        target.Occlusion = source.Occlusion;
+        target.Gain = source.Gain;
+        target.ReferenceDistance = source.ReferenceDistance;
+        target.Position = source.Position;
+        target.Global = source.Global;
+        target.Looping = source.Looping;
+        target.Pitch = source.Pitch;
+        target.Velocity = source.Velocity;
+        target.RolloffFactor = source.RolloffFactor;
+        target.MaxDistance = source.MaxDistance;
+        target.Playing = source.Playing;
+        target.PlaybackPosition = source.PlaybackPosition;
     }
 }

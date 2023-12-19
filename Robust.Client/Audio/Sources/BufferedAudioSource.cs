@@ -1,23 +1,20 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
-using System.Numerics;
 using OpenTK.Audio.OpenAL;
 using OpenTK.Audio.OpenAL.Extensions.Creative.EFX;
-using Robust.Client.Graphics;
 using Robust.Shared.Audio.Sources;
-using Robust.Shared.Maths;
 
 namespace Robust.Client.Audio.Sources;
 
 internal sealed class BufferedAudioSource : BaseAudioSource, IBufferedAudioSource
 {
+    internal Dictionary<int, int> BufferMap = new();
+    internal bool Float = false;
+
     private int? SourceHandle = null;
-    private int[] BufferHandles;
-    private Dictionary<int, int> BufferMap = new();
+    private int[] BufferHandles = null!;
     private readonly AudioManager _master;
     private bool _mono = true;
-    private bool _float = false;
     private int FilterHandle;
 
     public int SampleRate { get; set; } = 44100;
@@ -28,13 +25,19 @@ internal sealed class BufferedAudioSource : BaseAudioSource, IBufferedAudioSourc
     {
         _master = master;
         SourceHandle = sourceHandle;
+        SetBuffers(bufferHandles, floatAudio);
+    }
+
+    internal void SetBuffers(int[] bufferHandles, bool floatAudio)
+    {
         BufferHandles = bufferHandles;
         for (int i = 0; i < BufferHandles.Length; i++)
         {
             var bufferHandle = BufferHandles[i];
             BufferMap[bufferHandle] = i;
         }
-        _float = floatAudio;
+
+        Float = floatAudio;
     }
 
     /// <inheritdoc />
@@ -89,17 +92,30 @@ internal sealed class BufferedAudioSource : BaseAudioSource, IBufferedAudioSourc
         }
         else
         {
-            if (FilterHandle != 0)
-                EFX.DeleteFilter(FilterHandle);
-
-            AL.DeleteSource(SourceHandle.Value);
-            AL.DeleteBuffers(BufferHandles);
-            _master.RemoveBufferedAudioSource(SourceHandle.Value);
-            _master._checkAlError();
+            ClearHandles();
         }
 
         FilterHandle = 0;
         SourceHandle = null;
+    }
+
+    internal override bool ClearHandles()
+    {
+        // Already disposed
+        if (SourceHandle == null)
+            return false;
+
+        if (FilterHandle != 0)
+            EFX.DeleteFilter(FilterHandle);
+
+        AL.DeleteSource(SourceHandle.Value);
+        AL.DeleteBuffers(BufferHandles);
+        _master.RemoveBufferedAudioSource(SourceHandle.Value);
+        _master._checkAlError();
+
+        FilterHandle = 0;
+        SourceHandle = null;
+        return true;
     }
 
     public int GetNumberOfBuffersProcessed()
@@ -129,7 +145,7 @@ internal sealed class BufferedAudioSource : BaseAudioSource, IBufferedAudioSourc
     {
         _checkDisposed();
 
-        if(_float)
+        if(Float)
             throw new InvalidOperationException("Can't write ushort numbers to buffers when buffer type is float!");
 
         if (handle >= BufferHandles.Length)
@@ -149,7 +165,7 @@ internal sealed class BufferedAudioSource : BaseAudioSource, IBufferedAudioSourc
     {
         _checkDisposed();
 
-        if(!_float)
+        if(!Float)
             throw new InvalidOperationException("Can't write float numbers to buffers when buffer type is ushort!");
 
         if (handle >= BufferHandles.Length)
@@ -194,7 +210,7 @@ internal sealed class BufferedAudioSource : BaseAudioSource, IBufferedAudioSourc
 
         Span<int> handles = stackalloc int[BufferHandles.Length];
 
-        if (_float)
+        if (Float)
         {
             var empty = new float[length];
             var span = (Span<float>) empty;
