@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Robust.Shared.IoC;
 using Robust.Shared.Log;
@@ -12,12 +14,14 @@ using Robust.Shared.Prototypes;
 using Robust.Shared.Reflection;
 using Robust.Shared.Serialization.Manager.Attributes;
 using Robust.Shared.Serialization.Manager.Definition;
+using Robust.Shared.Threading;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.Serialization.Manager
 {
     public sealed partial class SerializationManager : ISerializationManager
     {
+        [Dependency] private readonly IParallelManager _parManager = default!;
         [Dependency] private readonly IReflectionManager _reflectionManager = default!;
 
         public IReflectionManager ReflectionManager => _reflectionManager;
@@ -34,6 +38,63 @@ namespace Robust.Shared.Serialization.Manager
 
         [field: IoC.Dependency]
         public IDependencyCollection DependencyCollection { get; } = default!;
+
+        private record struct DataDefinitionJob : IRobustJob
+        {
+            internal SerializationManager Manager;
+            internal ISawmill Sawmill;
+
+            internal ConcurrentBag<Type> MeansDataRecord;
+            internal ConcurrentDictionary<Type, byte> Records;
+            internal ConcurrentBag<Type> MeansDataDef;
+            internal Type Type;
+
+            public void Execute()
+            {
+                if (MeansDataDef.Any(Type.IsDefined))
+                {
+                    Manager.RunRegistration(Type, Sawmill, Records);
+                }
+
+                if (Type.IsDefined(typeof(DataRecordAttribute)) || MeansDataRecord.Any(Type.IsDefined))
+                    Records[Type] = 0;
+            }
+        }
+
+        private record struct RegistrationJob : IRobustJob
+        {
+            internal SerializationManager Manager;
+            internal ISawmill Sawmill;
+
+            internal ConcurrentDictionary<Type, byte> Records;
+            internal Type Type;
+
+            public void Execute()
+            {
+                Manager.RunRegistration(Type, Sawmill, Records);
+            }
+        }
+
+        private void RunRegistration(Type type, ISawmill sawmill, ConcurrentDictionary<Type, byte> records)
+        {
+            if (type.IsAbstract || type.IsInterface || type.IsGenericTypeDefinition)
+            {
+                sawmill.Debug(
+                    $"Skipping registering data definition for type {type} since it is abstract or an interface");
+                return;
+            }
+
+            var isRecord = records.ContainsKey(type);
+            if (!type.IsValueType && !isRecord && !type.HasParameterlessConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                // If someone attempts to save or load an entity that uses this DataDefinition, this will lead to errors.
+                sawmill.Warning(
+                    $"Skipping registering data definition for type {type} since it has no parameterless ctor");
+                return;
+            }
+
+            _dataDefinitions.GetOrAdd(type, static (t, s) => s.Item1.CreateDataDefinition(t, s.isRecord), (this, isRecord));
+        }
 
         public void Initialize()
         {
@@ -98,38 +159,46 @@ namespace Robust.Shared.Serialization.Manager
                 }
             }
 
-            Parallel.ForEach(_reflectionManager.FindAllTypes(), type =>
-            {
-                if (meansDataDef.Any(type.IsDefined))
-                    registrations.Add(type);
-
-                if (type.IsDefined(typeof(DataRecordAttribute)) || meansDataRecord.Any(type.IsDefined))
-                    records[type] = 0;
-            });
-
+            var allTypes = _reflectionManager.FindAllTypes();
+            var waitHandles = new List<WaitHandle>(registrations.Count);
             var sawmill = Logger.GetSawmill(LogCategory);
+            var sw = Stopwatch.StartNew();
 
-            Parallel.ForEach(registrations, type =>
+            // DataDefinitionJob may also need torun the registration work but it isn't reliant upon the registrations list.
+            foreach (var type in allTypes)
             {
-                if (type.IsAbstract || type.IsInterface || type.IsGenericTypeDefinition)
+                var job = new DataDefinitionJob()
                 {
-                    sawmill.Debug(
-                        $"Skipping registering data definition for type {type} since it is abstract or an interface");
-                    return;
-                }
+                    Manager = this,
+                    MeansDataDef = meansDataDef,
+                    MeansDataRecord = meansDataRecord,
+                    Records = records,
+                    Sawmill = sawmill,
+                    Type = type,
+                };
+                waitHandles.Add(_parManager.Process(job));
+            }
 
-                var isRecord = records.ContainsKey(type);
-                if (!type.IsValueType && !isRecord && !type.HasParameterlessConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            foreach (var reg in registrations)
+            {
+                var regJob = new RegistrationJob()
                 {
-                    // If someone attempts to save or load an entity that uses this DataDefinition, this will lead to errors.
-                    sawmill.Warning(
-                        $"Skipping registering data definition for type {type} since it has no parameterless ctor");
-                    return;
-                }
+                    Manager = this,
+                    Sawmill = sawmill,
+                    Type = reg,
+                    Records = records,
+                };
 
-                _dataDefinitions.GetOrAdd(type, static (t, s) => s.Item1.CreateDataDefinition(t, s.isRecord), (this, isRecord));
-            });
+                waitHandles.Add(_parManager.Process(regJob));
+            }
 
+            // WaitHandle.WaitAll has a 64 limit :(
+            foreach (var handle in waitHandles)
+            {
+                handle.WaitOne();
+            }
+
+            sw.Stop();
             var duplicateErrors = new StringBuilder();
             var invalidIncludes = new StringBuilder();
 
