@@ -113,9 +113,22 @@ namespace Robust.Shared.Serialization.Manager
             var meansDataRecord = new ConcurrentBag<Type>();
             var implicitDataDef = new ConcurrentBag<Type>();
             var implicitDataRecord = new ConcurrentBag<Type>();
+            var allTypes = _reflectionManager.FindAllTypes().ToList();
 
-            CollectAttributedTypes(flagsTypes, constantsTypes, typeSerializers, meansDataDef, meansDataRecord, implicitDataDef, implicitDataRecord);
+            var collectJob = new CollectAttributedTypesJob()
+            {
+                AllTypes = allTypes,
+                ConstantsTypes = constantsTypes,
+                FlagsTypes = flagsTypes,
+                TypeSerializers = typeSerializers,
+                MeansDataDef = meansDataDef,
+                MeansDataRecord = meansDataRecord,
+                ImplicitDataDef = implicitDataDef,
+                ImplicitDataRecord = implicitDataRecord,
+                CopyByRefReg = _copyByRefRegistrations,
+            };
 
+            _parManager.ProcessNow(collectJob, allTypes.Count);
             InitializeFlagsAndConstants(flagsTypes, constantsTypes);
             InitializeTypeSerializers(typeSerializers);
 
@@ -159,8 +172,6 @@ namespace Robust.Shared.Serialization.Manager
                 }
             }
 
-            var allTypes = _reflectionManager.FindAllTypes();
-            var waitHandles = new List<WaitHandle>(registrations.Count);
             var sawmill = Logger.GetSawmill(LogCategory);
             var sw = Stopwatch.StartNew();
 
@@ -247,42 +258,49 @@ namespace Robust.Shared.Serialization.Manager
             _initializing = false;
         }
 
-        private void CollectAttributedTypes(
-            ConcurrentBag<Type> flagsTypes,
-            ConcurrentBag<Type> constantsTypes,
-            ConcurrentBag<Type> typeSerializers,
-            ConcurrentBag<Type> meansDataDef,
-            ConcurrentBag<Type> meansDataRecord,
-            ConcurrentBag<Type> implicitDataDef,
-            ConcurrentBag<Type> implicitDataRecord)
+        private record struct CollectAttributedTypesJob : IParallelRobustJob
         {
-            // IsDefined is extremely slow. Great.
-            Parallel.ForEach(_reflectionManager.FindAllTypes(), type =>
+            public int BatchSize => 4;
+
+            internal List<Type> AllTypes;
+            internal ConcurrentBag<Type> FlagsTypes;
+            internal ConcurrentBag<Type> ConstantsTypes;
+            internal ConcurrentBag<Type> TypeSerializers;
+            internal ConcurrentBag<Type> MeansDataDef;
+            internal ConcurrentBag<Type> MeansDataRecord;
+            internal ConcurrentBag<Type> ImplicitDataDef;
+            internal ConcurrentBag<Type> ImplicitDataRecord;
+            internal ConcurrentDictionary<Type, byte> CopyByRefReg;
+
+            public void Execute(int index)
             {
+                // IsDefined is extremely slow. Great.
+                var type = AllTypes[index];
+
                 if (type.IsDefined(typeof(FlagsForAttribute), false))
-                    flagsTypes.Add(type);
+                    FlagsTypes.Add(type);
 
                 if (type.IsDefined(typeof(ConstantsForAttribute), false))
-                    constantsTypes.Add(type);
+                    ConstantsTypes.Add(type);
 
                 if (type.IsDefined(typeof(TypeSerializerAttribute)))
-                    typeSerializers.Add(type);
+                    TypeSerializers.Add(type);
 
                 if (type.IsDefined(typeof(MeansDataDefinitionAttribute)))
-                    meansDataDef.Add(type);
+                    MeansDataDef.Add(type);
 
                 if (type.IsDefined(typeof(MeansDataRecordAttribute)))
-                    meansDataRecord.Add(type);
+                    MeansDataRecord.Add(type);
 
                 if (type.IsDefined(typeof(ImplicitDataDefinitionForInheritorsAttribute), true))
-                    implicitDataDef.Add(type);
+                    ImplicitDataDef.Add(type);
 
                 if (type.IsDefined(typeof(ImplicitDataRecordAttribute), true))
-                    implicitDataRecord.Add(type);
+                    ImplicitDataRecord.Add(type);
 
                 if (type.IsDefined(typeof(CopyByRefAttribute)))
-                    _copyByRefRegistrations[type] = 0;
-            });
+                    CopyByRefReg[type] = 0;
+            }
         }
 
         private DataDefinition CreateDataDefinition(Type t, bool isRecord)
