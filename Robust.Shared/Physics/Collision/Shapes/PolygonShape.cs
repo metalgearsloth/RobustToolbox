@@ -173,6 +173,11 @@ namespace Robust.Shared.Physics.Collision.Shapes
 
         public ShapeType ShapeType => ShapeType.Polygon;
 
+        /// <summary>
+        /// Empty polygon shape with no data.
+        /// </summary>
+        public static PolygonShape Empty = new();
+
         public PolygonShape()
         {
         }
@@ -231,6 +236,23 @@ namespace Robust.Shared.Physics.Collision.Shapes
                 Vertices[i] = Transform.Mul(xf, Vertices[i]);
                 Normals[i] = Transform.Mul(xf.Quaternion2D, Normals[i]);
             }
+        }
+
+        public void SetAsBox(Box2 box)
+        {
+            if (box.Center == Vector2.Zero)
+            {
+                SetAsBox(box.Width / 2f, box.Height / 2f);
+            }
+            else
+            {
+                SetAsBox(box.Width / 2f, box.Height / 2f, box.Center, 0f);
+            }
+        }
+
+        public void SetAsBox(Box2Rotated box)
+        {
+            SetAsBox(box.Box.Width / 2f, box.Box.Height / 2f, box.Center, (float) box.Rotation.Theta);
         }
 
         // Don't need to check Centroid for these below as it's based off of the vertices below
