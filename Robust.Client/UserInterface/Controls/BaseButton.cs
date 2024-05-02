@@ -288,23 +288,39 @@ namespace Robust.Client.UserInterface.Controls
             var drawMode = DrawMode;
             if (Mode == ActionMode.Release && _attemptingPress > 0 && HasPoint((args.PointerLocation.Position - GlobalPixelPosition) / UIScale))
             {
-                // Can't un press a radio button directly.
-                // Only trigger toggle on UIClick. Do not un-press a toggle button if it's in a group.
-                if (args.Function != EngineKeyFunctions.UIClick || Group == null || !Pressed)
+                // Click it in if relevant
+                if (!Pressed)
                 {
-                    if (args.Function == EngineKeyFunctions.UIClick && ToggleMode && _attemptingPress == 1)
+                    UserInterfaceManager.ClickSound();
+                    Pressed = true;
+                    OnPressed?.Invoke(buttonEventArgs);
+
+                    if (ToggleMode)
                     {
-                        SetClickPressed(!Pressed);
+                        OnToggled?.Invoke(new ButtonToggledEventArgs(Pressed, this, args));
                     }
                     else
                     {
-                        UserInterfaceManager.ClickSound();
+                        Pressed = false;
                     }
 
-                    OnPressed?.Invoke(buttonEventArgs);
-                    if (args.Function == EngineKeyFunctions.UIClick && ToggleMode)
+                    UnsetOtherGroupButtons();
+                }
+                // Unclick if relevant
+                else
+                {
+                    // If it's toggle mode can't unclick it directly unless it's group-less.
+                    if (!ToggleMode || Group == null)
                     {
-                        OnToggled?.Invoke(new ButtonToggledEventArgs(Pressed, this, args));
+                        UserInterfaceManager.ClickSound();
+                        Pressed = false;
+                        OnPressed?.Invoke(buttonEventArgs);
+
+                        if (ToggleMode)
+                        {
+                            OnToggled?.Invoke(new ButtonToggledEventArgs(Pressed, this, args));
+                        }
+
                         UnsetOtherGroupButtons();
                     }
                 }
