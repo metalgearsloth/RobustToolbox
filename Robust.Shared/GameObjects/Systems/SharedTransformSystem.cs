@@ -296,6 +296,11 @@ namespace Robust.Shared.GameObjects
             // have finished running first. Ideally this shouldn't be required, but this is here just in case
             _traversal.CheckTraverse(ent.Owner, ent.Comp1);
         }
+
+        public void FullDirty(Entity<TransformComponent> entity)
+        {
+            entity.Comp.FullUpdate = _gameTiming.CurTick;
+        }
     }
 
     [ByRefEvent]
@@ -309,7 +314,7 @@ namespace Robust.Shared.GameObjects
     ///     Serialized state of a TransformComponent.
     /// </summary>
     [Serializable, NetSerializable]
-    internal readonly record struct TransformComponentState : IComponentState
+    internal sealed class TransformComponentState : IComponentState
     {
         /// <summary>
         ///     Current parent entity of this entity.
@@ -319,12 +324,12 @@ namespace Robust.Shared.GameObjects
         /// <summary>
         ///     Current position offset of the entity.
         /// </summary>
-        public readonly Vector2 LocalPosition;
+        public Vector2 LocalPosition;
 
         /// <summary>
         ///     Current rotation offset of the entity.
         /// </summary>
-        public readonly Angle Rotation;
+        public Angle Rotation;
 
         /// <summary>
         /// Is the transform able to be locally rotated?
@@ -350,6 +355,30 @@ namespace Robust.Shared.GameObjects
             ParentID = parentId;
             NoLocalRotation = noLocalRotation;
             Anchored = anchored;
+        }
+    }
+
+    [Serializable, NetSerializable]
+    internal sealed class TransformDeltaState : IComponentState, IComponentDeltaState
+    {
+        public Vector2 LocalPosition;
+        public Angle LocalRotation;
+
+        public bool FullState => false;
+
+        public void ApplyToFullState(IComponentState fullState)
+        {
+            var state = (TransformComponentState)fullState;
+            state.LocalPosition = LocalPosition;
+            state.Rotation = LocalRotation;
+        }
+
+        public IComponentState CreateNewFullState(IComponentState fullState)
+        {
+            var old = (TransformComponentState)fullState;
+
+            return new TransformComponentState(LocalPosition, LocalRotation, old.ParentID, old.NoLocalRotation,
+                old.Anchored);
         }
     }
 }

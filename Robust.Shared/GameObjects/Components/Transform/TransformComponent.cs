@@ -21,8 +21,12 @@ namespace Robust.Shared.GameObjects
     [RegisterComponent, NetworkedComponent]
     public sealed partial class TransformComponent : Component, IComponentDebug
     {
+        /// <summary>
+        /// Last time this component needed to be fully updated and not just position / rotation.
+        /// </summary>
+        public GameTick FullUpdate = GameTick.Zero;
+
         [Dependency] private readonly IEntityManager _entMan = default!;
-        [Dependency] private readonly IGameTiming _gameTiming = default!;
 
         // Currently this field just exists for VV. In future, it might become a real field
         [ViewVariables]

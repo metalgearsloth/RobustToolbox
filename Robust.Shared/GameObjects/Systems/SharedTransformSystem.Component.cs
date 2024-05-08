@@ -685,18 +685,36 @@ public abstract partial class SharedTransformSystem
     internal void OnGetState(EntityUid uid, TransformComponent component, ref ComponentGetState args)
     {
         DebugTools.Assert(!component.ParentUid.IsValid() || (!Deleted(component.ParentUid) && !EntityManager.IsQueuedForDeletion(component.ParentUid)));
-        var parent = GetNetEntity(component.ParentUid);
 
-        args.State = new TransformComponentState(
-            component.LocalPosition,
-            component.LocalRotation,
-            parent,
-            component.NoLocalRotation,
-            component.Anchored);
+        if (args.FromTick <= component.FullUpdate)
+        {
+            var parent = GetNetEntity(component.ParentUid);
+
+            args.State = new TransformComponentState(
+                component.LocalPosition,
+                component.LocalRotation,
+                parent,
+                component.NoLocalRotation,
+                component.Anchored);
+            return;
+        }
+
+        args.State = new TransformDeltaState()
+        {
+            LocalPosition = component.LocalPosition,
+            LocalRotation = component.LocalRotation,
+        };
     }
 
     internal void OnHandleState(EntityUid uid, TransformComponent xform, ref ComponentHandleState args)
     {
+        if (args.Current is TransformDeltaState delta)
+        {
+            xform.LocalPosition = delta.LocalPosition;
+
+            return;
+        }
+
         if (args.Current is TransformComponentState newState)
         {
             var parent = EnsureEntity<TransformComponent>(newState.ParentID, uid);
