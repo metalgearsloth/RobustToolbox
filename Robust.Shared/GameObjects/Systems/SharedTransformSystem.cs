@@ -69,6 +69,14 @@ namespace Robust.Shared.GameObjects
 
         private void MapManagerOnTileChanged(ref TileChangedEvent e)
         {
+            foreach (var tile in e.Changed)
+            {
+                if (!tile.EmptyChanged || !tile.NewTile.IsEmpty)
+                    continue;
+
+
+            }
+
             if(e.NewTile.Tile != Tile.Empty)
                 return;
 

@@ -129,44 +129,45 @@ namespace Robust.Shared.GameObjects
     }
 
     /// <summary>
-    ///     Arguments for when a single tile on a grid is changed locally or remotely.
+    ///     Arguments for when tiles on a grid are changed locally or remotely.
     /// </summary>
     [ByRefEvent]
     public readonly record struct TileChangedEvent
     {
         /// <summary>
-        ///     Creates a new instance of this class.
-        /// </summary>
-        public TileChangedEvent(EntityUid uid, TileRef newTile, Tile oldTile, Vector2i chunkIndex)
-        {
-            Entity = uid;
-            NewTile = newTile;
-            OldTile = oldTile;
-            ChunkIndex = chunkIndex;
-        }
-
-        /// <summary>
-        /// Was the tile previously empty or is it now empty.
-        /// </summary>
-        public bool EmptyChanged => OldTile.IsEmpty != NewTile.Tile.IsEmpty;
-
-        /// <summary>
         ///     EntityUid of the grid with the tile-change. TileRef stores the GridId.
         /// </summary>
         public readonly EntityUid Entity;
 
-        /// <summary>
-        ///     New tile that replaced the old one.
-        /// </summary>
-        public readonly TileRef NewTile;
+        public readonly TileChange[] Changed;
 
         /// <summary>
-        ///     Old tile that was replaced.
+        ///     Creates a new instance of this class.
         /// </summary>
+        public TileChangedEvent(EntityUid entity, TileChange[] changed)
+        {
+            Entity = entity;
+            Changed = changed;
+        }
+    }
+
+    public record struct TileChange
+    {
+        /// <summary>
+        /// Was the tile previously empty or is it now empty.
+        /// </summary>
+        public bool EmptyChanged => OldTile.IsEmpty != NewTile.IsEmpty;
+
         public readonly Tile OldTile;
+        public readonly Tile NewTile;
 
         /// <summary>
-        ///     The index of the grid-chunk that this tile belongs to.
+        /// Index of this tile inside of the grid.
+        /// </summary>
+        public readonly Vector2i GridIndex;
+
+        /// <summary>
+        /// Index of this tile inside of its map chunk.
         /// </summary>
         public readonly Vector2i ChunkIndex;
     }
