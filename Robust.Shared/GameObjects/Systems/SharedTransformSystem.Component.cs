@@ -55,6 +55,7 @@ public abstract partial class SharedTransformSystem
         DebugTools.Assert(XformQuery.GetComponent(oldGridUid).MapID == XformQuery.GetComponent(newGridUid).MapID);
         DebugTools.Assert(xform._anchored);
 
+        // Full dirty as it's all changing anyway.
         Dirty(uid, xform, meta);
         var ev = new ReAnchorEvent(uid, oldGridUid, newGridUid, tilePos, xform);
         RaiseLocalEvent(uid, ref ev);
@@ -83,7 +84,7 @@ public abstract partial class SharedTransformSystem
         var wasAnchored = entity.Comp._anchored;
         xform._anchored = true;
         var meta = MetaData(uid);
-        Dirty(entity, meta);
+        DirtyField(entity.Owner, entity.Comp, nameof(TransformComponent._anchored));
 
         // Mark as static before doing position changes, to avoid the velocity change on parent change.
         _physics.TrySetBodyType(uid, BodyType.Static, xform: xform);
@@ -132,7 +133,7 @@ public abstract partial class SharedTransformSystem
         if (!xform._anchored)
             return;
 
-        Dirty(uid, xform);
+        DirtyField(uid, xform, nameof(TransformComponent._anchored));
         xform._anchored = false;
 
         if (setPhysics)
@@ -466,12 +467,15 @@ public abstract partial class SharedTransformSystem
         var oldMap = xform.MapUid;
 
         // Set new values
-        Dirty(uid, xform, meta);
         xform.MatricesDirty = true;
         xform._localPosition = value.Position;
+        DirtyField(uid, xform, nameof(TransformComponent._localPosition));
 
         if (rotation != null && !xform.NoLocalRotation)
+        {
             xform._localRotation = rotation.Value;
+            DirtyField(uid, xform, nameof(TransformComponent._localRotation));
+        }
 
         DebugTools.Assert(!xform.NoLocalRotation || xform.LocalRotation == 0);
 
@@ -540,6 +544,7 @@ public abstract partial class SharedTransformSystem
             newParent?._children.Add(uid);
 
             xform._parent = value.EntityId;
+            DirtyField(uid, xform, nameof(TransformComponent._parent));
 
             if (newParent != null)
             {
@@ -685,6 +690,47 @@ public abstract partial class SharedTransformSystem
     internal void OnGetState(EntityUid uid, TransformComponent component, ref ComponentGetState args)
     {
         DebugTools.Assert(!component.ParentUid.IsValid() || (!Deleted(component.ParentUid) && !EntityManager.IsQueuedForDeletion(component.ParentUid)));
+
+        if (args.FromTick > component.CreationTick && component.LastFieldUpdate >= args.FromTick)
+        {
+            var fullUpdate = false;
+
+            // Check if any of the normal fields are dirty, if so send a full state.
+            for (var i = 0; i < _rotationFieldIndex; i++)
+            {
+                if (component.LastModifiedFields[i] >= args.FromTick)
+                {
+                    fullUpdate = true;
+                    break;
+                }
+            }
+
+            // Okay we can do a delta
+            if (!fullUpdate)
+            {
+                var posDirty = component.LastModifiedFields[_positionFieldIndex] >= args.FromTick;
+                var rotDirty = component.LastModifiedFields[_rotationFieldIndex] >= args.FromTick;
+
+                if (posDirty && rotDirty)
+                {
+                    args.State = new TransformPositionRotationComponentState()
+                    {
+                        Position = component._localPosition,
+                        Angle = component._localRotation,
+                    };
+                }
+                else
+                {
+                    args.State = new TransformPositionComponentState()
+                    {
+                        Position = component._localPosition,
+                    };
+                }
+
+                return;
+            }
+        }
+
         var parent = GetNetEntity(component.ParentUid);
 
         args.State = new TransformComponentState(
@@ -697,9 +743,22 @@ public abstract partial class SharedTransformSystem
 
     internal void OnHandleState(EntityUid uid, TransformComponent xform, ref ComponentHandleState args)
     {
-        if (args.Current is TransformComponentState newState)
+        EntityUid parent = EntityUid.Invalid;
+
+        if (args.Current is TransformPositionRotationComponentState posRot)
         {
-            var parent = EnsureEntity<TransformComponent>(newState.ParentID, uid);
+            parent = xform._parent;
+            SetLocalPositionRotationNoLerp(uid, posRot.Position, posRot.Angle, xform);
+        }
+        else if (args.Current is TransformPositionComponentState pos)
+        {
+            parent = xform._parent;
+            SetLocalPositionNoLerp(uid, pos.Position, xform);
+        }
+        // Full state
+        else if (args.Current is TransformComponentState newState)
+        {
+            parent = EnsureEntity<TransformComponent>(newState.ParentID, uid);
             var oldAnchored = xform.Anchored;
 
             // update actual position data, if required
@@ -755,12 +814,39 @@ public abstract partial class SharedTransformSystem
             DebugTools.Assert(xform.Anchored == newState.Anchored, "Transform state failed to set anchored");
         }
 
-        if (args.Next is TransformComponentState nextTransform
-            && nextTransform.ParentID == GetNetEntity(xform.ParentUid))
+        // Handle lerping
+        if (args.Next != null)
         {
-            xform.NextPosition = nextTransform.LocalPosition;
-            xform.NextRotation = nextTransform.Rotation;
-            ActivateLerp(uid, xform);
+            EntityUid nextParent;
+            Vector2 nextPos;
+            Angle nextRot;
+
+            if (args.Next is TransformPositionRotationComponentState posRotNext)
+            {
+                nextParent = parent;
+                nextPos = posRotNext.Position;
+                nextRot = posRotNext.Angle;
+            }
+            else if (args.Next is TransformPositionComponentState posNext)
+            {
+                nextParent = parent;
+                nextPos = posNext.Position;
+                nextRot = xform._localRotation;
+            }
+            else
+            {
+                var nextState = (TransformComponentState)args.Next;
+                nextParent = GetEntity(nextState.ParentID);
+                nextPos = nextState.LocalPosition;
+                nextRot = nextState.Rotation;
+            }
+
+            if (parent == nextParent && parent.IsValid())
+            {
+                xform.NextPosition = nextPos;
+                xform.NextRotation = nextRot;
+                ActivateLerp(uid, xform);
+            }
         }
     }
 
@@ -1122,11 +1208,15 @@ public abstract partial class SharedTransformSystem
     public void SetLocalPositionRotation(TransformComponent xform, Vector2 pos, Angle rot)
         => SetLocalPositionRotation(xform.Owner, pos, rot, xform);
 
+    public virtual void SetLocalPositionRotation(EntityUid uid, Vector2 pos, Angle rot, TransformComponent? xform = null)
+    {
+        SetLocalPositionRotationNoLerp(uid, pos, rot, xform);
+    }
+
     /// <summary>
     ///     Simultaneously set the position and rotation. This is better than setting individually, as it reduces the number of move events and matrix rebuilding operations.
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public virtual void SetLocalPositionRotation(EntityUid uid, Vector2 pos, Angle rot, TransformComponent? xform = null)
+    public void SetLocalPositionRotationNoLerp(EntityUid uid, Vector2 pos, Angle rot, TransformComponent? xform = null)
     {
         if (!XformQuery.Resolve(uid, ref xform))
             return;
@@ -1143,17 +1233,22 @@ public abstract partial class SharedTransformSystem
         var oldParent = xform._parent;
         var oldPosition = xform._localPosition;
         var oldRotation = xform.LocalRotation;
+        var meta = MetaData(uid);
 
-        if (!xform.Anchored)
+        if (!xform.Anchored && !xform._localPosition.EqualsApprox(pos))
+        {
             xform._localPosition = pos;
+            DirtyField(uid, xform, nameof(TransformComponent._localPosition), meta);
+        }
 
-        if (!xform.NoLocalRotation)
+        if (!xform.NoLocalRotation && !xform._localRotation.EqualsApprox(rot))
+        {
             xform._localRotation = rot;
+            DirtyField(uid, xform, nameof(TransformComponent._localRotation), meta);
+        }
 
         DebugTools.Assert(!xform.NoLocalRotation || xform.LocalRotation == 0);
 
-        var meta = MetaData(uid);
-        Dirty(uid, xform, meta);
         xform.MatricesDirty = true;
 
         if (!xform.Initialized)

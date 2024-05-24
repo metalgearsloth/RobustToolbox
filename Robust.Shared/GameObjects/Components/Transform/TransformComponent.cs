@@ -19,8 +19,11 @@ namespace Robust.Shared.GameObjects
     ///     Stores the position and orientation of the entity.
     /// </summary>
     [RegisterComponent, NetworkedComponent]
-    public sealed partial class TransformComponent : Component, IComponentDebug
+    public sealed partial class TransformComponent : Component, IComponentDebug, IComponentDelta
     {
+        public GameTick LastFieldUpdate { get; set; }
+        public GameTick[] LastModifiedFields { get; set; }
+
         [Dependency] private readonly IEntityManager _entMan = default!;
         [Dependency] private readonly IGameTiming _gameTiming = default!;
 
@@ -128,7 +131,7 @@ namespace Robust.Shared.GameObjects
                     LocalRotation = Angle.Zero;
 
                 _noLocalRotation = value;
-                _entMan.Dirty(Owner, this);
+                _entMan.DirtyField(Owner, this, nameof(_noLocalRotation));
             }
         }
 
@@ -151,7 +154,7 @@ namespace Robust.Shared.GameObjects
                 var oldRotation = _localRotation;
                 _localRotation = value;
                 var meta = _entMan.GetComponent<MetaDataComponent>(Owner);
-                _entMan.Dirty(Owner, this, meta);
+                _entMan.DirtyField(Owner, this, nameof(_localRotation), meta);
                 MatricesDirty = true;
 
                 if (!Initialized)
@@ -337,7 +340,7 @@ namespace Robust.Shared.GameObjects
 
                 _localPosition = value;
                 var meta = _entMan.GetComponent<MetaDataComponent>(Owner);
-                _entMan.Dirty(Owner, this, meta);
+                _entMan.DirtyField(Owner, this, nameof(_localPosition), meta);
                 MatricesDirty = true;
 
                 if (!Initialized)

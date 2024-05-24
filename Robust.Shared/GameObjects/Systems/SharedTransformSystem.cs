@@ -48,11 +48,24 @@ namespace Robust.Shared.GameObjects
         /// </summary>
         internal event MoveEventHandler? OnBeforeMoveEvent;
 
+        private int _positionFieldIndex;
+        private int _rotationFieldIndex;
+
         public override void Initialize()
         {
             base.Initialize();
 
             UpdatesOutsidePrediction = true;
+
+            EntityManager.ComponentFactory.RegisterNetworkedFields<TransformComponent>(
+                nameof(TransformComponent._parent),
+                nameof(TransformComponent._anchored),
+                nameof(TransformComponent._noLocalRotation),
+                nameof(TransformComponent._localRotation),
+                nameof(TransformComponent._localPosition));
+
+            _rotationFieldIndex = 3;
+            _positionFieldIndex = 4;
 
             _mapQuery = GetEntityQuery<MapComponent>();
             _gridQuery = GetEntityQuery<MapGridComponent>();
@@ -306,10 +319,58 @@ namespace Robust.Shared.GameObjects
     }
 
     /// <summary>
+    ///     Delta state of a TransformComponent.
+    /// </summary>
+    [Serializable, NetSerializable]
+    internal record struct TransformPositionComponentState : IComponentDeltaState<TransformComponentState>
+    {
+        public Vector2 Position;
+
+        public void ApplyToFullState(TransformComponentState fullState)
+        {
+            fullState.LocalPosition = Position;
+        }
+
+        public TransformComponentState CreateNewFullState(TransformComponentState fullState)
+        {
+            return new TransformComponentState(Position,
+                fullState.Rotation,
+                fullState.ParentID,
+                fullState.NoLocalRotation,
+                fullState.Anchored);
+        }
+    }
+
+    /// <summary>
+    ///     Delta state of a TransformComponent.
+    /// </summary>
+    [Serializable, NetSerializable]
+    internal record struct TransformPositionRotationComponentState : IComponentDeltaState<TransformComponentState>
+    {
+        public Vector2 Position;
+        public Angle Angle;
+
+        public void ApplyToFullState(TransformComponentState fullState)
+        {
+            fullState.LocalPosition = Position;
+            fullState.Rotation = Angle;
+        }
+
+        public TransformComponentState CreateNewFullState(TransformComponentState fullState)
+        {
+            return new TransformComponentState(Position,
+                Angle,
+                fullState.ParentID,
+                fullState.NoLocalRotation,
+                fullState.Anchored);
+        }
+    }
+
+    /// <summary>
     ///     Serialized state of a TransformComponent.
     /// </summary>
     [Serializable, NetSerializable]
-    internal readonly record struct TransformComponentState : IComponentState
+    internal record struct TransformComponentState : IComponentState
     {
         /// <summary>
         ///     Current parent entity of this entity.
@@ -319,12 +380,12 @@ namespace Robust.Shared.GameObjects
         /// <summary>
         ///     Current position offset of the entity.
         /// </summary>
-        public readonly Vector2 LocalPosition;
+        public Vector2 LocalPosition;
 
         /// <summary>
         ///     Current rotation offset of the entity.
         /// </summary>
-        public readonly Angle Rotation;
+        public Angle Rotation;
 
         /// <summary>
         /// Is the transform able to be locally rotated?
