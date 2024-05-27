@@ -41,12 +41,16 @@ public abstract partial class SharedTransformSystem
         oldGridXform._children.Remove(uid);
         newGridXform._children.Add(uid);
         xform._parent = newGridUid;
+        DirtyField(uid, xform, nameof(TransformComponent._parent));
         xform._anchored = true;
+        // Shouldn't need to dirty anchored.
         var oldPos = xform._localPosition;
         var oldRot = xform._localRotation;
         var oldMap = xform.MapUid;
         xform._localPosition = tilePos + newGrid.TileSizeHalfVector;
+        DirtyField(uid, xform, nameof(TransformComponent._localPosition));
         xform._localRotation += rotation;
+        DirtyField(uid, xform, nameof(TransformComponent._localRotation));
 
         SetGridId(uid, xform, newGridUid, XformQuery);
         var meta = MetaData(uid);
@@ -55,8 +59,6 @@ public abstract partial class SharedTransformSystem
         DebugTools.Assert(XformQuery.GetComponent(oldGridUid).MapID == XformQuery.GetComponent(newGridUid).MapID);
         DebugTools.Assert(xform._anchored);
 
-        // Full dirty as it's all changing anyway.
-        Dirty(uid, xform, meta);
         var ev = new ReAnchorEvent(uid, oldGridUid, newGridUid, tilePos, xform);
         RaiseLocalEvent(uid, ref ev);
     }
@@ -84,7 +86,7 @@ public abstract partial class SharedTransformSystem
         var wasAnchored = entity.Comp._anchored;
         xform._anchored = true;
         var meta = MetaData(uid);
-        DirtyField(entity.Owner, entity.Comp, nameof(TransformComponent._anchored));
+        DirtyField(entity.Owner, entity.Comp, nameof(TransformComponent._anchored), meta);
 
         // Mark as static before doing position changes, to avoid the velocity change on parent change.
         _physics.TrySetBodyType(uid, BodyType.Static, xform: xform);
@@ -133,8 +135,8 @@ public abstract partial class SharedTransformSystem
         if (!xform._anchored)
             return;
 
-        DirtyField(uid, xform, nameof(TransformComponent._anchored));
         xform._anchored = false;
+        DirtyField(uid, xform, nameof(TransformComponent._anchored));
 
         if (setPhysics)
             _physics.TrySetBodyType(uid, BodyType.Dynamic, xform: xform);
@@ -272,7 +274,10 @@ public abstract partial class SharedTransformSystem
         }
 
         if (!AnchorEntity(uid, component, grid))
+        {
             component._anchored = false;
+            DirtyField(uid, component, nameof(TransformComponent._anchored));
+        }
     }
 
     internal void InitializeGridUid(
@@ -708,10 +713,9 @@ public abstract partial class SharedTransformSystem
             // Okay we can do a delta
             if (!fullUpdate)
             {
-                var posDirty = component.LastModifiedFields[_positionFieldIndex] >= args.FromTick;
                 var rotDirty = component.LastModifiedFields[_rotationFieldIndex] >= args.FromTick;
 
-                if (posDirty && rotDirty)
+                if (rotDirty)
                 {
                     args.State = new TransformPositionRotationComponentState()
                     {

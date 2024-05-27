@@ -48,7 +48,6 @@ namespace Robust.Shared.GameObjects
         /// </summary>
         internal event MoveEventHandler? OnBeforeMoveEvent;
 
-        private int _positionFieldIndex;
         private int _rotationFieldIndex;
 
         public override void Initialize()
@@ -65,7 +64,6 @@ namespace Robust.Shared.GameObjects
                 nameof(TransformComponent._localPosition));
 
             _rotationFieldIndex = 3;
-            _positionFieldIndex = 4;
 
             _mapQuery = GetEntityQuery<MapComponent>();
             _gridQuery = GetEntityQuery<MapGridComponent>();
