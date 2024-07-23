@@ -147,6 +147,26 @@ namespace Robust.Client.GameObjects
             }
         }
 
+        /// <summary>
+        /// Gets the pixel size of this sprite by summarising the pixel size of its layers.
+        /// </summary>
+        /// <param name="visible">Should only visible layers be considered.</param>
+        [ViewVariables]
+        public Vector2i GetPixelSize(bool visible = true)
+        {
+            var size = Vector2i.Zero;
+
+            foreach (var layer in AllLayers)
+            {
+                if (visible && !layer.Visible)
+                    continue;
+
+                size = Vector2i.ComponentMax(size, layer.PixelSize);
+            }
+
+            return size;
+        }
+
         [DataField("color")]
         private Color color = Color.White;
 
