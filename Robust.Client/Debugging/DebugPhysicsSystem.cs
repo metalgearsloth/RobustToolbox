@@ -120,6 +120,76 @@ namespace Robust.Client.Debugging
 
         private PhysicsDebugFlags _flags;
 
+        /// <summary>
+        /// Draws the physics shape inside of teh world handle.
+        /// </summary>
+        /// <param name="filled">Should we also draw the interior of the shape if applicable</param>
+        public void DrawShape(DrawingHandleWorld worldHandle, IPhysShape shape, Transform xform, Color color, bool filled = true)
+        {
+            switch (shape)
+            {
+                case ChainShape cShape:
+                {
+                    var count = cShape.Count;
+                    var vertices = cShape.Vertices;
+
+                    var v1 = Shared.Physics.Transform.Mul(xform, vertices[0]);
+                    for (var i = 1; i < count; ++i)
+                    {
+                        var v2 = Shared.Physics.Transform.Mul(xform, vertices[i]);
+                        worldHandle.DrawLine(v1, v2, color);
+                        v1 = v2;
+                    }
+                }
+                    break;
+                case PhysShapeCircle circle:
+                    var center = Shared.Physics.Transform.Mul(xform, circle.Position);
+                    worldHandle.DrawCircle(center, circle.Radius, color, filled: filled);
+                    break;
+                case EdgeShape edge:
+                {
+                    var v1 = Shared.Physics.Transform.Mul(xform, edge.Vertex1);
+                    var v2 = Shared.Physics.Transform.Mul(xform, edge.Vertex2);
+                    worldHandle.DrawLine(v1, v2, color);
+
+                    if (edge.OneSided)
+                    {
+                        worldHandle.DrawCircle(v1, 0.1f, color);
+                        worldHandle.DrawCircle(v2, 0.1f, color);
+                    }
+                }
+
+                    break;
+                case PolygonShape poly:
+                    if (filled)
+                    {
+                        Span<Vector2> verts = stackalloc Vector2[Math.Min(poly.VertexCount, PhysicsConstants.MaxPolygonVertices)];
+
+                        for (var i = 0; i < verts.Length; i++)
+                        {
+                            verts[i] = Shared.Physics.Transform.Mul(xform, poly.Vertices[i]);
+                        }
+
+                        worldHandle.DrawPrimitives(DrawPrimitiveTopology.TriangleFan, verts, color);
+                    }
+                    else
+                    {
+                        Span<Vector2> verts = stackalloc Vector2[Math.Min(poly.VertexCount, PhysicsConstants.MaxPolygonVertices)];
+
+                        for (var i = 0; i < verts.Length; i++)
+                        {
+                            verts[i] = Shared.Physics.Transform.Mul(xform, poly.Vertices[i]);
+                        }
+
+                        worldHandle.DrawPrimitives(DrawPrimitiveTopology.LineLoop, verts, color);
+                    }
+
+                    break;
+                default:
+                    return;
+            }
+        }
+
         public override void HandlePreSolve(Contact contact, in Manifold oldManifold)
         {
             if ((Flags & (PhysicsDebugFlags.ContactPoints | PhysicsDebugFlags.ContactNormals)) != 0)
@@ -255,27 +325,27 @@ namespace Robust.Client.Debugging
                         // Invalid shape - Box2D doesn't check for IsSensor but we will for sanity.
                         if (comp.BodyType == BodyType.Dynamic && fixture.Density == 0f && fixture.Hard)
                         {
-                            DrawShape(worldHandle, fixture, xform, Color.Red.WithAlpha(AlphaModifier));
+                            _debugPhysicsSystem.DrawShape(worldHandle, fixture.Shape, xform, Color.Red.WithAlpha(AlphaModifier));
                         }
                         else if (!comp.CanCollide)
                         {
-                            DrawShape(worldHandle, fixture, xform, new Color(0.5f, 0.5f, 0.3f).WithAlpha(AlphaModifier));
+                            _debugPhysicsSystem.DrawShape(worldHandle, fixture.Shape, xform, new Color(0.5f, 0.5f, 0.3f).WithAlpha(AlphaModifier));
                         }
                         else if (comp.BodyType == BodyType.Static)
                         {
-                            DrawShape(worldHandle, fixture, xform, new Color(0.5f, 0.9f, 0.5f).WithAlpha(AlphaModifier));
+                            _debugPhysicsSystem.DrawShape(worldHandle, fixture.Shape, xform, new Color(0.5f, 0.9f, 0.5f).WithAlpha(AlphaModifier));
                         }
                         else if ((comp.BodyType & (BodyType.Kinematic | BodyType.KinematicController)) != 0x0)
                         {
-                            DrawShape(worldHandle, fixture, xform, new Color(0.5f, 0.5f, 0.9f).WithAlpha(AlphaModifier));
+                            _debugPhysicsSystem.DrawShape(worldHandle, fixture.Shape, xform, new Color(0.5f, 0.5f, 0.9f).WithAlpha(AlphaModifier));
                         }
                         else if (!comp.Awake)
                         {
-                            DrawShape(worldHandle, fixture, xform, new Color(0.6f, 0.6f, 0.6f).WithAlpha(AlphaModifier));
+                            _debugPhysicsSystem.DrawShape(worldHandle, fixture.Shape, xform, new Color(0.6f, 0.6f, 0.6f).WithAlpha(AlphaModifier));
                         }
                         else
                         {
-                            DrawShape(worldHandle, fixture, xform, new Color(0.9f, 0.7f, 0.7f).WithAlpha(AlphaModifier));
+                            _debugPhysicsSystem.DrawShape(worldHandle, fixture.Shape, xform, new Color(0.9f, 0.7f, 0.7f).WithAlpha(AlphaModifier));
                         }
                     }
                 }
@@ -470,57 +540,6 @@ namespace Robust.Client.Debugging
                 case OverlaySpace.WorldSpace:
                     DrawWorld((DrawingHandleWorld) args.DrawingHandle, args);
                     break;
-            }
-        }
-
-        private void DrawShape(DrawingHandleWorld worldHandle, Fixture fixture, Transform xform, Color color)
-        {
-            switch (fixture.Shape)
-            {
-                case ChainShape cShape:
-                {
-                    var count = cShape.Count;
-                    var vertices = cShape.Vertices;
-
-                    var v1 = Transform.Mul(xform, vertices[0]);
-                    for (var i = 1; i < count; ++i)
-                    {
-                        var v2 = Transform.Mul(xform, vertices[i]);
-                        worldHandle.DrawLine(v1, v2, color);
-                        v1 = v2;
-                    }
-                }
-                    break;
-                case PhysShapeCircle circle:
-                    var center = Transform.Mul(xform, circle.Position);
-                    worldHandle.DrawCircle(center, circle.Radius, color);
-                    break;
-                case EdgeShape edge:
-                {
-                    var v1 = Transform.Mul(xform, edge.Vertex1);
-                    var v2 = Transform.Mul(xform, edge.Vertex2);
-                    worldHandle.DrawLine(v1, v2, color);
-
-                    if (edge.OneSided)
-                    {
-                        worldHandle.DrawCircle(v1, 0.1f, color);
-                        worldHandle.DrawCircle(v2, 0.1f, color);
-                    }
-                }
-
-                    break;
-                case PolygonShape poly:
-                    Span<Vector2> verts = stackalloc Vector2[poly.VertexCount];
-
-                    for (var i = 0; i < verts.Length; i++)
-                    {
-                        verts[i] = Transform.Mul(xform, poly.Vertices[i]);
-                    }
-
-                    worldHandle.DrawPrimitives(DrawPrimitiveTopology.TriangleFan, verts, color);
-                    break;
-                default:
-                    return;
             }
         }
 
