@@ -1,3 +1,4 @@
+using Robust.Shared.GameObjects;
 using Robust.Shared.IoC;
 using Robust.Shared.Serialization.Manager;
 using Robust.Shared.Serialization.Manager.Attributes;
@@ -17,7 +18,7 @@ namespace Robust.Shared.Serialization.TypeSerializers.Implementations
             ISerializationContext? context = null,
             ISerializationManager.InstantiationDelegate<string>? instanceProvider = null)
         {
-            return node.Value;
+            return dependencies.Resolve<StringManager>().Intern(node.Value);
         }
 
         public ValidationNode Validate(ISerializationManager serializationManager, ValueDataNode node,

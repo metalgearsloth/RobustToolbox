@@ -52,6 +52,7 @@ namespace Robust.Shared
             deps.Register<HttpClientHolder>();
             deps.Register<RobustMemoryManager>();
             deps.Register<EntityConsoleHost>();
+            deps.Register<StringManager>();
         }
     }
 }
