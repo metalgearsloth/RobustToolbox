@@ -57,7 +57,7 @@ namespace Robust.Shared.Serialization
 
             private FrozenDictionary<string, int> GenMapDict(string[] strings)
             {
-                var dict = new Dictionary<string, int>();
+                var dict = new Dictionary<string, int>(strings.Length);
                 for (var i = 0; i < strings.Length; i++)
                 {
                     dict.Add(strings[i], i);
