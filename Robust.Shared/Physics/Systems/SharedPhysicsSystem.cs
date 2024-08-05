@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Prometheus;
 using Robust.Shared.Configuration;
 using Robust.Shared.Containers;
@@ -59,6 +60,10 @@ namespace Robust.Shared.Physics.Systems
         [Dependency] private readonly SharedTransformSystem _transform = default!;
         [Dependency] private readonly CollisionWakeSystem _wakeSystem = default!;
 
+        internal PhysicsWorld DefaultWorld = new();
+
+        private List<PhysicsWorld> _worlds = new();
+
         private int _substeps;
 
         /// <summary>
@@ -73,7 +78,6 @@ namespace Robust.Shared.Physics.Systems
         protected EntityQuery<PhysicsComponent> PhysicsQuery;
         private EntityQuery<TransformComponent> _xformQuery;
         private EntityQuery<CollideOnAnchorComponent> _anchorQuery;
-        protected EntityQuery<PhysicsMapComponent> PhysMapQuery;
         protected EntityQuery<MapComponent> MapQuery;
 
         public override void Initialize()
@@ -84,13 +88,11 @@ namespace Robust.Shared.Physics.Systems
             PhysicsQuery = GetEntityQuery<PhysicsComponent>();
             _xformQuery = GetEntityQuery<TransformComponent>();
             _anchorQuery = GetEntityQuery<CollideOnAnchorComponent>();
-            PhysMapQuery = GetEntityQuery<PhysicsMapComponent>();
             MapQuery = GetEntityQuery<MapComponent>();
 
             SubscribeLocalEvent<GridAddEvent>(OnGridAdd);
             SubscribeLocalEvent<CollisionChangeEvent>(OnCollisionChange);
             SubscribeLocalEvent<PhysicsComponent, EntGotRemovedFromContainerMessage>(HandleContainerRemoved);
-            SubscribeLocalEvent<PhysicsMapComponent, ComponentInit>(HandlePhysicsMapInit);
             SubscribeLocalEvent<PhysicsComponent, ComponentInit>(OnPhysicsInit);
             SubscribeLocalEvent<PhysicsComponent, ComponentShutdown>(OnPhysicsShutdown);
             SubscribeLocalEvent<PhysicsComponent, ComponentGetState>(OnPhysicsGetState);
@@ -112,6 +114,16 @@ namespace Robust.Shared.Physics.Systems
                 RemComp<FixturesComponent>(uid);
         }
 
+        public PhysicsWorld CreateWorld()
+        {
+            return new PhysicsWorld();
+        }
+
+        public bool DestroyWorld(PhysicsWorld world)
+        {
+            return _worlds.Remove(world);
+        }
+
         private void OnCollisionChange(ref CollisionChangeEvent ev)
         {
             var uid = ev.BodyUid;
@@ -126,19 +138,11 @@ namespace Robust.Shared.Physics.Systems
             }
         }
 
-        private void HandlePhysicsMapInit(EntityUid uid, PhysicsMapComponent component, ComponentInit args)
-        {
-            _deps.InjectDependencies(component);
-            component.AutoClearForces = _cfg.GetCVar(CVars.AutoClearForces);
-        }
-
         private void OnAutoClearChange(bool value)
         {
-            var enumerator = AllEntityQuery<PhysicsMapComponent>();
-
-            while (enumerator.MoveNext(out var comp))
+            foreach (var world in _worlds)
             {
-                comp.AutoClearForces = value;
+                world.AutoClearForces = value;
             }
         }
 
@@ -172,7 +176,8 @@ namespace Robust.Shared.Physics.Systems
             if (oldMap != xform.MapUid)
             {
                 // This will also handle broadphase updating & joint clearing.
-                HandleMapChange(uid, xform, body, oldMap, xform.MapUid);
+                // TODO: Need to be able to occasionally keep joints across maps.
+                HandleMapChange(uid, xform);
                 return;
             }
 
@@ -183,11 +188,9 @@ namespace Robust.Shared.Physics.Systems
         /// <summary>
         ///     Recursively add/remove from awake bodies, clear joints, remove from move buffer, and update broadphase.
         /// </summary>
-        private void HandleMapChange(EntityUid uid, TransformComponent xform, PhysicsComponent? body, EntityUid? oldMapId, EntityUid? newMapId)
+        private void HandleMapChange(EntityUid uid, TransformComponent xform)
         {
-            PhysMapQuery.TryGetComponent(oldMapId, out var oldMap);
-            PhysMapQuery.TryGetComponent(newMapId, out var newMap);
-            RecursiveMapUpdate(uid, xform, body, newMap, oldMap);
+            RecursiveMapUpdate(uid, xform);
         }
 
         /// <summary>
@@ -195,34 +198,16 @@ namespace Robust.Shared.Physics.Systems
         /// </summary>
         private void RecursiveMapUpdate(
             EntityUid uid,
-            TransformComponent xform,
-            PhysicsComponent? body,
-            PhysicsMapComponent? newMap,
-            PhysicsMapComponent? oldMap)
+            TransformComponent xform)
         {
             DebugTools.Assert(!Deleted(uid));
-
-            // This entity may not have a body, but some of its children might:
-            if (body != null)
-            {
-                if (body.Awake)
-                {
-                    RemoveSleepBody(uid, body, oldMap);
-                    AddAwakeBody(uid, body, newMap);
-                    DebugTools.Assert(body.Awake);
-                }
-                else
-                    DebugTools.Assert(oldMap?.AwakeBodies.Contains(body) != true);
-            }
-
             _joints.ClearJoints(uid);
 
             foreach (var child in xform._children)
             {
                 if (_xformQuery.TryGetComponent(child, out var childXform))
                 {
-                    PhysicsQuery.TryGetComponent(child, out var childBody);
-                    RecursiveMapUpdate(child, childXform, childBody, newMap, oldMap);
+                    RecursiveMapUpdate(child, childXform);
                 }
             }
         }
@@ -284,32 +269,31 @@ namespace Robust.Shared.Physics.Systems
             EffectiveCurTime = _gameTiming.CurTime;
             for (int i = 0; i < _substeps; i++)
             {
-                var updateBeforeSolve = new PhysicsUpdateBeforeSolveEvent(prediction, frameTime);
-                RaiseLocalEvent(ref updateBeforeSolve);
-
-                var contactEnumerator = AllEntityQuery<PhysicsMapComponent, TransformComponent>();
-
-                // Find new contacts and (TODO: temporary) update any per-map virtual controllers
-                while (contactEnumerator.MoveNext(out var comp, out var xform))
+                foreach (var world in _worlds)
                 {
-                    // Box2D does this at the end of a step and also here when there's a fixture update.
-                    // Given external stuff can move bodies we'll just do this here.
-                    _broadphase.FindNewContacts(comp, xform.MapID);
+                    var updateBeforeSolve = new PhysicsUpdateBeforeSolveEvent(prediction, frameTime);
+                    RaiseLocalEvent(ref updateBeforeSolve);
+
+                    _broadphase.FindNewContacts(world, xform.MapID);
 
                     var updateMapBeforeSolve = new PhysicsUpdateBeforeMapSolveEvent(prediction, comp, frameTime);
                     RaiseLocalEvent(ref updateMapBeforeSolve);
+
+                    CollideContacts();
+                    var enumerator = AllEntityQuery<PhysicsMapComponent>();
+
+                    while (enumerator.MoveNext(out var uid, out var comp))
+                    {
+                        Step(uid, comp, frameTime, prediction);
+                    }
+
+                    var updateAfterSolve = new PhysicsUpdateAfterSolveEvent(prediction, frameTime);
+                    RaiseLocalEvent(ref updateAfterSolve);
                 }
 
-                CollideContacts();
-                var enumerator = AllEntityQuery<PhysicsMapComponent>();
 
-                while (enumerator.MoveNext(out var uid, out var comp))
-                {
-                    Step(uid, comp, frameTime, prediction);
-                }
 
-                var updateAfterSolve = new PhysicsUpdateAfterSolveEvent(prediction, frameTime);
-                RaiseLocalEvent(ref updateAfterSolve);
+
 
                 // On last substep (or main step where no substeps occured) we'll update all of the lerp data.
                 if (i == _substeps - 1)

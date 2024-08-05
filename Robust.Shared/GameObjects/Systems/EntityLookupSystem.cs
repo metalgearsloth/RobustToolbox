@@ -157,8 +157,7 @@ public sealed partial class EntityLookupSystem : EntitySystem
     }
 
     private void RemoveChildrenFromTerminatingBroadphase(TransformComponent xform,
-        BroadphaseComponent component,
-        PhysicsMapComponent? map)
+        BroadphaseComponent component)
     {
         foreach (var child in xform._children)
         {
@@ -176,10 +175,6 @@ public sealed partial class EntityLookupSystem : EntitySystem
 
             if (childXform.Broadphase.Value.CanCollide && _fixturesQuery.TryGetComponent(child, out var fixtures))
             {
-                if (map == null)
-                    _mapQuery.TryGetComponent(childXform.Broadphase.Value.PhysicsMap, out map);
-
-                DebugTools.Assert(map == null || childXform.Broadphase.Value.PhysicsMap == map.Owner);
                 var tree = childXform.Broadphase.Value.Static ? component.StaticTree : component.DynamicTree;
                 foreach (var fixture in fixtures.Fixtures.Values)
                 {
@@ -333,7 +328,7 @@ public sealed partial class EntityLookupSystem : EntitySystem
             AddOrUpdateSundriesTree(old.Uid, broadphase, uid, xform, body.BodyType == BodyType.Static);
     }
 
-    private void RemoveBroadTree(BroadphaseComponent lookup, FixturesComponent manager, bool staticBody, PhysicsMapComponent? map)
+    private void RemoveBroadTree(BroadphaseComponent lookup, FixturesComponent manager, bool staticBody)
     {
         var tree = staticBody ? lookup.StaticTree : lookup.DynamicTree;
         foreach (var fixture in manager.Fixtures.Values)
@@ -342,7 +337,7 @@ public sealed partial class EntityLookupSystem : EntitySystem
         }
     }
 
-    internal void DestroyProxies(Fixture fixture, IBroadPhase tree, PhysicsMapComponent? map)
+    internal void DestroyProxies(Fixture fixture, IBroadPhase tree)
     {
         var buffer = map?.MoveBuffer;
         for (var i = 0; i < fixture.ProxyCount; i++)
