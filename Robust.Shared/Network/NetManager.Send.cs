@@ -6,7 +6,7 @@ using Lidgren.Network;
 
 namespace Robust.Shared.Network;
 
-public sealed partial class NetManager
+sealed partial class NetManager
 {
     // Encryption is relatively expensive, so we want to not do it on the main thread.
     // We can't *just* thread pool everything though, because most messages still require strict ordering guarantees.

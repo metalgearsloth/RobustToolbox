@@ -37,7 +37,7 @@ namespace Robust.Shared.Network
     /// <summary>
     ///     Manages all network connections and packet IO.
     /// </summary>
-    public sealed partial class NetManager : IClientNetManager, IServerNetManager, IPostInjectInit
+    internal sealed partial class NetManager : IClientNetManager, IServerNetManager, IPostInjectInit
     {
         internal const int SharedKeyLength = CryptoAeadXChaCha20Poly1305Ietf.KeyBytes; // 32 bytes
 
@@ -948,7 +948,7 @@ namespace Robust.Shared.Network
                 _logger.Error($"{msg.SenderConnection.RemoteEndPoint}: Wrong deserialization of {type.Name} packet:\n{ice}");
                 return true;
             }
-            catch (Exception e) // yes, we want to catch ALL exeptions for security
+            catch (Exception e) // yes, we want to catch ALL exceptions for security
             {
                 _logger.Error($"{msg.SenderConnection.RemoteEndPoint}: Failed to deserialize {type.Name} packet:\n{e}");
                 return true;

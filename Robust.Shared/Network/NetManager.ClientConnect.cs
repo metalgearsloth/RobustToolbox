@@ -18,7 +18,7 @@ using SpaceWizards.Sodium;
 
 namespace Robust.Shared.Network
 {
-    public partial class NetManager
+    partial class NetManager
     {
         private CancellationTokenSource? _cancelConnectTokenSource;
         private ClientConnectionState _clientConnectState;
