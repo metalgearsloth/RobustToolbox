@@ -24,6 +24,8 @@ public interface IParallelManager
     /// <param name="job"></param>
     WaitHandle Process(IRobustJob job);
 
+    public void ProcessNow(IRobustJob job);
+
     /// <summary>
     /// Takes in a parallel job and runs it the specified amount.
     /// </summary>
@@ -43,6 +45,11 @@ public interface IParallelManager
 internal interface IParallelManagerInternal : IParallelManager
 {
     void Initialize();
+}
+
+public record struct RobustJobHandle()
+{
+    internal ManualResetEventSlim Event = new();
 }
 
 internal sealed class ParallelManager : IParallelManagerInternal
@@ -123,6 +130,11 @@ internal sealed class ParallelManager : IParallelManagerInternal
         return subJob.Event.WaitHandle;
     }
 
+    public void ProcessNow(IRobustJob job)
+    {
+        job.Execute();
+    }
+
     /// <inheritdoc/>
     public void ProcessNow(IParallelRobustJob job, int amount)
     {
@@ -195,7 +207,7 @@ internal sealed class ParallelManager : IParallelManagerInternal
     /// <summary>
     /// Runs an <see cref="IRobustJob"/> and handles cleanup.
     /// </summary>
-    private sealed class InternalJob : IRobustJob
+    private sealed class InternalJob : IRobustJob, IThreadPoolWorkItem
     {
         private ISawmill _sawmill = default!;
         private IRobustJob _robust = default!;
@@ -231,7 +243,7 @@ internal sealed class ParallelManager : IParallelManagerInternal
     /// <summary>
     /// Runs an <see cref="IParallelRobustJob"/> and handles cleanup.
     /// </summary>
-    private sealed class InternalParallelJob : IRobustJob
+    private sealed class InternalParallelJob : IRobustJob, IThreadPoolWorkItem
     {
         private IParallelRobustJob _robust = default!;
         private int _start;

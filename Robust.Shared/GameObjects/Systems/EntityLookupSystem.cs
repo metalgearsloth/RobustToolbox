@@ -226,6 +226,8 @@ public sealed partial class EntityLookupSystem : EntitySystem
                 $"Broadphase's map is missing a physics map comp. Broadphase: {ToPrettyString(broadphase.Owner)}");
         }
 
+        // Issue is if you have an init entity parented to an un-init entity the broadphase data never gets updated.
+        // This can happen in client gamestate as entities get initialized out of order.
         var ent = new Entity<TransformComponent, BroadphaseComponent>(broadphase, xform, broadphase);
         var map = new Entity<PhysicsMapComponent>(xform.MapUid.Value, physMap);
         var enumerator = xform.ChildEnumerator;
@@ -272,7 +274,7 @@ public sealed partial class EntityLookupSystem : EntitySystem
             }
         }
 
-        DebugTools.Assert(xform.Broadphase is not {} x || x.Uid == broadphase.Owner && x.PhysicsMap == map.Owner);
+        DebugTools.Assert(xform.Broadphase is not {} x || x.Uid == broadphase.Owner && (!x.PhysicsMap.IsValid() || x.PhysicsMap == map.Owner));
         AddOrUpdateEntityTree(
             broadphase.Owner,
             broadphase.Comp2,

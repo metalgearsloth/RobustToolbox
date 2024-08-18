@@ -73,6 +73,9 @@ namespace Robust.Shared.GameObjects
         protected readonly Queue<EntityUid> QueuedDeletions = new();
         protected readonly HashSet<EntityUid> QueuedDeletionsSet = new();
 
+        // Temporary storage for metadata components.
+        private List<Entity<MetaDataComponent>> _meta = new();
+
         private EntityDiffContext _context = new();
 
         /// <summary>
@@ -705,12 +708,18 @@ namespace Robust.Shared.GameObjects
                 }
             }
 
+            DebugTools.Assert(_meta.Count == 0);
+
             // Then delete all other entities.
-            var ents = _entTraitDict[typeof(MetaDataComponent)].ToArray();
-            DebugTools.Assert(ents.Length == Entities.Count);
-            foreach (var (uid, comp) in ents)
+            foreach (var ent in _entTraitDict[typeof(MetaDataComponent)])
             {
-                var meta = (MetaDataComponent) comp;
+                var meta = (MetaDataComponent)ent.Value;
+                _meta.Add((ent.Key, meta));
+            }
+
+            DebugTools.Assert(_meta.Count == Entities.Count);
+            foreach (var (uid, meta) in _meta)
+            {
                 if (meta.EntityLifeStage >= EntityLifeStage.Terminating)
                     continue;
 
@@ -727,6 +736,8 @@ namespace Robust.Shared.GameObjects
 #endif
                 }
             }
+
+            _meta.Clear();
 
             if (Entities.Count != 0)
                 _sawmill.Error("Entities were spawned while flushing entities.");

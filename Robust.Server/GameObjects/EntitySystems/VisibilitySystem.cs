@@ -6,7 +6,7 @@ using Robust.Shared.ViewVariables;
 
 namespace Robust.Server.GameObjects
 {
-    public sealed class VisibilitySystem : EntitySystem
+    public sealed class VisibilitySystem : SharedVisibilitySystem
     {
         [Dependency] private readonly PvsSystem _pvs = default!;
         [Dependency] private readonly IViewVariablesManager _vvManager = default!;
