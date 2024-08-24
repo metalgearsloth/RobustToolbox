@@ -4,13 +4,11 @@ using Robust.Shared.Configuration;
 using Robust.Shared.Containers;
 using Robust.Shared.GameObjects;
 using Robust.Shared.GameStates;
-using Robust.Shared.IoC;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Physics.Collision;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Physics.Controllers;
-using Robust.Shared.Physics.Dynamics;
 using Robust.Shared.Physics.Events;
 using Robust.Shared.Threading;
 using Robust.Shared.Timing;
@@ -27,7 +25,6 @@ namespace Robust.Shared.Physics.Systems
          * Raycasts for non-box shapes.
          * TOI Solver (continuous collision detection)
          * Poly cutting
-         * Chain shape
          */
 
         public static readonly Histogram TickUsageControllerBeforeSolveHistogram = Metrics.CreateHistogram("robust_entity_physics_controller_before_solve",
@@ -49,7 +46,6 @@ namespace Robust.Shared.Physics.Systems
         [Dependency] private readonly IMapManager _mapManager = default!;
         [Dependency] private readonly IParallelManager _parallel = default!;
         [Dependency] private readonly IConfigurationManager _cfg = default!;
-        [Dependency] private readonly IDependencyCollection _deps = default!;
         [Dependency] private readonly Gravity2DController _gravity = default!;
         [Dependency] private readonly EntityLookupSystem _lookup = default!;
         [Dependency] private readonly SharedBroadphaseSystem _broadphase = default!;
@@ -69,11 +65,9 @@ namespace Robust.Shared.Physics.Systems
 
         public bool MetricsEnabled { get; protected set; }
 
-        private EntityQuery<FixturesComponent> _fixturesQuery;
         protected EntityQuery<PhysicsComponent> PhysicsQuery;
         private EntityQuery<TransformComponent> _xformQuery;
         private EntityQuery<CollideOnAnchorComponent> _anchorQuery;
-        protected EntityQuery<PhysicsMapComponent> PhysMapQuery;
         protected EntityQuery<MapComponent> MapQuery;
 
         private ComponentRegistration _physicsReg = default!;
@@ -88,7 +82,6 @@ namespace Robust.Shared.Physics.Systems
             // If you update this then update the delta state + GetState + HandleState!
             EntityManager.ComponentFactory.RegisterNetworkedFields(_physicsReg,
                 nameof(PhysicsComponent.CanCollide),
-                nameof(PhysicsComponent.BodyStatus),
                 nameof(PhysicsComponent.BodyType),
                 nameof(PhysicsComponent.SleepingAllowed),
                 nameof(PhysicsComponent.FixedRotation),
@@ -97,28 +90,27 @@ namespace Robust.Shared.Physics.Systems
                 nameof(PhysicsComponent.Torque),
                 nameof(PhysicsComponent.LinearDamping),
                 nameof(PhysicsComponent.AngularDamping),
+                nameof(PhysicsComponent.Fixtures),
                 nameof(PhysicsComponent.AngularVelocity),
                 nameof(PhysicsComponent.LinearVelocity));
 
             _angularVelocityIndex = 10;
 
-            _fixturesQuery = GetEntityQuery<FixturesComponent>();
             PhysicsQuery = GetEntityQuery<PhysicsComponent>();
             _xformQuery = GetEntityQuery<TransformComponent>();
             _anchorQuery = GetEntityQuery<CollideOnAnchorComponent>();
-            PhysMapQuery = GetEntityQuery<PhysicsMapComponent>();
             MapQuery = GetEntityQuery<MapComponent>();
 
             SubscribeLocalEvent<GridAddEvent>(OnGridAdd);
             SubscribeLocalEvent<CollisionChangeEvent>(OnCollisionChange);
             SubscribeLocalEvent<PhysicsComponent, EntGotRemovedFromContainerMessage>(HandleContainerRemoved);
-            SubscribeLocalEvent<PhysicsMapComponent, ComponentInit>(HandlePhysicsMapInit);
             SubscribeLocalEvent<PhysicsComponent, ComponentInit>(OnPhysicsInit);
             SubscribeLocalEvent<PhysicsComponent, ComponentShutdown>(OnPhysicsShutdown);
             SubscribeLocalEvent<PhysicsComponent, ComponentGetState>(OnPhysicsGetState);
             SubscribeLocalEvent<PhysicsComponent, ComponentHandleState>(OnPhysicsHandleState);
             InitializeIsland();
             InitializeContacts();
+            InitializeWorlds();
 
             Subs.CVar(_configManager, CVars.AutoClearForces, OnAutoClearChange);
             Subs.CVar(_configManager, CVars.NetTickrate, UpdateSubsteps, true);
@@ -127,11 +119,10 @@ namespace Robust.Shared.Physics.Systems
 
         private void OnPhysicsShutdown(EntityUid uid, PhysicsComponent component, ComponentShutdown args)
         {
+            DestroyContacts(component);
+
             SetCanCollide(uid, false, false, body: component);
             DebugTools.Assert(!component.Awake);
-
-            if (LifeStage(uid) <= EntityLifeStage.MapInitialized)
-                RemComp<FixturesComponent>(uid);
         }
 
         private void OnCollisionChange(ref CollisionChangeEvent ev)
@@ -146,12 +137,6 @@ namespace Robust.Shared.Physics.Systems
             {
                 DestroyContacts(ev.Body);
             }
-        }
-
-        private void HandlePhysicsMapInit(EntityUid uid, PhysicsMapComponent component, ComponentInit args)
-        {
-            _deps.InjectDependencies(component);
-            component.AutoClearForces = _cfg.GetCVar(CVars.AutoClearForces);
         }
 
         private void OnAutoClearChange(bool value)
@@ -218,9 +203,7 @@ namespace Robust.Shared.Physics.Systems
         private void RecursiveMapUpdate(
             EntityUid uid,
             TransformComponent xform,
-            PhysicsComponent? body,
-            PhysicsMapComponent? newMap,
-            PhysicsMapComponent? oldMap)
+            PhysicsComponent? body)
         {
             DebugTools.Assert(!Deleted(uid));
 
@@ -229,8 +212,8 @@ namespace Robust.Shared.Physics.Systems
             {
                 if (body.Awake)
                 {
-                    RemoveSleepBody(uid, body, oldMap);
-                    AddAwakeBody(uid, body, newMap);
+                    RemoveSleepBody(uid, body);
+                    AddAwakeBody(uid, body);
                     DebugTools.Assert(body.Awake);
                 }
                 else
@@ -258,10 +241,9 @@ namespace Robust.Shared.Physics.Systems
                 return;
 
             var body = EnsureComp<PhysicsComponent>(guid);
-            var manager = EnsureComp<FixturesComponent>(guid);
 
-            SetCanCollide(guid, true, manager: manager, body: body);
-            SetBodyType(guid, BodyType.Static, manager: manager, body: body);
+            SetCanCollide(guid, true, body: body);
+            SetBodyType(guid, BodyType.Static, body: body);
         }
 
         public override void Shutdown()
@@ -269,17 +251,15 @@ namespace Robust.Shared.Physics.Systems
             base.Shutdown();
 
             ShutdownContacts();
+            ShutdownWorlds();
         }
 
-        private void UpdateMapAwakeState(EntityUid uid, PhysicsComponent body)
+        private void UpdateMapAwakeState(Entity<PhysicsComponent> entity)
         {
-            if (Transform(uid).MapUid is not {} map)
-                return;
-
-            if (body.Awake)
-                AddAwakeBody(uid, body, map);
+            if (entity.Comp.Awake)
+                AddAwakeBody(entity);
             else
-                RemoveSleepBody(uid, body, map);
+                RemoveSleepBody(entity);
         }
 
         private void HandleContainerRemoved(EntityUid uid, PhysicsComponent physics, EntGotRemovedFromContainerMessage message)
@@ -348,11 +328,6 @@ namespace Robust.Shared.Physics.Systems
             }
 
             EffectiveCurTime = null;
-        }
-
-        protected virtual void FinalStep(PhysicsMapComponent component)
-        {
-
         }
     }
 

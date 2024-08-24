@@ -52,46 +52,41 @@ public abstract partial class SharedPhysicsSystem
     ///     Ordering is under <see cref="ShapeType"/>
     ///     uses enum to work out which collision evaluation to use.
     /// </summary>
-    private static Contact.ContactType[,] _registers =
+    private static ContactType[,] _registers =
     {
-       {
-           // Circle register
-           Contact.ContactType.Circle,
-           Contact.ContactType.EdgeAndCircle,
-           Contact.ContactType.PolygonAndCircle,
-           Contact.ContactType.ChainAndCircle,
-       },
-       {
-           // Edge register
-           Contact.ContactType.EdgeAndCircle,
-           Contact.ContactType.NotSupported, // Edge
-           Contact.ContactType.EdgeAndPolygon,
-           Contact.ContactType.NotSupported, // Chain
-       },
-       {
-           // Polygon register
-           Contact.ContactType.PolygonAndCircle,
-           Contact.ContactType.EdgeAndPolygon,
-           Contact.ContactType.Polygon,
-           Contact.ContactType.ChainAndPolygon,
-       },
-       {
-           // Chain register
-           Contact.ContactType.ChainAndCircle,
-           Contact.ContactType.NotSupported, // Edge
-           Contact.ContactType.ChainAndPolygon,
-           Contact.ContactType.NotSupported, // Chain
-       }
-   };
-
-    private int ContactCount => _activeContacts.Count;
+        {
+            // Circle register
+            ContactType.Circle,
+            ContactType.EdgeAndCircle,
+            ContactType.PolygonAndCircle,
+            ContactType.ChainAndCircle,
+        },
+        {
+            // Edge register
+            ContactType.EdgeAndCircle,
+            ContactType.NotSupported, // Edge
+            ContactType.EdgeAndPolygon,
+            ContactType.NotSupported, // Chain
+        },
+        {
+            // Polygon register
+            ContactType.PolygonAndCircle,
+            ContactType.EdgeAndPolygon,
+            ContactType.Polygon,
+            ContactType.ChainAndPolygon,
+        },
+        {
+            // Chain register
+            ContactType.ChainAndCircle,
+            ContactType.NotSupported, // Edge
+            ContactType.ChainAndPolygon,
+            ContactType.NotSupported, // Chain
+        }
+    };
 
     private const int ContactPoolInitialSize = 128;
-    private const int ContactsPerThread = 32;
 
     private ObjectPool<Contact> _contactPool = default!;
-
-    private readonly LinkedList<Contact> _activeContacts = new();
 
     private sealed class ContactPoolPolicy : IPooledObjectPolicy<Contact>
     {
@@ -106,13 +101,12 @@ public abstract partial class SharedPhysicsSystem
 
         public Contact Create()
         {
-            var contact = new Contact(_manifoldManager);
-#if DEBUG
-            contact._debugPhysics = _debugPhysicsSystem;
-#endif
-            contact.Manifold = new Manifold
+            var contact = new Contact(_manifoldManager)
             {
-                Points = new ManifoldPoint[2]
+                Manifold = new Manifold
+                {
+                    Points = new ManifoldPoint[2]
+                }
             };
 
             return contact;
@@ -123,10 +117,7 @@ public abstract partial class SharedPhysicsSystem
             SetContact(obj,
                 false,
                 EntityUid.Invalid, EntityUid.Invalid,
-                string.Empty, string.Empty,
-                null, 0,
-                null, 0,
-                null, null);
+                string.Empty, string.Empty);
             return true;
         }
     }
@@ -134,11 +125,7 @@ public abstract partial class SharedPhysicsSystem
     private static void SetContact(Contact contact,
         bool enabled,
         EntityUid uidA, EntityUid uidB,
-        string fixtureAId, string fixtureBId,
-        Fixture? fixtureA, int indexA,
-        Fixture? fixtureB, int indexB,
-        PhysicsComponent? bodyA,
-        PhysicsComponent? bodyB)
+        string fixtureAId, string fixtureBId)
     {
         contact.Enabled = enabled;
         contact.IsTouching = false;
@@ -151,18 +138,11 @@ public abstract partial class SharedPhysicsSystem
         contact.FixtureAId = fixtureAId;
         contact.FixtureBId = fixtureBId;
 
-        contact.FixtureA = fixtureA;
-        contact.FixtureB = fixtureB;
-
-        contact.BodyA = bodyA;
-        contact.BodyB = bodyB;
-
-        contact.ChildIndexA = indexA;
-        contact.ChildIndexB = indexB;
-
         contact.Manifold.PointCount = 0;
 
         //FPE: We only set the friction and restitution if we are not destroying the contact
+
+
         if (fixtureA != null && fixtureB != null)
         {
             contact.Friction = MathF.Sqrt(fixtureA.Friction * fixtureB.Friction);
@@ -190,7 +170,7 @@ public abstract partial class SharedPhysicsSystem
     private void OnContactEntityQueueDel(EntityUid obj)
     {
         // If an entity is queuedeleted then we want to purge its contacts before SimulateWorld runs in the same tick.
-        if (!TryComp<PhysicsComponent>(obj, out var physicsComp))
+        if (!PhysicsQuery.TryComp(obj, out var physicsComp))
             return;
 
         DestroyContacts(physicsComp);
@@ -213,10 +193,7 @@ public abstract partial class SharedPhysicsSystem
 
     private Contact CreateContact(
         EntityUid uidA, EntityUid uidB,
-        string fixtureAId, string fixtureBId,
-        Fixture fixtureA, int indexA,
-        Fixture fixtureB, int indexB,
-        PhysicsComponent bodyA, PhysicsComponent bodyB)
+        string fixtureAId, string fixtureBId)
     {
         var type1 = fixtureA.Shape.ShapeType;
         var type2 = fixtureB.Shape.ShapeType;

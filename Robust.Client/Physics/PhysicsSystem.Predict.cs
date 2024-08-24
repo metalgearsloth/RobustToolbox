@@ -43,10 +43,6 @@ public sealed partial class PhysicsSystem
                 continue;
 
             physics.Predict = ev.IsPredicted;
-            if (ev.IsPredicted)
-                EnsureComp<PredictedPhysicsComponent>(uid);
-            else
-                RemComp<PredictedPhysicsComponent>(uid);
         }
 
         _toUpdate.Clear();
@@ -78,36 +74,6 @@ public sealed partial class PhysicsSystem
     {
         if (uid != null)
             _toUpdate.Add(uid.Value);
-    }
-
-    internal void ResetContacts()
-    {
-        // Physics Contacts are not stored in any component state.
-        // Unfortunately this means that collision start/stop tends to mis-predict when resetting entity states/
-        // E.g., imagine a scenario where we resetting an entity from colliding to non-colliding, and then predicting
-        // the start of that same collision. When physics runs, it will just see that contact as a continuation of the
-        // existing collision, and will not raise a new collision started event. Therefore, we first need to update
-        // existing contacts for predicted entities before performing any actual prediction.
-
-        var contacts = new List<Contact>();
-        var maps = new HashSet<EntityUid>();
-
-        var enumerator = AllEntityQuery<PredictedPhysicsComponent, PhysicsComponent, TransformComponent>();
-        while (enumerator.MoveNext(out var _, out var physics, out var xform))
-        {
-            DebugTools.Assert(physics.Predict);
-
-            if (xform.MapUid is not { } map)
-                continue;
-
-            if (maps.Add(map) && PhysMapQuery.TryGetComponent(map, out var physMap) &&
-                MapQuery.TryGetComponent(map, out var mapComp))
-                _broadphase.FindNewContacts(physMap, mapComp.MapId);
-
-            contacts.AddRange(physics.Contacts);
-        }
-
-        UpdateIsTouching(contacts);
     }
 
     /// <summary>

@@ -15,7 +15,6 @@ namespace Robust.Client.Physics
     {
         [Dependency] private readonly IGameTiming _gameTiming = default!;
         [Dependency] private readonly SharedTransformSystem _transform = default!;
-        [Dependency] private readonly SharedBroadphaseSystem _broadphase = default!;
 
         public override void Update(float frameTime)
         {

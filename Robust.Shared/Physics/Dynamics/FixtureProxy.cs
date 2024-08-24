@@ -38,9 +38,6 @@ namespace Robust.Shared.Physics.Dynamics
         [ViewVariables]
         public Box2 AABB;
 
-        [ViewVariables]
-        public int ChildIndex;
-
         public string FixtureId;
 
         /// <summary>
@@ -54,14 +51,13 @@ namespace Robust.Shared.Physics.Dynamics
         [ViewVariables]
         public DynamicTree.Proxy ProxyId = DynamicTree.Proxy.Free;
 
-        public FixtureProxy(EntityUid uid, PhysicsComponent body, Box2 aabb, string fixtureId, Fixture fixture, int childIndex)
+        public FixtureProxy(EntityUid uid, PhysicsComponent body, Box2 aabb, string fixtureId, Fixture fixture)
         {
             Entity = uid;
             Body = body;
             AABB = aabb;
             FixtureId = fixtureId;
             Fixture = fixture;
-            ChildIndex = childIndex;
         }
     }
 }

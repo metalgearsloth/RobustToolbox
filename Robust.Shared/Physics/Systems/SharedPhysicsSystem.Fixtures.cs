@@ -1,14 +1,236 @@
+using System;
+using System.Collections.Generic;
 using Robust.Shared.GameObjects;
 using Robust.Shared.IoC;
+using Robust.Shared.Physics.Collision.Shapes;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Physics.Dynamics;
+using Robust.Shared.Physics.Events;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.Physics.Systems;
 
 public abstract partial class SharedPhysicsSystem
 {
-    [Dependency] private readonly FixtureSystem _fixtures = default!;
+    internal FixtureProxy? GetProxy(Entity<PhysicsComponent?> entity, string id)
+    {
+        if (!PhysicsQuery.Resolve(entity.Owner, ref entity.Comp))
+            return null;
+
+        return entity.Comp.FixtureProxies[id];
+    }
+
+    #region Public
+
+    public bool TryCreateFixture(
+        EntityUid uid,
+        IPhysShape shape,
+        string id,
+        float density = PhysicsConstants.DefaultDensity,
+        bool hard = true,
+        int collisionLayer = 0,
+        int collisionMask = 0,
+        float friction = PhysicsConstants.DefaultContactFriction,
+        float restitution = PhysicsConstants.DefaultRestitution,
+        bool updates = true,
+        PhysicsComponent? body = null,
+        TransformComponent? xform = null)
+    {
+        if (!PhysicsQuery.Resolve(uid, ref body))
+            return false;
+
+        if (body.Fixtures.ContainsKey(id))
+            return false;
+
+        var fixture = new Fixture(shape, collisionLayer, collisionMask, hard, density, friction, restitution);
+        CreateFixture(uid, id, fixture, updates, body, xform);
+        return true;
+    }
+
+    internal void CreateFixture(
+        EntityUid uid,
+        string fixtureId,
+        Fixture fixture,
+        bool updates = true,
+        PhysicsComponent? body = null,
+        TransformComponent? xform = null)
+    {
+        DebugTools.Assert(MetaData(uid).EntityLifeStage < EntityLifeStage.Terminating);
+
+        if (!PhysicsQuery.Resolve(uid, ref body))
+        {
+            DebugTools.Assert(false);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(fixtureId))
+        {
+            throw new InvalidOperationException($"Tried to create a fixture without an ID!");
+        }
+
+        body.Fixtures.Add(fixtureId, fixture);
+        body.FixtureProxies.Add(fixtureId, null);
+        body.FixtureContacts.Add(fixtureId, new HashSet<SlimContact>());
+
+        if (body.CanCollide && Resolve(uid, ref xform))
+        {
+            _lookup.CreateProxies(uid, fixtureId, fixture, xform, body);
+        }
+
+        // Supposed to be wrapped in density but eh
+        if (updates)
+        {
+            // Don't need to dirty here as we'll just manually call it after (we 100% need to call it).
+            FixtureUpdate(uid, false, body: body);
+            // Don't need to ResetMassData as FixtureUpdate already does it.
+            Dirty(uid, body);
+        }
+        // TODO: Set newcontacts to true.
+    }
+
+    /// <summary>
+    /// Attempts to get the <see cref="Fixture"/> with the specified ID for this body.
+    /// </summary>
+    public Fixture? GetFixtureOrNull(Entity<PhysicsComponent?> entity, string id)
+    {
+        if (!PhysicsQuery.Resolve(entity.Owner, ref entity.Comp))
+            return null;
+
+        return entity.Comp.Fixtures.GetValueOrDefault(id);
+    }
+
+    /// <summary>
+    /// Destroys the specified <see cref="Fixture"/> attached to the body.
+    /// </summary>
+    /// <param name="body">The specified body</param>
+    /// <param name="id">The fixture ID</param>
+    /// <param name="updates">Whether to update mass etc. Set false if you're doing a bulk operation</param>
+    public void DestroyFixture(
+        EntityUid uid,
+        string id,
+        bool updates = true,
+        PhysicsComponent? body = null,
+        TransformComponent? xform = null)
+    {
+        if (!PhysicsQuery.Resolve(uid, ref body))
+            return;
+
+        var fixture = GetFixtureOrNull(uid, id, manager);
+        if (fixture != null)
+            DestroyFixture(uid, id, fixture, updates, body, manager, xform);
+    }
+
+    /// <summary>
+    /// Destroys the specified <see cref="Fixture"/>
+    /// </summary>
+    /// <param name="updates">Whether to update mass etc. Set false if you're doing a bulk operation</param>
+    public void DestroyFixture(
+        EntityUid uid,
+        string fixtureId,
+        Fixture fixture,
+        bool updates = true,
+        PhysicsComponent? body = null,
+        FixturesComponent? manager = null,
+        TransformComponent? xform = null)
+    {
+        if (!Resolve(uid, ref body, ref manager, ref xform))
+        {
+            return;
+        }
+
+        // TODO: Assert world locked
+        DebugTools.Assert(manager.FixtureCount > 0);
+
+        if (!manager.Fixtures.Remove(fixtureId))
+        {
+            Log.Error($"Tried to remove fixture from {ToPrettyString(uid)} that was already removed.");
+            return;
+        }
+
+        foreach (var contact in fixture.Contacts.Values.ToArray())
+        {
+            _physics.DestroyContact(contact);
+        }
+
+        if (_lookup.TryGetCurrentBroadphase(xform, out var broadphase))
+        {
+            DebugTools.Assert(xform.MapUid == Transform(broadphase.Owner).MapUid);
+            _mapQuery.TryGetComponent(xform.MapUid, out var physicsMap);
+            _lookup.DestroyProxies(uid, fixtureId, fixture, xform, broadphase, physicsMap);
+        }
+
+        if (updates)
+        {
+            var resetMass = fixture.Density > 0f;
+            FixtureUpdate(uid, resetMass: resetMass, manager: manager, body: body);
+        }
+    }
+
+    #endregion
+
+    #region Restitution
+
+    public void SetRestitution(EntityUid uid, string fixtureId, Fixture fixture, float value, bool update = true, FixturesComponent? manager = null)
+    {
+        fixture.Restitution = value;
+        if (update && Resolve(uid, ref manager))
+            FixtureUpdate(uid, manager: manager);
+    }
+
+    #endregion
+
+    /// <summary>
+    /// Updates all of the cached physics information on the body derived from fixtures.
+    /// </summary>
+    public void FixtureUpdate(EntityUid uid, bool dirty = true, bool resetMass = true, PhysicsComponent? body = null)
+    {
+        if (!PhysicsQuery.Resolve(uid, ref body))
+            return;
+
+        var mask = 0;
+        var layer = 0;
+        var hard = false;
+
+        foreach (var fixture in body.Fixtures.Values)
+        {
+            mask |= fixture.CollisionMask;
+            layer |= fixture.CollisionLayer;
+            hard |= fixture.Hard;
+        }
+
+        if (resetMass)
+            ResetMassData(uid, body);
+
+        // Save the old layer to see if an event should be raised later.
+        var oldLayer = body.CollisionLayer;
+
+        // Normally this method is called when fixtures need to be dirtied anyway so no point in returning early I think
+        body.CollisionMask = mask;
+        body.CollisionLayer = layer;
+        body.Hard = hard;
+
+        if (manager.FixtureCount == 0)
+            _physics.SetCanCollide(uid, false, manager: manager, body: body);
+
+        if (oldLayer != layer)
+        {
+            var ev = new CollisionLayerChangeEvent((uid, body));
+            RaiseLocalEvent(ref ev);
+        }
+
+        if (dirty)
+            Dirty(uid, manager);
+    }
+
+    public int GetFixtureCount(Entity<PhysicsComponent?> entity)
+    {
+        if (!PhysicsQuery.Resolve(entity.Owner, ref entity.Comp))
+        {
+            return 0;
+        }
+
+        return entity.Comp.FixtureCount;
+    }
 
     public void SetDensity(EntityUid uid, string fixtureId, Fixture fixture, float value, bool update = true, FixturesComponent? manager = null)
     {

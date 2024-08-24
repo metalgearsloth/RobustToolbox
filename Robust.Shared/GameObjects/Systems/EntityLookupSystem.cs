@@ -80,19 +80,16 @@ public sealed partial class EntityLookupSystem : EntitySystem
     [Dependency] private readonly IGameTiming _timing = default!;
     [Dependency] private readonly INetManager _netMan = default!;
     [Dependency] private readonly SharedContainerSystem _container = default!;
-    [Dependency] private readonly FixtureSystem _fixtures = default!;
     [Dependency] private readonly SharedMapSystem _map = default!;
     [Dependency] private readonly SharedPhysicsSystem _physics = default!;
     [Dependency] private readonly SharedTransformSystem _transform = default!;
 
     private EntityQuery<BroadphaseComponent> _broadQuery;
     private EntityQuery<ContainerManagerComponent> _containerQuery;
-    private EntityQuery<FixturesComponent> _fixturesQuery;
 
     private EntityQuery<MapGridComponent> _gridQuery;
     private EntityQuery<MetaDataComponent> _metaQuery;
     private EntityQuery<PhysicsComponent> _physicsQuery;
-    private EntityQuery<PhysicsMapComponent> _mapQuery;
     private EntityQuery<TransformComponent> _xformQuery;
 
     public const float TileEnlargementRadius = -PhysicsConstants.PolygonRadius * 4f;
@@ -113,11 +110,9 @@ public sealed partial class EntityLookupSystem : EntitySystem
 
         _broadQuery = GetEntityQuery<BroadphaseComponent>();
         _containerQuery = GetEntityQuery<ContainerManagerComponent>();
-        _fixturesQuery = GetEntityQuery<FixturesComponent>();
         _gridQuery = GetEntityQuery<MapGridComponent>();
         _metaQuery = GetEntityQuery<MetaDataComponent>();
         _physicsQuery = GetEntityQuery<PhysicsComponent>();
-        _mapQuery = GetEntityQuery<PhysicsMapComponent>();
         _xformQuery = GetEntityQuery<TransformComponent>();
 
         SubscribeLocalEvent<BroadphaseComponent, EntityTerminatingEvent>(OnBroadphaseTerminating);
@@ -152,14 +147,12 @@ public sealed partial class EntityLookupSystem : EntitySystem
     {
         var xform = _xformQuery.GetComponent(uid);
         var map = xform.MapUid;
-        _mapQuery.TryGetComponent(map, out var physMap);
         RemoveChildrenFromTerminatingBroadphase(xform, component, physMap);
         RemComp(uid, component);
     }
 
     private void RemoveChildrenFromTerminatingBroadphase(TransformComponent xform,
-        BroadphaseComponent component,
-        PhysicsMapComponent? map)
+        BroadphaseComponent component)
     {
         foreach (var child in xform._children)
         {
@@ -175,11 +168,8 @@ public sealed partial class EntityLookupSystem : EntitySystem
             DebugTools.Assert(childXform.Broadphase.Value.Uid == component.Owner);
             DebugTools.Assert(!_mapManager.IsGrid(child));
 
-            if (childXform.Broadphase.Value.CanCollide && _fixturesQuery.TryGetComponent(child, out var fixtures))
+            if (childXform.Broadphase.Value.CanCollide)
             {
-                if (map == null)
-                    _mapQuery.TryGetComponent(childXform.Broadphase.Value.PhysicsMap, out map);
-
                 DebugTools.Assert(map == null || childXform.Broadphase.Value.PhysicsMap == map.Owner);
                 var tree = childXform.Broadphase.Value.Static ? component.StaticTree : component.DynamicTree;
                 foreach (var fixture in fixtures.Fixtures.Values)
@@ -227,7 +217,6 @@ public sealed partial class EntityLookupSystem : EntitySystem
         }
 
         var ent = new Entity<TransformComponent, BroadphaseComponent>(broadphase, xform, broadphase);
-        var map = new Entity<PhysicsMapComponent>(xform.MapUid.Value, physMap);
         var enumerator = xform.ChildEnumerator;
         while (enumerator.MoveNext(out var child))
         {
@@ -322,7 +311,7 @@ public sealed partial class EntityLookupSystem : EntitySystem
         AddOrMoveProxies(uid, fixtureId, fixture, body, tree, broadphaseTransform, mapTransform, physMap.MoveBuffer);
     }
 
-    internal void DestroyProxies(EntityUid uid, string fixtureId, Fixture fixture, TransformComponent xform, BroadphaseComponent broadphase, PhysicsMapComponent? physicsMap)
+    internal void DestroyProxies(EntityUid uid, string fixtureId, Fixture fixture, TransformComponent xform, BroadphaseComponent broadphase)
     {
         DebugTools.AssertNotNull(xform.Broadphase);
         DebugTools.Assert(xform.Broadphase!.Value.Uid == broadphase.Owner);

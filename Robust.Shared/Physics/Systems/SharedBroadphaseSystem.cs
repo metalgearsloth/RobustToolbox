@@ -31,11 +31,9 @@ namespace Robust.Shared.Physics.Systems
         [Dependency] private readonly SharedTransformSystem _transform = default!;
 
         private EntityQuery<BroadphaseComponent> _broadphaseQuery;
-        private EntityQuery<FixturesComponent> _fixturesQuery;
         private EntityQuery<MapGridComponent> _gridQuery;
         private EntityQuery<PhysicsComponent> _physicsQuery;
         private EntityQuery<TransformComponent> _xformQuery;
-        private EntityQuery<PhysicsMapComponent> _mapQuery;
 
         private float _broadphaseExpand;
 
@@ -60,7 +58,6 @@ namespace Robust.Shared.Physics.Systems
             };
 
             _broadphaseQuery = GetEntityQuery<BroadphaseComponent>();
-            _fixturesQuery = GetEntityQuery<FixturesComponent>();
             _gridQuery = GetEntityQuery<MapGridComponent>();
             _physicsQuery = GetEntityQuery<PhysicsComponent>();
             _xformQuery = GetEntityQuery<TransformComponent>();
@@ -208,8 +205,6 @@ namespace Robust.Shared.Physics.Systems
                 var proxyA = _contactJob.MoveBuffer[i].Proxy;
                 var proxyABody = proxyA.Body;
 
-                _fixturesQuery.TryGetComponent(proxyA.Entity, out var manager);
-
                 foreach (var other in proxies)
                 {
                     var otherBody = other.Body;
@@ -221,7 +216,7 @@ namespace Robust.Shared.Physics.Systems
                     if (proxyA.Fixture.Hard && other.Fixture.Hard &&
                         (gridMoveBuffer.ContainsKey(proxyA) || gridMoveBuffer.ContainsKey(other)))
                     {
-                        _physicsSystem.WakeBody(proxyA.Entity, force: true, manager: manager, body: proxyABody);
+                        _physicsSystem.WakeBody(proxyA.Entity, force: true, body: proxyABody);
                         _physicsSystem.WakeBody(other.Entity, force: true, body: otherBody);
                     }
 
@@ -395,10 +390,10 @@ namespace Robust.Shared.Physics.Systems
             }, aabb, true);
         }
 
-        public void RegenerateContacts(EntityUid uid, PhysicsComponent body, FixturesComponent? fixtures = null, TransformComponent? xform = null)
+        public void RegenerateContacts(EntityUid uid, PhysicsComponent body, TransformComponent? xform = null)
         {
             _physicsSystem.DestroyContacts(body);
-            if (!Resolve(uid, ref xform, ref fixtures))
+            if (!Resolve(uid, ref xform))
                 return;
 
             if (xform.MapUid == null)
@@ -410,7 +405,7 @@ namespace Robust.Shared.Physics.Systems
             _physicsSystem.SetAwake((uid, body), true);
 
             var matrix = _transform.GetWorldMatrix(broadphase);
-            foreach (var fixture in fixtures.Fixtures.Values)
+            foreach (var fixture in body.Fixtures.Values)
             {
                 TouchProxies(xform.MapUid.Value, matrix, fixture);
             }

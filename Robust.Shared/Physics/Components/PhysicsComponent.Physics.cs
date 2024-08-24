@@ -26,7 +26,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using Robust.Shared.GameObjects;
 using Robust.Shared.GameStates;
-using Robust.Shared.Maths;
+using Robust.Shared.Physics.Dynamics;
 using Robust.Shared.Physics.Dynamics.Contacts;
 using Robust.Shared.Physics.Systems;
 using Robust.Shared.Serialization.Manager.Attributes;
@@ -53,13 +53,6 @@ public sealed partial class PhysicsComponent : Component, IComponentDelta
     /// </summary>
     [Access(typeof(SharedPhysicsSystem))]
     public Dictionary<int, int> IslandIndex = new();
-
-    [ViewVariables] public int ContactCount => Contacts.Count;
-
-    /// <summary>
-    ///     Linked-list of all of our contacts.
-    /// </summary>
-    internal readonly LinkedList<Contact> Contacts = new();
 
     [DataField]
     public bool IgnorePaused;
@@ -103,19 +96,19 @@ public sealed partial class PhysicsComponent : Component, IComponentDelta
     /// <remarks>
     ///     This is useful for triggers or such to detect collision without actually causing a blockage.
     /// </remarks>
-    [ViewVariables, Access(typeof(SharedPhysicsSystem), typeof(FixtureSystem), Friend = AccessPermissions.ReadWriteExecute, Other = AccessPermissions.Read)]
+    [ViewVariables, Access(typeof(SharedPhysicsSystem), typeof(SharedPhysicsSystem), Friend = AccessPermissions.ReadWriteExecute, Other = AccessPermissions.Read)]
     public bool Hard { get; internal set; }
 
     /// <summary>
     ///     Bitmask of the collision layers this component is a part of.
     /// </summary>
-    [ViewVariables, Access(typeof(SharedPhysicsSystem), typeof(FixtureSystem), Friend = AccessPermissions.ReadWriteExecute, Other = AccessPermissions.Read)]
+    [ViewVariables, Access(typeof(SharedPhysicsSystem), typeof(SharedPhysicsSystem), Friend = AccessPermissions.ReadWriteExecute, Other = AccessPermissions.Read)]
     public int CollisionLayer { get; internal set; }
 
     /// <summary>
     ///     Bitmask of the layers this component collides with.
     /// </summary>
-    [ViewVariables, Access(typeof(SharedPhysicsSystem), typeof(FixtureSystem), Friend = AccessPermissions.ReadWriteExecute, Other = AccessPermissions.Read)]
+    [ViewVariables, Access(typeof(SharedPhysicsSystem), typeof(SharedPhysicsSystem), Friend = AccessPermissions.ReadWriteExecute, Other = AccessPermissions.Read)]
     public int CollisionMask { get; internal set; }
 
     /// <summary>
@@ -258,12 +251,40 @@ public sealed partial class PhysicsComponent : Component, IComponentDelta
     [ViewVariables]
     public Vector2 Momentum => LinearVelocity * Mass;
 
-    /// <summary>
-    ///     The current status of the object
-    /// </summary>
-    [DataField, Access(typeof(SharedPhysicsSystem), Friend = AccessPermissions.ReadWriteExecute, Other = AccessPermissions.Read)]
-    public BodyStatus BodyStatus { get; set; }
-
     [ViewVariables, Access(typeof(SharedPhysicsSystem))]
     public bool Predict;
+
+    #region Fixtures
+
+    /// <summary>
+    /// Allows us to reference a specific fixture when we contain multiple
+    /// This is useful for stuff like slippery objects that might have a non-hard layer for mob collisions and
+    /// a hard layer for wall collisions.
+    /// <remarks>
+    /// We can also use this for networking to make cross-referencing fixtures easier.
+    /// Won't call Dirty() by default
+    /// </remarks>
+    /// </summary>
+    [ViewVariables(VVAccess.ReadWrite), DataField(customTypeSerializer:typeof(FixtureSerializer))]
+    [NeverPushInheritance]
+    [Access(typeof(SharedPhysicsSystem), Other = AccessPermissions.ReadExecute)] // FIXME Friends
+    public Dictionary<string, Fixture> Fixtures = new();
+
+    /// <summary>
+    /// Contacts for each fixture.
+    /// </summary>
+    /// <remarks>
+    /// Store separately to make networking cleaner.
+    /// </remarks>
+    internal readonly Dictionary<string, HashSet<Contact>> FixtureContacts = new();
+
+    /// <summary>
+    /// Proxy data for each fixture.
+    /// </summary>
+    internal readonly Dictionary<string, FixtureProxy?> FixtureProxies = new();
+
+    [ViewVariables]
+    public int FixtureCount => Fixtures.Count;
+
+    #endregion
 }

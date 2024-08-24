@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Numerics;
 using Robust.Shared.GameObjects;
+using Robust.Shared.Physics.Dynamics;
+using Robust.Shared.Physics.Systems;
 using Robust.Shared.Serialization;
 
 namespace Robust.Shared.Physics.Components;
@@ -80,7 +82,7 @@ public record struct PhysicsDeltaState() : IComponentDeltaState<PhysicsComponent
     {
         byte index = 0;
 
-        for (var i = 0; i < 12; i++)
+        for (var i = 0; i < SharedPhysicsSystem.StateFieldCount; i++)
         {
             var field = 1 << i;
 
@@ -97,31 +99,31 @@ public record struct PhysicsDeltaState() : IComponentDeltaState<PhysicsComponent
                     state.CanCollide = (bool)value!;
                     break;
                 case 1:
-                    state.Status = (BodyStatus)value!;
-                    break;
-                case 2:
                     state.BodyType = (BodyType)value!;
                     break;
-                case 3:
+                case 2:
                     state.SleepingAllowed = (bool)value!;
                     break;
-                case 4:
+                case 3:
                     state.FixedRotation = (bool)value!;
                     break;
-                case 5:
+                case 4:
                     state.Friction = (float)value!;
                     break;
-                case 6:
+                case 5:
                     state.Force = (Vector2)value!;
                     break;
-                case 7:
+                case 6:
                     state.Torque = (float)value!;
                     break;
-                case 8:
+                case 7:
                     state.LinearDamping = (float)value!;
                     break;
-                case 9:
+                case 8:
                     state.AngularDamping = (float)value!;
+                    break;
+                case 9:
+                    state.Fixtures = SharedPhysicsSystem.GetFixturesCopy((Dictionary<string, Fixture>) value!);
                     break;
                 case 10:
                     state.AngularVelocity = (float)value!;
@@ -144,7 +146,6 @@ public sealed class PhysicsComponentState : IComponentState
     public bool CanCollide;
     public bool SleepingAllowed;
     public bool FixedRotation;
-    public BodyStatus Status;
 
     public Vector2 LinearVelocity;
     public float AngularVelocity;
@@ -157,6 +158,8 @@ public sealed class PhysicsComponentState : IComponentState
     public Vector2 Force;
     public float Torque;
 
+    public Dictionary<string, Fixture> Fixtures = new();
+
     public PhysicsComponentState() {}
 
     public PhysicsComponentState(PhysicsComponentState existing)
@@ -164,7 +167,6 @@ public sealed class PhysicsComponentState : IComponentState
         CanCollide = existing.CanCollide;
         SleepingAllowed = existing.SleepingAllowed;
         FixedRotation = existing.FixedRotation;
-        Status = existing.Status;
 
         LinearVelocity = existing.LinearVelocity;
         AngularVelocity = existing.AngularVelocity;
@@ -176,5 +178,11 @@ public sealed class PhysicsComponentState : IComponentState
 
         Force = existing.Force;
         Torque = existing.Torque;
+        Fixtures.EnsureCapacity(existing.Fixtures.Count);
+
+        foreach (var (id, fixture) in existing.Fixtures)
+        {
+            Fixtures[id] = new Fixture(fixture);
+        }
     }
 }
