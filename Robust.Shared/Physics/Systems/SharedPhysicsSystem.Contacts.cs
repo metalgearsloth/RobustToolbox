@@ -30,6 +30,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Numerics;
 using JetBrains.Annotations;
 using Microsoft.Extensions.ObjectPool;
@@ -787,18 +788,44 @@ public abstract partial class SharedPhysicsSystem
     /// <summary>
     /// Returns all of this entity's contacts.
     /// </summary>
-    public IEnumerable<Contact> GetContacts(Entity<FixturesComponent?> entity)
+    [Pure]
+    public ContactEnumerator GetContacts(Entity<FixturesComponent?> entity)
     {
         if (!_fixturesQuery.Resolve(entity.Owner, ref entity.Comp))
-            yield break;
+            return ContactEnumerator.Empty;
 
-        foreach (var fixture in entity.Comp.Fixtures.Values)
+        return new ContactEnumerator(entity.Comp);
+    }
+}
+
+public record struct ContactEnumerator
+{
+    public static readonly ContactEnumerator Empty = new();
+
+    private Dictionary<string, Fixture>.ValueCollection.Enumerator _fixtureEnumerator;
+    private Dictionary<Fixture, Contact>.ValueCollection.Enumerator _contactEnumerator;
+
+    public ContactEnumerator(FixturesComponent fixtures)
+    {
+        _fixtureEnumerator = fixtures.Fixtures.Values.GetEnumerator();
+        _contactEnumerator = _fixtureEnumerator.Current.Contacts.Values.GetEnumerator();
+    }
+
+    public bool MoveNext(out Contact? contact)
+    {
+        if (!_contactEnumerator.MoveNext())
         {
-            foreach (var contact in fixture.Contacts.Values)
+            if (!_fixtureEnumerator.MoveNext())
             {
-                yield return contact;
+                contact = null;
+                return false;
             }
+
+            _contactEnumerator = _fixtureEnumerator.Current.Contacts.Values.GetEnumerator();
         }
+
+        contact = _contactEnumerator.Current;
+        return true;
     }
 }
 
