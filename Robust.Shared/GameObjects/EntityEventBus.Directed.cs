@@ -354,6 +354,8 @@ namespace Robust.Shared.GameObjects
             }
         }
 
+        internal bool Exists(EntityUid e) => _entEventTables.ContainsKey(e);
+
         public void OnEntityAdded(EntityUid e)
         {
             EntAddEntity(e);
@@ -482,6 +484,11 @@ namespace Robust.Shared.GameObjects
 
         private void EntAddEntity(EntityUid euid)
         {
+            if (_entEventTables.ContainsKey(euid))
+            {
+
+            }
+
             // odds are at least 1 component will subscribe to an event on the entity, so just
             // preallocate the table now. Dispatch does not need to check this later.
             _entEventTables.Add(euid, new EventTable());

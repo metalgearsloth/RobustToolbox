@@ -153,7 +153,7 @@ namespace Robust.Shared.GameObjects
 
         public static implicit operator EntityReference(EntityUid other)
         {
-            return DangerousEntityExtensions.CreateEntityReferenceStruct(other.Id - ArchUidOffset, other.Version - ArchVersionOffset, 0);
+            return DangerousEntityExtensions.CreateEntityReferenceStruct(other.Id - ArchUidOffset, 0, other.Version - ArchVersionOffset);
         }
 
         public static implicit operator EntityUid(EntityReference other)

@@ -358,12 +358,12 @@ namespace Robust.Shared.GameObjects
         /// <inheritdoc />
         public IEnumerable<EntityUid> GetEntities()
         {
-            using var ents = new PooledList<EntityReference>(_world.Size);
+            using var ents = new PooledList<Entity>(_world.Size);
             _world.GetEntities(_archMetaQuery, ents.Span);
 
             foreach (var entity in ents)
             {
-                yield return entity;
+                yield return EntityUid.FromArch(_world, entity);
             }
         }
 
@@ -514,6 +514,12 @@ namespace Robust.Shared.GameObjects
             // Some UIs get disposed after entity-manager has shut down and already deleted all entities.
             if (!Started)
                 return;
+
+            if (!IsAlive(uid.Value))
+            {
+                DebugTools.Assert(!TryGetComponent(uid.Value, out MetaDataComponent? wehData) || wehData.Deleted);
+                return;
+            }
 
             // Networking blindly spams entities at this function, they can already be
             // deleted from being a child of a previously deleted entity
@@ -694,7 +700,7 @@ namespace Robust.Shared.GameObjects
 
         public bool Deleted(EntityUid uid)
         {
-            return !_world.TryGetAlive(uid, out MetaDataComponent? comp) || comp!.EntityLifeStage > EntityLifeStage.Terminating;
+            return !IsAlive(uid) || !_world.TryGet(uid, out MetaDataComponent? comp) || comp!.EntityLifeStage > EntityLifeStage.Terminating;
         }
 
         /// <summary>

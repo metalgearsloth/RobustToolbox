@@ -1,4 +1,5 @@
 ﻿using Arch.Core;
+using Arch.Core.Extensions.Dangerous;
 
 namespace Robust.Shared.GameObjects;
 

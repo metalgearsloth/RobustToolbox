@@ -45,7 +45,14 @@ public partial class EntityManager
     private void SpawnEntityArch(out EntityUid entity)
     {
         var archEnt = _world.Create(DefaultArchetype);
+
         var reference = _world.Reference(archEnt);
+
+        if (((EntityEventBus)EventBus).Exists(reference))
+        {
+
+        }
+
         entity = new EntityUid(reference);
     }
 
@@ -54,7 +61,7 @@ public partial class EntityManager
         var sw = new Stopwatch();
         sw.Start();
         var arc = _world.Archetypes.Count;
-        _world.TrimExcess();
+        // _world.TrimExcess();
         arc -= _world.Archetypes.Count;
         sw.Stop();
         _sawmill.Debug($"Trimming {arc} archetypes took {sw.Elapsed.TotalMilliseconds} milliseconds");
