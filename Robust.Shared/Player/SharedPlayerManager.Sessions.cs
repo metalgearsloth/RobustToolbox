@@ -234,12 +234,6 @@ internal abstract partial class SharedPlayerManager
         PlayerStatusChanged?.Invoke(this, new SessionStatusEventArgs(session, old, status));
     }
 
-    public void SetPing(ICommonSession session, short ping)
-    {
-        ((ICommonSessionInternal) session).SetPing(ping);
-        UpdateState(session);
-    }
-
     public void SetName(ICommonSession session, string name)
     {
         ((ICommonSessionInternal) session).SetName(name);

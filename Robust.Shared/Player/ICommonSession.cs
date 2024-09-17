@@ -76,7 +76,6 @@ internal interface ICommonSessionInternal : ICommonSession
 {
     public void SetStatus(SessionStatus status);
     public void SetAttachedEntity(EntityUid? uid);
-    public void SetPing(short ping);
     public void SetName(string name);
     void SetChannel(INetChannel channel);
 }

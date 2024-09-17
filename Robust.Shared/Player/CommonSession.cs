@@ -20,7 +20,7 @@ internal sealed class CommonSession : ICommonSessionInternal
     public string Name { get; set; } = "<Unknown>";
 
     [ViewVariables]
-    public short Ping { get; set; }
+    public short Ping => Channel.Ping;
 
     [ViewVariables]
     public DateTime ConnectedTime { get; set; }
@@ -62,11 +62,6 @@ internal sealed class CommonSession : ICommonSessionInternal
     public void SetAttachedEntity(EntityUid? uid)
     {
         AttachedEntity = uid;
-    }
-
-    public void SetPing(short ping)
-    {
-        Ping = ping;
     }
 
     public void SetName(string name)

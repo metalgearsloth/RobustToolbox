@@ -154,11 +154,6 @@ public interface ISharedPlayerManager
     void SetStatus(ICommonSession session, SessionStatus status);
 
     /// <summary>
-    /// Updates a session's <see cref="ICommonSession.Ping"/>
-    /// </summary>
-    void SetPing(ICommonSession session, short ping);
-
-    /// <summary>
     /// Updates a session's <see cref="ICommonSession.Name"/>
     /// </summary>
     public void SetName(ICommonSession session, string name);
