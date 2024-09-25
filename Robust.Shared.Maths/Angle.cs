@@ -14,15 +14,25 @@ namespace Robust.Shared.Maths
     {
         public static Angle Zero { get; } = new();
 
+        public readonly float C;
+
+        public readonly float S;
+
         /// <summary>
         ///     Angle in radians.
         /// </summary>
-        public readonly double Theta;
+        public double Theta => Math.Atan2(S, C);
 
         /// <summary>
         ///     Angle in degrees.
         /// </summary>
         public double Degrees => MathHelper.RadiansToDegrees(Theta);
+
+        public Angle(float x, float y)
+        {
+            C = x;
+            S = y;
+        }
 
         /// <summary>
         ///     Constructs an instance of an Angle.
@@ -30,7 +40,8 @@ namespace Robust.Shared.Maths
         /// <param name="theta">The angle in radians.</param>
         public Angle(double theta)
         {
-            Theta = theta;
+            C = (float) Math.Cos(theta);
+            S = (float) Math.Sin(theta);
         }
 
         /// <summary>
@@ -40,7 +51,8 @@ namespace Robust.Shared.Maths
         public Angle(Vector2 dir)
         {
             dir = dir.Normalized();
-            Theta = Math.Atan2(dir.Y, dir.X);
+            S = dir.Y;
+            C = dir.X;
         }
 
         public static Angle FromWorldVec(Vector2 dir)
@@ -59,9 +71,7 @@ namespace Robust.Shared.Maths
         /// <returns>Unit Direction Vector</returns>
         public readonly Vector2 ToVec()
         {
-            var x = Math.Cos(Theta);
-            var y = Math.Sin(Theta);
-            return new Vector2((float) x, (float) y);
+            return new Vector2(C, S);
         }
 
         public readonly Vector2 ToWorldVec()
@@ -115,12 +125,10 @@ namespace Robust.Shared.Maths
             // No calculation necessery when theta is zero
             if (Theta == 0) return vec;
 
-            var cos = Math.Cos(Theta);
-            var sin = Math.Sin(Theta);
-            var dx = cos * vec.X - sin * vec.Y;
-            var dy = sin * vec.X + cos * vec.Y;
+            var dx = C * vec.X - S * vec.Y;
+            var dy = S * vec.X + C * vec.Y;
 
-            return new Vector2((float) dx, (float) dy);
+            return new Vector2(dx, dy);
         }
 
         public bool EqualsApprox(Angle other, double tolerance)
@@ -259,24 +267,8 @@ namespace Robust.Shared.Maths
         /// <param name="degrees">The angle in degrees.</param>
         public static Angle FromDegrees(double degrees)
         {
-            // Avoid rounding issues with common use cases.
-            switch (degrees)
-            {
-                case -270:
-                    return new Angle(Math.PI * -1.5);
-                case 90:
-                    return new Angle(Math.PI / 2);
-                case -180:
-                    return new Angle(-Math.PI);
-                case 180:
-                    return new Angle(Math.PI);
-                case 270.0:
-                    return new Angle(Math.PI * 1.5);
-                case -90:
-                    return new Angle(Math.PI / -2);
-                default:
-                    return new(MathHelper.DegreesToRadians(degrees));
-            }
+            var radians = MathHelper.DegreesToRadians(degrees);
+            return new Angle(radians);
         }
 
         /// <summary>
