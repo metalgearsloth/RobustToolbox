@@ -779,7 +779,7 @@ namespace Robust.Client.Graphics.Clyde
                 color = Color.Black;
 
             fovShader.SetUniformMaybe("occludeColor", color);
-            FovSetTransformAndBlit(target, eye, scale, eye.Position.Position, fovShader);
+            FovSetTransformAndBlit(target, target.Size / 2, eye, scale, eye.Position.Position, fovShader);
 
             GL.StencilMask(0x00);
             GL.Disable(EnableCap.StencilTest);
@@ -823,7 +823,7 @@ namespace Robust.Client.Graphics.Clyde
             CheckGlError();
 
             fovShader.SetUniformMaybe("occludeColor", Color.Black);
-            FovSetTransformAndBlit(target, eye, scale, eye.Position.Position, fovShader);
+            FovSetTransformAndBlit(target, target.Size, eye, scale, eye.Position.Position, fovShader);
 
             if (_hasGLSamplerObjects)
             {
@@ -839,7 +839,7 @@ namespace Robust.Client.Graphics.Clyde
             }
         }
 
-        private void FovSetTransformAndBlit(IRenderTarget target, IEye eye, Vector2 scale, Vector2 fovCentre, GLShaderProgram fovShader)
+        private void FovSetTransformAndBlit(IRenderTarget target, Vector2i halfSize, IEye eye, Vector2 scale, Vector2 fovCentre, GLShaderProgram fovShader)
         {
             // It might be an idea if there was a proper way to get the LocalToWorld matrix.
             // But actually constructing the matrix tends to be more trouble than it's worth in most cases.
@@ -851,7 +851,6 @@ namespace Robust.Client.Graphics.Clyde
 
             // Bit of an interesting little trick here - need to set things up correctly.
             // 0, 0 in clip-space is the centre of the screen, and 1, 1 is the top-right corner.
-            var halfSize = target.Size;
             var uZero = target.LocalToWorld(eye, halfSize, scale);
             var uX = target.LocalToWorld(eye, halfSize + (Vector2.UnitX * halfSize.X), scale) - uZero;
             var uY = target.LocalToWorld(eye, halfSize - (Vector2.UnitY * halfSize.Y), scale) - uZero;
