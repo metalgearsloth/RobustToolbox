@@ -93,9 +93,6 @@ public sealed class ClientLightingSystem : EntitySystem
 
     private sealed class LightComparer : IComparer<RenderLight>
     {
-        public int MaxLights;
-        public Vector2 WorldPos;
-
         public int Compare(RenderLight x, RenderLight y)
         {
             if (x.CastShadows != y.CastShadows)
