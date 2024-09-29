@@ -242,12 +242,6 @@ public partial class SharedPhysicsSystem
             Dirty(uid, body);
     }
 
-    [Obsolete("Use overload that takes EntityUid")]
-    public void ResetDynamics(PhysicsComponent body, bool dirty = true)
-    {
-        ResetDynamics(body.Owner, body, dirty);
-    }
-
     public void ResetMassData(EntityUid uid, FixturesComponent? manager = null, PhysicsComponent? body = null)
     {
         if (!PhysicsQuery.Resolve(uid, ref body))
@@ -392,12 +386,6 @@ public partial class SharedPhysicsSystem
             Dirty(uid, body);
     }
 
-    [Obsolete("Use overload that takes EntityUid")]
-    public void SetAngularDamping(PhysicsComponent body, float value, bool dirty = true)
-    {
-        SetAngularDamping(body.Owner, body, value, dirty);
-    }
-
     public void SetLinearDamping(EntityUid uid, PhysicsComponent body, float value, bool dirty = true)
     {
         if (MathHelper.CloseTo(body.LinearDamping, value))
@@ -407,12 +395,6 @@ public partial class SharedPhysicsSystem
 
         if (dirty)
             Dirty(uid, body);
-    }
-
-    [Obsolete("Use overload that takes EntityUid")]
-    public void SetLinearDamping(PhysicsComponent body, float value, bool dirty = true)
-    {
-        SetLinearDamping(body.Owner, body, value, dirty);
     }
 
     [Obsolete("Use SetAwake with EntityUid<PhysicsComponent>")]
@@ -524,12 +506,6 @@ public partial class SharedPhysicsSystem
             Dirty(uid, body);
     }
 
-    [Obsolete("Use overload that takes EntityUid")]
-    public void SetBodyStatus(PhysicsComponent body, BodyStatus status, bool dirty = true)
-    {
-        SetBodyStatus(body.Owner, body, status, dirty);
-    }
-
     /// <summary>
     /// Sets the <see cref="PhysicsComponent.CanCollide"/> property; this handles whether the body is enabled.
     /// </summary>
@@ -609,12 +585,6 @@ public partial class SharedPhysicsSystem
             Dirty(uid, body);
     }
 
-    [Obsolete("Use overload that takes EntityUid")]
-    public void SetFriction(PhysicsComponent body, float value, bool dirty = true)
-    {
-        SetFriction(body.Owner, body, value, dirty);
-    }
-
     public void SetInertia(EntityUid uid, PhysicsComponent body, float value, bool dirty = true)
     {
         DebugTools.Assert(!float.IsNaN(value));
@@ -632,12 +602,6 @@ public partial class SharedPhysicsSystem
             if (dirty)
                 Dirty(uid, body);
         }
-    }
-
-    [Obsolete("Use overload that takes EntityUid")]
-    public void SetInertia(PhysicsComponent body, float value, bool dirty = true)
-    {
-        SetInertia(body.Owner, body, value, dirty);
     }
 
     public void SetLocalCenter(EntityUid uid, PhysicsComponent body, Vector2 value)
@@ -691,6 +655,54 @@ public partial class SharedPhysicsSystem
     }
 
     #endregion
+
+    public Transform GetRelativePhysicsTransform(Transform worldTransform, Entity<TransformComponent?> relative)
+    {
+        if (!_xformQuery.Resolve(relative.Owner, ref relative.Comp))
+            return Physics.Transform.Empty;
+
+        var (_, broadphaseRot, _, broadphaseInv) = _transform.GetWorldPositionRotationMatrixWithInv(relative.Comp);
+
+        return new Transform(Vector2.Transform(worldTransform.Position, broadphaseInv),
+            worldTransform.Quaternion2D.Angle - broadphaseRot);
+    }
+
+    /// <summary>
+    /// Gets the physics transform relative to another entity.
+    /// </summary>
+    public Transform GetRelativePhysicsTransform(
+        Entity<TransformComponent?> entity,
+        Entity<TransformComponent?> relative)
+    {
+        if (!_xformQuery.Resolve(entity.Owner, ref entity.Comp) ||
+            !_xformQuery.Resolve(relative.Owner, ref relative.Comp))
+        {
+            return Physics.Transform.Empty;
+        }
+
+        var (worldPos, worldRot) = _transform.GetWorldPositionRotation(entity.Comp);
+        var (_, broadphaseRot, _, broadphaseInv) = _transform.GetWorldPositionRotationMatrixWithInv(relative.Comp);
+
+        return new Transform(Vector2.Transform(worldPos, broadphaseInv), worldRot - broadphaseRot);
+    }
+
+    /// <summary>
+    /// Gets broadphase relevant transform.
+    /// </summary>
+    public Transform GetLocalPhysicsTransform(EntityUid uid, TransformComponent? xform = null)
+    {
+        if (!_xformQuery.Resolve(uid, ref xform) || xform.Broadphase == null)
+            return Physics.Transform.Empty;
+
+        var broadphase = xform.Broadphase.Value.Uid;
+
+        if (xform.ParentUid == broadphase)
+        {
+            return new Transform(xform.LocalPosition, xform.LocalRotation);
+        }
+
+        return GetRelativePhysicsTransform((uid, xform), broadphase);
+    }
 
     public Transform GetPhysicsTransform(EntityUid uid, TransformComponent? xform = null)
     {
