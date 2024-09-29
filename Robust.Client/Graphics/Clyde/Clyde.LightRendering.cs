@@ -458,7 +458,7 @@ namespace Robust.Client.Graphics.Clyde
                 ClearFramebuffer(pass.ClearColor);
             }
 
-            ApplyLightingFovToBuffer(pass.Target, eye, pass.Scale);
+            ApplyLightingFovToBuffer(viewport, eye);
 
             var lightShader = _loadedShaders[_enableSoftShadows ? _lightSoftShaderHandle : _lightHardShaderHandle]
                 .Program;
@@ -755,7 +755,7 @@ namespace Robust.Client.Graphics.Clyde
             CheckGlError();
         }
 
-        private void ApplyFovToBuffer(IRenderTarget target, IEye eye, Vector2 scale)
+        private void ApplyFovToBuffer(Viewport viewport, IEye eye)
         {
             GL.Clear(ClearBufferMask.StencilBufferBit);
             GL.Enable(EnableCap.StencilTest);
@@ -779,14 +779,14 @@ namespace Robust.Client.Graphics.Clyde
                 color = Color.Black;
 
             fovShader.SetUniformMaybe("occludeColor", color);
-            FovSetTransformAndBlit(target, target.Size / 2, eye, scale, eye.Position.Position, fovShader);
+            FovSetTransformAndBlit(viewport, eye.Position.Position, fovShader);
 
             GL.StencilMask(0x00);
             GL.Disable(EnableCap.StencilTest);
             _isStencilling = false;
         }
 
-        private void ApplyLightingFovToBuffer(IRenderTarget target, IEye eye, Vector2 scale)
+        private void ApplyLightingFovToBuffer(Viewport viewport, IEye eye)
         {
             // Applies FOV to the lighting framebuffer.
 
@@ -823,7 +823,7 @@ namespace Robust.Client.Graphics.Clyde
             CheckGlError();
 
             fovShader.SetUniformMaybe("occludeColor", Color.Black);
-            FovSetTransformAndBlit(target, target.Size, eye, scale, eye.Position.Position, fovShader);
+            FovSetTransformAndBlit(viewport, eye.Position.Position, fovShader);
 
             if (_hasGLSamplerObjects)
             {
@@ -839,7 +839,7 @@ namespace Robust.Client.Graphics.Clyde
             }
         }
 
-        private void FovSetTransformAndBlit(IRenderTarget target, Vector2i halfSize, IEye eye, Vector2 scale, Vector2 fovCentre, GLShaderProgram fovShader)
+        private void FovSetTransformAndBlit(Viewport viewport, Vector2 fovCentre, GLShaderProgram fovShader)
         {
             // It might be an idea if there was a proper way to get the LocalToWorld matrix.
             // But actually constructing the matrix tends to be more trouble than it's worth in most cases.
@@ -851,9 +851,11 @@ namespace Robust.Client.Graphics.Clyde
 
             // Bit of an interesting little trick here - need to set things up correctly.
             // 0, 0 in clip-space is the centre of the screen, and 1, 1 is the top-right corner.
-            var uZero = target.LocalToWorld(eye, halfSize, scale);
-            var uX = target.LocalToWorld(eye, halfSize + (Vector2.UnitX * halfSize.X), scale) - uZero;
-            var uY = target.LocalToWorld(eye, halfSize - (Vector2.UnitY * halfSize.Y), scale) - uZero;
+            var halfSize = viewport.Size / 2;
+
+            var uZero = viewport.LocalToWorld(halfSize).Position;
+            var uX = viewport.LocalToWorld(halfSize + Vector2.UnitX * halfSize.X).Position - uZero;
+            var uY = viewport.LocalToWorld(halfSize - Vector2.UnitY * halfSize.Y).Position - uZero;
 
             // Second modification is that output must be fov-centred (difference-space)
             uZero -= fovCentre;
