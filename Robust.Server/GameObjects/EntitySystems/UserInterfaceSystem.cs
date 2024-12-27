@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Robust.Server.GameStates;
 using Robust.Shared.GameObjects;
@@ -11,6 +12,18 @@ public sealed class UserInterfaceSystem : SharedUserInterfaceSystem
     {
         base.Initialize();
         SubscribeLocalEvent<UserInterfaceUserComponent, ExpandPvsEvent>(OnBuiUserExpand);
+    }
+
+    /// <inheritdoc />
+    public override void SendUiMessage(Entity<UserInterfaceComponent?> entity, Enum key, BoundUserInterfaceMessage message)
+    {
+        ServerSendUiMessage(entity, key, message);
+    }
+
+    /// <inheritdoc />
+    public override void ClientReceiveUiMessage(Entity<UserInterfaceComponent?> entity, Enum key, BoundUserInterfaceMessage message)
+    {
+        // NOOP
     }
 
     private void OnBuiUserExpand(Entity<UserInterfaceUserComponent> ent, ref ExpandPvsEvent args)

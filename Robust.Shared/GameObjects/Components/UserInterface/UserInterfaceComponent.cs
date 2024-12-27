@@ -221,7 +221,7 @@ namespace Robust.Shared.GameObjects
     }
 
     [Serializable, NetSerializable]
-    internal abstract class BaseBoundUIWrapMessage(NetEntity entity, BoundUserInterfaceMessage message, Enum uiKey)
+    public abstract class BaseBoundUIWrapMessage(NetEntity entity, BoundUserInterfaceMessage message, Enum uiKey)
         : EntityEventArgs
     {
         public readonly NetEntity Entity = entity;
@@ -233,7 +233,7 @@ namespace Robust.Shared.GameObjects
     /// Helper message raised from client to server.
     /// </summary>
     [Serializable, NetSerializable]
-    internal sealed class BoundUIWrapMessage(NetEntity entity, BoundUserInterfaceMessage message, Enum uiKey)
+    public sealed class BoundUIWrapMessage(NetEntity entity, BoundUserInterfaceMessage message, Enum uiKey)
         : BaseBoundUIWrapMessage(entity, message, uiKey);
 
     public sealed class BoundUIOpenedEvent : BaseLocalBoundUserInterfaceEvent

@@ -84,7 +84,7 @@ public abstract class SharedUserInterfaceSystem : EntitySystem
     /// <summary>
     /// Validates the received message, and then pass it onto systems/components
     /// </summary>
-    private void OnMessageReceived(BoundUIWrapMessage msg, EntityUid sender)
+    protected void OnMessageReceived(BoundUIWrapMessage msg, EntityUid sender)
     {
         // This is more or less the main BUI method that handles all messages.
 
@@ -813,6 +813,19 @@ public abstract class SharedUserInterfaceSystem : EntitySystem
 
         OnMessageReceived(new BoundUIWrapMessage(GetNetEntity(entity.Owner), message, key), message.Actor);
     }
+
+    /// <summary>
+    /// Sends a BUI message from Server -> Clients or Client -> itself.
+    /// </summary>
+    public abstract void SendUiMessage(
+        Entity<UserInterfaceComponent?> entity,
+        Enum key,
+        BoundUserInterfaceMessage message);
+
+    /// <summary>
+    /// Raises the BUI message on the client as if the server had sent it. Does nothing on server itself.
+    /// </summary>
+    public abstract void ClientReceiveUiMessage(Entity<UserInterfaceComponent?> entity, Enum key, BoundUserInterfaceMessage message);
 
     #region Server messages
 
