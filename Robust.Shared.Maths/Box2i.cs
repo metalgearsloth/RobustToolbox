@@ -2,6 +2,7 @@ using System;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using JetBrains.Annotations;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.Maths
@@ -55,6 +56,17 @@ namespace Robust.Shared.Maths
         public static Box2i FromDimensions(Vector2i position, Vector2i size)
         {
             return FromDimensions(position.X, position.Y, size.X, size.Y);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        [Pure]
+        public readonly bool Intersects(in Box2i other)
+        {
+            // A box of 0,0,1,1 doesn't intersect a box of 1,0,1,1
+            return other.Bottom < this.Top &&
+                   other.Top > this.Bottom &&
+                   other.Right > this.Left &&
+                   other.Left < this.Right;
         }
 
         public readonly bool Contains(int x, int y)
