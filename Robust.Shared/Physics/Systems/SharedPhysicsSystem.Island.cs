@@ -971,7 +971,7 @@ public abstract partial class SharedPhysicsSystem
         {
             var body = bodies[i];
 
-            if (body.BodyType == BodyType.Static)
+            if (body.BodyType == BodyType.Static || (body.ServerIgnored && _netMan.IsServer))
                 continue;
 
             var xform = xformQuery.GetComponent(body.Owner);

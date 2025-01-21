@@ -264,6 +264,9 @@ public sealed partial class PhysicsComponent : Component, IComponentDelta
     [DataField, Access(typeof(SharedPhysicsSystem), Friend = AccessPermissions.ReadWriteExecute, Other = AccessPermissions.Read)]
     public BodyStatus BodyStatus { get; set; }
 
+    [ViewVariables]
+    public bool ServerIgnored;
+
     [ViewVariables, Access(typeof(SharedPhysicsSystem))]
     public bool Predict;
 }
