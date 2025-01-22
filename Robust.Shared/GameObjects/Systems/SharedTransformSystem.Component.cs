@@ -12,6 +12,8 @@ using Robust.Shared.Map.Components;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using Robust.Shared.Containers;
+using Robust.Shared.IoC;
+using Robust.Shared.Player;
 
 namespace Robust.Shared.GameObjects;
 
