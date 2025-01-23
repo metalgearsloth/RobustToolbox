@@ -2,19 +2,13 @@ using Robust.Client.Player;
 using Robust.Shared.GameObjects;
 using Robust.Shared.IoC;
 using Robust.Shared.Physics.Systems;
+using Robust.Shared.Utility;
 
 namespace Robust.Client.GameObjects;
 
 public sealed class OwnerTransformSystem : SharedOwnerTransformSystem
 {
     [Dependency] private readonly IPlayerManager _playerManager = default!;
-
-    public override void Initialize()
-    {
-        base.Initialize();
-        UpdatesAfter.Add(typeof(SharedPhysicsSystem));
-        UpdatesAfter.Add(typeof(SharedTransformSystem));
-    }
 
     public override void Update(float frameTime)
     {
@@ -39,7 +33,10 @@ public sealed class OwnerTransformSystem : SharedOwnerTransformSystem
 
         ownerXform.LastPosition = xform.LocalPosition;
         ownerXform.LastRotation = xform.LocalRotation;
-        RaiseNetworkEvent(new TransformOwnerMessage()
+
+        DebugTools.Assert(!Timing.ApplyingState);
+
+        RaisePredictiveEvent(new TransformOwnerMessage()
         {
             LocalPosition = xform.LocalPosition,
             LocalRotation = xform.LocalRotation,

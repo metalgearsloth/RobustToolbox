@@ -971,7 +971,7 @@ public abstract partial class SharedPhysicsSystem
         {
             var body = bodies[i];
 
-            if (body.BodyType == BodyType.Static || (body.ServerIgnored && _netMan.IsServer))
+            if (body.BodyType == BodyType.Static)
                 continue;
 
             var xform = xformQuery.GetComponent(body.Owner);
@@ -1019,7 +1019,11 @@ public abstract partial class SharedPhysicsSystem
 
             // So technically we don't /need/ to skip static bodies here but it saves us having to check for deferred updates so we'll do it anyway.
             // Plus calcing worldpos can be costly so we skip that too which is nice.
-            if (body.BodyType == BodyType.Static) continue;
+            if (body.BodyType == BodyType.Static)
+                continue;
+
+            if (body.ServerIgnored && (_netMan.IsServer || !_gameTiming.IsFirstTimePredicted))
+                continue;
 
             var uid = body.Owner;
             var position = positions[offset + i];

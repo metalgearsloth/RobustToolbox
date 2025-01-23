@@ -1,8 +1,10 @@
 using System;
 using System.Numerics;
 using Robust.Shared.IoC;
+using Robust.Shared.Map;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics.Components;
+using Robust.Shared.Physics.Systems;
 using Robust.Shared.Serialization;
 using Robust.Shared.Timing;
 
@@ -18,7 +20,9 @@ public abstract class SharedOwnerTransformSystem : EntitySystem
     public override void Initialize()
     {
         base.Initialize();
-        SubscribeNetworkEvent<TransformOwnerMessage>(OnTransformMessage);
+        SubscribeAllEvent<TransformOwnerMessage>(OnTransformMessage);
+        UpdatesAfter.Add(typeof(SharedPhysicsSystem));
+        UpdatesAfter.Add(typeof(SharedTransformSystem));
     }
 
     private void OnTransformMessage(TransformOwnerMessage msg, EntitySessionEventArgs args)
@@ -28,7 +32,8 @@ public abstract class SharedOwnerTransformSystem : EntitySystem
         if (!HasComp<OwnerTransformComponent>(player))
             return;
 
-        XformSystem.SetLocalPositionRotation(player.Value, msg.LocalPosition, msg.LocalRotation);
+        var xform = Transform(player.Value);
+        XformSystem.SetCoordinates(player.Value, xform, new EntityCoordinates(xform.ParentUid, msg.LocalPosition), rotation: msg.LocalRotation);
     }
 
     public void SetPlayerOwner(EntityUid uid)
@@ -41,11 +46,17 @@ public abstract class SharedOwnerTransformSystem : EntitySystem
         {
             physics.ServerIgnored = true;
         }
+
+        if (TryComp(uid, out TransformComponent? transform))
+        {
+            transform.IgnoreState = true;
+        }
     }
 
     [Serializable, NetSerializable]
     protected sealed class TransformOwnerMessage : EntityEventArgs
     {
+        public NetEntity Parent;
         public Vector2 LocalPosition;
         public Angle LocalRotation;
     }

@@ -390,6 +390,9 @@ namespace Robust.Shared.GameObjects
 
         [ViewVariables] public int ChildCount => _children.Count;
 
+        [ViewVariables]
+        public bool IgnoreState;
+
         [ViewVariables] public EntityUid LerpParent;
         public bool PredictedLerp;
 
