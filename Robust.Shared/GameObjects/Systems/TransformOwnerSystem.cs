@@ -15,8 +15,6 @@ public abstract class SharedOwnerTransformSystem : EntitySystem
     [Dependency] protected readonly IGameTiming Timing = default!;
     [Dependency] private readonly SharedTransformSystem XformSystem = default!;
 
-    public virtual bool Enabled { get; protected set; } = false;
-
     public override void Initialize()
     {
         base.Initialize();
@@ -36,20 +34,27 @@ public abstract class SharedOwnerTransformSystem : EntitySystem
         XformSystem.SetCoordinates(player.Value, xform, new EntityCoordinates(xform.ParentUid, msg.LocalPosition), rotation: msg.LocalRotation);
     }
 
-    public void SetPlayerOwner(EntityUid uid)
+    public void SetPlayerOwner(EntityUid uid, bool value)
     {
-        if (!EnsureComp<OwnerTransformComponent>(uid, out var comp))
-            return;
+        if (!value)
+        {
+            if (!RemComp<OwnerTransformComponent>(uid))
+                return;
+        }
+        else
+        {
+            if (!EnsureComp<OwnerTransformComponent>(uid, out var comp))
+                return;
+        }
 
-        // TODO: Disable transform states (except teleports probably)
         if (TryComp(uid, out PhysicsComponent? physics))
         {
-            physics.ServerIgnored = true;
+            physics.ServerIgnored = value;
         }
 
         if (TryComp(uid, out TransformComponent? transform))
         {
-            transform.IgnoreState = true;
+            transform.IgnoreState = value;
         }
     }
 

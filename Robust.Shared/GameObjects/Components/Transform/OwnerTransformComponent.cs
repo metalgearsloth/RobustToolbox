@@ -12,6 +12,9 @@ namespace Robust.Shared.GameObjects;
 public sealed partial class OwnerTransformComponent : Component
 {
     [ViewVariables]
+    public bool Enabled = true;
+
+    [ViewVariables]
     public Vector2 LastPosition;
 
     [ViewVariables]

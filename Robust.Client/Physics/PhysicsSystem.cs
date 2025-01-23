@@ -17,6 +17,12 @@ namespace Robust.Client.Physics
         [Dependency] private readonly SharedTransformSystem _transform = default!;
         [Dependency] private readonly SharedBroadphaseSystem _broadphase = default!;
 
+        public override void FrameUpdate(float frameTime)
+        {
+            base.FrameUpdate(frameTime);
+            // SimulateWorld(frameTime, true);
+        }
+
         public override void Update(float frameTime)
         {
             UpdateIsPredicted();

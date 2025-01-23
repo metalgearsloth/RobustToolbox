@@ -1,8 +1,6 @@
 using Robust.Client.Player;
 using Robust.Shared.GameObjects;
 using Robust.Shared.IoC;
-using Robust.Shared.Physics.Systems;
-using Robust.Shared.Utility;
 
 namespace Robust.Client.GameObjects;
 
@@ -19,13 +17,11 @@ public sealed class OwnerTransformSystem : SharedOwnerTransformSystem
 
         var player = _playerManager.LocalEntity;
 
-        if (!TryComp(player, out OwnerTransformComponent? ownerXform))
+        if (!TryComp(player, out OwnerTransformComponent? ownerXform) || !ownerXform.Enabled)
         {
-            Enabled = false;
             return;
         }
 
-        Enabled = true;
         var xform = Transform(player.Value);
 
         if (xform.LocalPosition.Equals(ownerXform.LastPosition) && xform.LocalRotation.Equals(ownerXform.LastRotation))
@@ -33,8 +29,6 @@ public sealed class OwnerTransformSystem : SharedOwnerTransformSystem
 
         ownerXform.LastPosition = xform.LocalPosition;
         ownerXform.LastRotation = xform.LocalRotation;
-
-        DebugTools.Assert(!Timing.ApplyingState);
 
         RaisePredictiveEvent(new TransformOwnerMessage()
         {
