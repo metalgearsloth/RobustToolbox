@@ -12,7 +12,6 @@ using Robust.Shared.Map.Events;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics;
 using Robust.Shared.Physics.Components;
-using Robust.Shared.Physics.Dynamics;
 using Robust.Shared.Timing;
 using Robust.Shared.Utility;
 
@@ -20,6 +19,27 @@ namespace Robust.Shared.GameObjects;
 
 public abstract partial class SharedMapSystem
 {
+    private void InitializeGrid()
+    {
+        SubscribeLocalEvent<MapGridComponent, ComponentGetState>(OnGridGetState);
+        SubscribeLocalEvent<MapGridComponent, ComponentHandleState>(OnGridHandleState);
+        SubscribeLocalEvent<MapGridComponent, ComponentAdd>(OnGridAdd);
+        SubscribeLocalEvent<MapGridComponent, ComponentInit>(OnGridInit);
+        SubscribeLocalEvent<MapGridComponent, ComponentStartup>(OnGridStartup);
+        SubscribeLocalEvent<MapGridComponent, ComponentShutdown>(OnGridRemove);
+        SubscribeLocalEvent<MapGridComponent, MoveEvent>(OnGridMove);
+    }
+
+    private void UpdateGrid()
+    {
+        var query = AllEntityQuery<MapGridComponent>();
+
+        while (query.MoveNext(out var gridUid, out var grid))
+        {
+            FlushTiles((gridUid, grid));
+        }
+    }
+
     #region Chunk helpers
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -115,17 +135,6 @@ public abstract partial class SharedMapSystem
             default:
                 throw new NotImplementedException();
         }
-    }
-
-    private void InitializeGrid()
-    {
-        SubscribeLocalEvent<MapGridComponent, ComponentGetState>(OnGridGetState);
-        SubscribeLocalEvent<MapGridComponent, ComponentHandleState>(OnGridHandleState);
-        SubscribeLocalEvent<MapGridComponent, ComponentAdd>(OnGridAdd);
-        SubscribeLocalEvent<MapGridComponent, ComponentInit>(OnGridInit);
-        SubscribeLocalEvent<MapGridComponent, ComponentStartup>(OnGridStartup);
-        SubscribeLocalEvent<MapGridComponent, ComponentShutdown>(OnGridRemove);
-        SubscribeLocalEvent<MapGridComponent, MoveEvent>(OnGridMove);
     }
 
     /// <summary>
@@ -245,6 +254,9 @@ public abstract partial class SharedMapSystem
 
     private void OnGridHandleState(EntityUid uid, MapGridComponent component, ref ComponentHandleState args)
     {
+        // Don't want anymore buffered tiles as the state is authoritative.
+        component.PendingTiles.Clear();
+
         switch (args.Current)
         {
             case MapGridComponentDeltaState delta:
@@ -796,6 +808,48 @@ public abstract partial class SharedMapSystem
         return new GridTileEnumerator(uid, grid.Chunks.GetEnumerator(), grid.ChunkSize, ignoreEmpty);
     }
 
+    /// <summary>
+    /// Flushes all pending tile updates. Called automatically every tick.
+    /// </summary>
+    public void FlushTiles(Entity<MapGridComponent> grid)
+    {
+        if (grid.Comp.PendingTiles.Count == 0)
+            return;
+
+        var uid = grid.Owner;
+        var modified = new HashSet<MapChunk>(Math.Max(1, grid.Comp.PendingTiles.Count / grid.Comp.ChunkSize));
+
+        foreach (var (index, tile) in grid.Comp.PendingTiles)
+        {
+            var chunkIndex = GridTileToChunkIndices(uid, grid, index);
+
+            if (!grid.Comp.Chunks.TryGetValue(chunkIndex, out var chunk))
+            {
+                if (tile.IsEmpty)
+                    continue;
+
+                grid.Comp.Chunks[chunkIndex] = chunk = new MapChunk(chunkIndex.X, chunkIndex.Y, grid.Comp.ChunkSize)
+                {
+                    LastTileModifiedTick = _timing.CurTick
+                };
+            }
+
+            var offset = chunk.GridTileToChunkTile(index);
+            chunk.SuppressCollisionRegeneration = true;
+            if (SetChunkTile(uid, grid, chunk, (ushort)offset.X, (ushort)offset.Y, tile))
+                modified.Add(chunk);
+        }
+
+        grid.Comp.PendingTiles.Clear();
+
+        foreach (var chunk in modified)
+        {
+            chunk.SuppressCollisionRegeneration = false;
+        }
+
+        RegenerateCollision(uid, grid, modified);
+    }
+
     public void SetTile(Entity<MapGridComponent> grid, EntityCoordinates coordinates, Tile tile)
     {
         SetTile(grid.Owner, grid.Comp, coordinates, tile);
@@ -819,20 +873,7 @@ public abstract partial class SharedMapSystem
 
     public void SetTile(EntityUid uid, MapGridComponent grid, Vector2i gridIndices, Tile tile)
     {
-        var chunkIndex = GridTileToChunkIndices(uid, grid, gridIndices);
-        if (!grid.Chunks.TryGetValue(chunkIndex, out var chunk))
-        {
-            if (tile.IsEmpty)
-                return;
-
-            grid.Chunks[chunkIndex] = chunk = new MapChunk(chunkIndex.X, chunkIndex.Y, grid.ChunkSize)
-            {
-                LastTileModifiedTick = _timing.CurTick
-            };
-        }
-
-        var offset = chunk.GridTileToChunkTile(gridIndices);
-        SetChunkTile(uid, grid, chunk, (ushort)offset.X, (ushort)offset.Y, tile);
+        grid.PendingTiles[gridIndices] = tile;
     }
 
     public void SetTiles(EntityUid uid, MapGridComponent grid, List<(Vector2i GridIndices, Tile Tile)> tiles)
@@ -840,34 +881,10 @@ public abstract partial class SharedMapSystem
         if (tiles.Count == 0)
             return;
 
-        var modified = new HashSet<MapChunk>(Math.Max(1, tiles.Count / grid.ChunkSize));
-
-        foreach (var (gridIndices, tile) in tiles)
+        foreach (var tile in tiles)
         {
-            var chunkIndex = GridTileToChunkIndices(uid, grid, gridIndices);
-            if (!grid.Chunks.TryGetValue(chunkIndex, out var chunk))
-            {
-                if (tile.IsEmpty)
-                    continue;
-
-                grid.Chunks[chunkIndex] = chunk = new MapChunk(chunkIndex.X, chunkIndex.Y, grid.ChunkSize)
-                {
-                    LastTileModifiedTick = _timing.CurTick
-                };
-            }
-
-            var offset = chunk.GridTileToChunkTile(gridIndices);
-            chunk.SuppressCollisionRegeneration = true;
-            if (SetChunkTile(uid, grid, chunk, (ushort)offset.X, (ushort)offset.Y, tile))
-                modified.Add(chunk);
+            grid.PendingTiles[tile.GridIndices] = tile.Tile;
         }
-
-        foreach (var chunk in modified)
-        {
-            chunk.SuppressCollisionRegeneration = false;
-        }
-
-        RegenerateCollision(uid, grid, modified);
     }
 
     public TilesEnumerator GetLocalTilesEnumerator(EntityUid uid, MapGridComponent grid, Box2 aabb,

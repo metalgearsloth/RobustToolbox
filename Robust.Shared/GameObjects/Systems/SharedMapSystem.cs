@@ -48,6 +48,12 @@ namespace Robust.Shared.GameObjects
             SubscribeLocalEvent<MapLightComponent, ComponentGetState>(OnMapLightGetState);
             SubscribeLocalEvent<MapLightComponent, ComponentHandleState>(OnMapLightHandleState);
         }
+
+        public override void Update(float frameTime)
+        {
+            base.Update(frameTime);
+            UpdateGrid();
+        }
     }
 
     /// <summary>
