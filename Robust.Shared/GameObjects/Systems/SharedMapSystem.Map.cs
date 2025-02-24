@@ -209,7 +209,7 @@ public abstract partial class SharedMapSystem
     /// <summary>
     ///     Creates a new map, automatically assigning a map id.
     /// </summary>
-    public EntityUid CreateMap(out MapId mapId, bool runMapInit = true)
+    public Entity<MapComponent> CreateMap(out MapId mapId, bool runMapInit = true)
     {
         mapId = GetNextMapId();
         var uid = CreateMap(mapId, runMapInit);
@@ -217,13 +217,13 @@ public abstract partial class SharedMapSystem
     }
 
     /// <inheritdoc cref="CreateMap(out Robust.Shared.Map.MapId,bool)"/>
-    public EntityUid CreateMap(bool runMapInit = true) => CreateMap(out _, runMapInit);
+    public Entity<MapComponent> CreateMap(bool runMapInit = true) => CreateMap(out _, runMapInit);
 
     /// <summary>
     ///     Creates a new map with the specified map id.
     /// </summary>
     /// <exception cref="ArgumentException">Throws if an invalid or already existing map id is provided.</exception>
-    public EntityUid CreateMap(MapId mapId, bool runMapInit = true)
+    public Entity<MapComponent> CreateMap(MapId mapId, bool runMapInit = true)
     {
         if (Maps.ContainsKey(mapId))
             throw new ArgumentException($"Map with id {mapId} already exists");
@@ -241,8 +241,9 @@ public abstract partial class SharedMapSystem
             Log.Warning($"Re-using MapId: {mapId}");
 
         var (uid, map, meta) = CreateUninitializedMap();
+        var mapEnt = new Entity<MapComponent>(uid, map);
         DebugTools.AssertEqual(map.MapId, MapId.Nullspace);
-        AssignMapId((uid, map), mapId);
+        AssignMapId(mapEnt, mapId);
 
         // Initialize components. this should add the map id to the collections.
         EntityManager.InitializeEntity(uid, meta);
@@ -254,7 +255,7 @@ public abstract partial class SharedMapSystem
         else
             SetPaused((uid, map), true);
 
-        return uid;
+        return mapEnt;
     }
 
     public Entity<MapComponent, MetaDataComponent> CreateUninitializedMap()
