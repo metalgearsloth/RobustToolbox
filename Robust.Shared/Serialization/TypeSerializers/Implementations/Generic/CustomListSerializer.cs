@@ -10,26 +10,23 @@ using Robust.Shared.Serialization.TypeSerializers.Interfaces;
 
 namespace Robust.Shared.Serialization.TypeSerializers.Implementations.Generic;
 
-/// <summary>
-///     This is a variation of the <see cref="HashSetSerializer{T}"/> that uses a custom type serializer to read the values.
-/// </summary>
-public sealed class CustomHashSetSerializer<T, TCustomSerializer>
-    : ITypeSerializer<HashSet<T>, SequenceDataNode>
+public sealed class CustomListSerializer<T, TCustomSerializer>
+    : ITypeSerializer<List<T>, SequenceDataNode>
     where TCustomSerializer : ITypeSerializer<T, ValueDataNode>
 {
-    HashSet<T> ITypeReader<HashSet<T>, SequenceDataNode>.Read(ISerializationManager serializationManager,
+    List<T> ITypeReader<List<T>, SequenceDataNode>.Read(ISerializationManager serializationManager,
         SequenceDataNode node,
         IDependencyCollection dependencies,
         SerializationHookContext hookCtx,
-        ISerializationContext? context, ISerializationManager.InstantiationDelegate<HashSet<T>>? instanceProvider)
+        ISerializationContext? context, ISerializationManager.InstantiationDelegate<List<T>>? instanceProvider)
     {
-        var set = instanceProvider != null ? instanceProvider() : new HashSet<T>();
+        var set = instanceProvider != null ? instanceProvider() : new List<T>();
 
         foreach (var dataNode in node.Sequence)
         {
             var value = serializationManager.Read<T, ValueDataNode, TCustomSerializer>((ValueDataNode)dataNode, hookCtx, context);
             if (value == null)
-                throw new InvalidOperationException($"{nameof(TCustomSerializer)} returned a null value when reading using a custom hashset serializer.");
+                throw new InvalidOperationException($"{nameof(TCustomSerializer)} returned a null value when reading using a custom List serializer.");
 
             set.Add(value);
         }
@@ -37,7 +34,7 @@ public sealed class CustomHashSetSerializer<T, TCustomSerializer>
         return set;
     }
 
-    ValidationNode ITypeValidator<HashSet<T>, SequenceDataNode>.Validate(ISerializationManager serializationManager,
+    ValidationNode ITypeValidator<List<T>, SequenceDataNode>.Validate(ISerializationManager serializationManager,
         SequenceDataNode node, IDependencyCollection dependencies, ISerializationContext? context)
     {
         var list = new List<ValidationNode>();
@@ -49,7 +46,7 @@ public sealed class CustomHashSetSerializer<T, TCustomSerializer>
         return new ValidatedSequenceNode(list);
     }
 
-    public DataNode Write(ISerializationManager serializationManager, HashSet<T> value,
+    public DataNode Write(ISerializationManager serializationManager, List<T> value,
         IDependencyCollection dependencies, bool alwaysWrite = false,
         ISerializationContext? context = null)
     {
