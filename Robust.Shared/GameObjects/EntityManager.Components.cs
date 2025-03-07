@@ -1273,18 +1273,18 @@ namespace Robust.Shared.GameObjects
             foreach (var chunk in _world.Query(query).ChunkIterator(_world))
             {
                 var components = chunk.GetArray(type);
-                var metas = includePaused ? default : chunk.GetArray<MetaDataComponent>();
+                var metas = includePaused ? null : chunk.GetArray<MetaDataComponent>();
 
                 for (var i = 0; i < chunk.Size; i++)
                 {
-                    var comp = (IComponent)(components.GetValue(i))!;
+                    var comp = (IComponent)components.GetValue(i)!;
                     if (comp.Deleted)
                         continue;
 
                     if (!includePaused && metas![i].EntityPaused)
                         continue;
 
-                    yield return (EntityUid.FromArch(_world, chunk.Entity(i)), comp);
+                    yield return (EntityUid.FromArch(_world, chunk.EntityReference(i)), comp);
                 }
             }
         }
@@ -1640,7 +1640,7 @@ namespace Robust.Shared.GameObjects
                         return MoveNext(out uid);
                 }
 
-                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.Entity(_index));
+                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.EntityReference(_index));
                 return true;
             }
         }
@@ -1684,7 +1684,7 @@ namespace Robust.Shared.GameObjects
         {
             if (MoveNext(out comp1))
             {
-                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.Entity(_index));
+                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.EntityReference(_index));
                 DebugTools.AssertOwner(uid, comp1);
                 return true;
             }
@@ -1751,7 +1751,7 @@ namespace Robust.Shared.GameObjects
         {
             if (MoveNext(out comp1, out comp2))
             {
-                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.Entity(_index));
+                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.EntityReference(_index));
                 DebugTools.AssertOwner(uid, comp1);
                 DebugTools.AssertOwner(uid, comp2);
                 return true;
@@ -1825,7 +1825,7 @@ namespace Robust.Shared.GameObjects
         {
             if (MoveNext(out comp1, out comp2, out comp3))
             {
-                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.Entity(_index));
+                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.EntityReference(_index));
                 DebugTools.AssertOwner(uid, comp1);
                 DebugTools.AssertOwner(uid, comp2);
                 DebugTools.AssertOwner(uid, comp3);
@@ -1908,7 +1908,7 @@ namespace Robust.Shared.GameObjects
         {
             if (MoveNext(out comp1, out comp2, out comp3, out comp4))
             {
-                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.Entity(_index));
+                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.EntityReference(_index));
                 DebugTools.AssertOwner(uid, comp1);
                 DebugTools.AssertOwner(uid, comp2);
                 DebugTools.AssertOwner(uid, comp3);
@@ -1995,7 +1995,7 @@ namespace Robust.Shared.GameObjects
         {
             if (MoveNext(out comp1))
             {
-                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.Entity(_index));
+                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.EntityReference(_index));
                 DebugTools.AssertOwner(uid, comp1);
                 return true;
             }
@@ -2065,7 +2065,7 @@ namespace Robust.Shared.GameObjects
         {
             if (MoveNext(out comp1, out comp2))
             {
-                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.Entity(_index));
+                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.EntityReference(_index));
                 DebugTools.AssertOwner(uid, comp1);
                 DebugTools.AssertOwner(uid, comp2);
                 return true;
@@ -2140,7 +2140,7 @@ namespace Robust.Shared.GameObjects
         {
             if (MoveNext(out comp1, out comp2, out comp3))
             {
-                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.Entity(_index));
+                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.EntityReference(_index));
                 DebugTools.AssertOwner(uid, comp1);
                 DebugTools.AssertOwner(uid, comp2);
                 DebugTools.AssertOwner(uid, comp3);
@@ -2221,7 +2221,7 @@ namespace Robust.Shared.GameObjects
         {
             if (MoveNext(out comp1, out comp2, out comp3, out comp4))
             {
-                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.Entity(_index));
+                uid = EntityUid.FromArch(_world, _chunkEnumerator.Current.EntityReference(_index));
                 DebugTools.AssertOwner(uid, comp1);
                 DebugTools.AssertOwner(uid, comp2);
                 DebugTools.AssertOwner(uid, comp3);

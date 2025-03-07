@@ -87,6 +87,12 @@ namespace Robust.Shared.GameObjects
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static EntityUid FromArch(in World world, in EntityReference entity)
+        {
+            return new EntityUid(entity.Entity.Id + ArchUidOffset, entity.Version + ArchVersionOffset);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public int GetArchId() => Id - ArchUidOffset;
 
         /// <summary>
