@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using JetBrains.Annotations;
@@ -188,7 +188,8 @@ public static class CompletionHelper
     {
         IoCManager.Resolve(ref entManager);
 
-        return Components<MapComponent>(string.Empty, entManager, limit: int.MaxValue); // faster just to pass the max value than bother unlimiting it.
+        // Arbitrary limit in the off chance you have unlimited maps.
+        return Components<MapComponent>(string.Empty, entManager, limit: 128);
     }
 
     /// <summary>
