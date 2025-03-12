@@ -416,8 +416,8 @@ namespace Robust.Shared.Physics.Systems
                 // Logger.DebugS("physics", $"Checking {proxy.Entity} against {other.Fixture.Body.Owner} at {aabb}");
 
                 if (tuple.proxy == other ||
-                    !SharedPhysicsSystem.ShouldCollide(tuple.proxy.Fixture, other.Fixture) ||
-                    tuple.proxy.Entity == other.Entity)
+                    tuple.proxy.Entity == other.Entity ||
+                    !SharedPhysicsSystem.ShouldCollide(tuple.proxy.Fixture, other.Fixture))
                 {
                     return true;
                 }
