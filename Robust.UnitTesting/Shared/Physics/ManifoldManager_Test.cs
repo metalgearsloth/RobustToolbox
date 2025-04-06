@@ -5,6 +5,7 @@ using Robust.Shared.Maths;
 using Robust.Shared.Physics;
 using Robust.Shared.Physics.Collision;
 using Robust.Shared.Physics.Collision.Shapes;
+using Robust.Shared.Physics.Shapes;
 using Robust.Shared.Utility;
 
 namespace Robust.UnitTesting.Shared.Physics
@@ -18,8 +19,8 @@ namespace Robust.UnitTesting.Shared.Physics
         private PhysShapeCircle _circleA = default!;
         private PhysShapeCircle _circleB = default!;
 
-        private PolygonShape _polyA = default!;
-        private PolygonShape _polyB = default!;
+        private Polygon _polyA = default!;
+        private Polygon _polyB = default!;
 
         [OneTimeSetUp]
         public void Setup()
@@ -27,8 +28,8 @@ namespace Robust.UnitTesting.Shared.Physics
             _manifoldManager = new CollisionManager();
             _circleA = new PhysShapeCircle(0.5f);
             _circleB = new PhysShapeCircle(0.5f);
-            _polyA = new PolygonShape();
-            _polyB = new PolygonShape();
+            _polyA = new Polygon();
+            _polyB = new Polygon();
             _polyA.SetAsBox(0.5f, 0.5f);
             _polyB.SetAsBox(0.5f, 0.5f);
         }

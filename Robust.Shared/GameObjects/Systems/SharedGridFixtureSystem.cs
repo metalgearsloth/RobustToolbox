@@ -14,6 +14,7 @@ using Robust.Shared.Physics;
 using Robust.Shared.Physics.Collision.Shapes;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Physics.Dynamics;
+using Robust.Shared.Physics.Shapes;
 using Robust.Shared.Physics.Systems;
 using Robust.Shared.Serialization;
 using Robust.Shared.Utility;
@@ -130,14 +131,7 @@ namespace Robust.Shared.GameObjects
             foreach (var rectangle in rectangles)
             {
                 var bounds = ((Box2) rectangle.Translated(origin)).Enlarged(_fixtureEnlargement);
-                var poly = new PolygonShape();
-
-                vertices[0] = bounds.BottomLeft;
-                vertices[1] = bounds.BottomRight;
-                vertices[2] = bounds.TopRight;
-                vertices[3] = bounds.TopLeft;
-
-                poly.Set(vertices, 4);
+                var poly = new Polygon(bounds);
 
 #pragma warning disable CS0618
                 var newFixture = new Fixture(
@@ -203,8 +197,8 @@ namespace Robust.Shared.GameObjects
                 // Check if it's the same (otherwise remove anyway).
                 // TODO GRIDS
                 // wasn't this already checked?
-                if (existingFixture?.Shape is PolygonShape poly &&
-                    poly.EqualsApprox((PolygonShape) fixture.Shape))
+                if (existingFixture?.Shape is Polygon poly &&
+                    poly.Equals((Polygon) fixture.Shape))
                 {
                     continue;
                 }

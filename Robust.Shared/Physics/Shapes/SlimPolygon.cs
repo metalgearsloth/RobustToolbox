@@ -45,6 +45,8 @@ internal record struct SlimPolygon : IPhysShape
         _normals._01 = new Vector2(1.0f, 0.0f);
         _normals._02 = new Vector2(0.0f, 1.0f);
         _normals._03 = new Vector2(-1.0f, 0.0f);
+
+        Centroid = box.Center;
     }
 
     public SlimPolygon(Box2Rotated bounds)

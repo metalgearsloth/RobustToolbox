@@ -154,7 +154,7 @@ internal sealed partial class CollisionManager : IManifoldManager
 /// <summary>
 /// This structure is used to keep track of the best separating axis.
 /// </summary>
-public struct EPAxis
+internal ref struct EPAxis
 {
     public int Index;
     public float Separation;
@@ -165,7 +165,7 @@ public struct EPAxis
 /// <summary>
 /// Reference face used for clipping
 /// </summary>
-public struct ReferenceFace
+internal ref struct ReferenceFace
 {
     public int i1, i2;
 

@@ -2,6 +2,7 @@ using System;
 using System.Numerics;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics.Collision.Shapes;
+using Robust.Shared.Physics.Shapes;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.Physics.Collision;
@@ -16,7 +17,7 @@ internal sealed partial class CollisionManager
     /// <param name="xfA">The transform of A.</param>
     /// <param name="circleB">The circle B.</param>
     /// <param name="xfB">The transform of B.</param>
-    public void CollidePolygonAndCircle(ref Manifold manifold, PolygonShape polygonA, in Transform xfA,
+    public void CollidePolygonAndCircle(ref Manifold manifold, Polygon polygonA, in Transform xfA,
         PhysShapeCircle circleB, in Transform xfB)
     {
         manifold.PointCount = 0;
@@ -30,7 +31,7 @@ internal sealed partial class CollisionManager
 	    float separation = float.MinValue;
 	    float radius = polygonA.Radius + circleB.Radius;
 	    int vertexCount = polygonA.VertexCount;
-	    var vertices = polygonA.Vertices;
+	    var vertices = polygonA._vertices.AsSpan;
 	    var normals = polygonA.Normals;
 
 	    for (int i = 0; i < vertexCount; ++i)

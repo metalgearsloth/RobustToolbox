@@ -37,6 +37,7 @@ using Robust.Shared.Maths;
 using Robust.Shared.Physics.Collision;
 using Robust.Shared.Physics.Collision.Shapes;
 using Robust.Shared.Physics.Components;
+using Robust.Shared.Physics.Shapes;
 using Robust.Shared.Physics.Systems;
 using Robust.Shared.ViewVariables;
 
@@ -299,16 +300,16 @@ namespace Robust.Shared.Physics.Dynamics.Contacts
             {
                 // TODO: Need a unit test for these.
                 case ContactType.Polygon:
-                    _manifoldManager.CollidePolygons(ref manifold, (PolygonShape) FixtureA!.Shape, transformA, (PolygonShape) FixtureB!.Shape, transformB);
+                    _manifoldManager.CollidePolygons(ref manifold, (Polygon) FixtureA!.Shape, transformA, (Polygon) FixtureB!.Shape, transformB);
                     break;
                 case ContactType.PolygonAndCircle:
-                    _manifoldManager.CollidePolygonAndCircle(ref manifold, (PolygonShape) FixtureA!.Shape, transformA, (PhysShapeCircle) FixtureB!.Shape, transformB);
+                    _manifoldManager.CollidePolygonAndCircle(ref manifold, (Polygon) FixtureA!.Shape, transformA, (PhysShapeCircle) FixtureB!.Shape, transformB);
                     break;
                 case ContactType.EdgeAndCircle:
                     _manifoldManager.CollideEdgeAndCircle(ref manifold, (EdgeShape) FixtureA!.Shape, transformA, (PhysShapeCircle) FixtureB!.Shape, transformB);
                     break;
                 case ContactType.EdgeAndPolygon:
-                    _manifoldManager.CollideEdgeAndPolygon(ref manifold, (EdgeShape) FixtureA!.Shape, transformA, (PolygonShape) FixtureB!.Shape, transformB);
+                    _manifoldManager.CollideEdgeAndPolygon(ref manifold, (EdgeShape) FixtureA!.Shape, transformA, (Polygon) FixtureB!.Shape, transformB);
                     break;
                 case ContactType.ChainAndCircle:
                 {
@@ -324,7 +325,7 @@ namespace Robust.Shared.Physics.Dynamics.Contacts
                     var loop2 = (ChainShape) FixtureA!.Shape;
                     var edge = _manifoldManager.GetContactEdge();
                     loop2.GetChildEdge(ref edge, ChildIndexA);
-                    _manifoldManager.CollideEdgeAndPolygon(ref manifold, edge, in transformA, (PolygonShape) FixtureB!.Shape, in transformB);
+                    _manifoldManager.CollideEdgeAndPolygon(ref manifold, edge, in transformA, (Polygon) FixtureB!.Shape, in transformB);
                     _manifoldManager.ReturnEdge(edge);
                     break;
                 }

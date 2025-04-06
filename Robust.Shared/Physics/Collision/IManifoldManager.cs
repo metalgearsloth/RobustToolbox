@@ -1,4 +1,5 @@
 using Robust.Shared.Physics.Collision.Shapes;
+using Robust.Shared.Physics.Shapes;
 
 namespace Robust.Shared.Physics.Collision;
 
@@ -23,11 +24,11 @@ internal interface IManifoldManager
         PhysShapeCircle circleB, in Transform transformB);
 
     void CollideEdgeAndPolygon(ref Manifold manifold, EdgeShape edgeA, in Transform xfA,
-        PolygonShape polygonB, in Transform xfB);
+        Polygon polygonB, in Transform xfB);
 
-    void CollidePolygonAndCircle(ref Manifold manifold, PolygonShape polygonA, in Transform xfA,
+    void CollidePolygonAndCircle(ref Manifold manifold, Polygon polygonA, in Transform xfA,
         PhysShapeCircle circleB, in Transform xfB);
 
-    void CollidePolygons(ref Manifold manifold, PolygonShape polyA, in Transform transformA,
-        PolygonShape polyB, in Transform transformB);
+    void CollidePolygons(ref Manifold manifold, Polygon polyA, in Transform transformA,
+        Polygon polyB, in Transform transformB);
 }

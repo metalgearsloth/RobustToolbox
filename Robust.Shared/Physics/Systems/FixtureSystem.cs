@@ -6,6 +6,7 @@ using Robust.Shared.GameObjects;
 using Robust.Shared.GameStates;
 using Robust.Shared.IoC;
 using Robust.Shared.Map.Components;
+using Robust.Shared.Network;
 using Robust.Shared.Physics.Collision.Shapes;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Physics.Dynamics;
@@ -24,6 +25,7 @@ namespace Robust.Shared.Physics.Systems
         [Dependency] private readonly EntityLookupSystem _lookup = default!;
         [Dependency] private readonly SharedPhysicsSystem _physics = default!;
         [Dependency] private readonly IGameTiming _timing = default!;
+        [Dependency] private readonly INetManager _netMan = default!;
         private EntityQuery<PhysicsMapComponent> _mapQuery;
         private EntityQuery<PhysicsComponent> _physicsQuery;
         private EntityQuery<FixturesComponent> _fixtureQuery;
@@ -239,10 +241,29 @@ namespace Robust.Shared.Physics.Systems
 
         private void OnGetState(EntityUid uid, FixturesComponent component, ref ComponentGetState args)
         {
-            args.State = new FixtureManagerComponentState
+            if (_netMan.IsClient)
             {
-                Fixtures = component.Fixtures,
-            };
+                var fixs = new Dictionary<string, Fixture>();
+
+                foreach (var (id, fix) in component.Fixtures)
+                {
+                    var copy = new Fixture();
+                    fix.CopyTo(copy);
+                    fixs[id] = copy;
+                }
+
+                args.State = new FixtureManagerComponentState
+                {
+                    Fixtures = fixs,
+                };
+            }
+            else
+            {
+                args.State = new FixtureManagerComponentState
+                {
+                    Fixtures = component.Fixtures,
+                };
+            }
         }
 
         private void OnHandleState(EntityUid uid, FixturesComponent component, ref ComponentHandleState args)

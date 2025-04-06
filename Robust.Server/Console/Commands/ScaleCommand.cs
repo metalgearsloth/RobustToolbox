@@ -7,6 +7,7 @@ using Robust.Shared.IoC;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics;
 using Robust.Shared.Physics.Collision.Shapes;
+using Robust.Shared.Physics.Shapes;
 using Robust.Shared.Physics.Systems;
 
 namespace Robust.Server.Console.Commands;
@@ -75,7 +76,20 @@ public sealed class ScaleCommand : LocalizedCommands
                     case PhysShapeCircle circle:
                         physics.SetPositionRadius(uid, id, fixture, circle, circle.Position * scale, circle.Radius * scale, manager);
                         break;
+                    case Polygon fastPoly:
+                    {
+                        var verts = fastPoly._vertices.AsSpan;
+
+                        for (var i = 0; i < fastPoly.VertexCount; i++)
+                        {
+                            verts[i] *= scale;
+                        }
+
+                        physics.SetVertices(uid, id, fixture, fastPoly, verts.ToArray(), manager);
+                        break;
+                    }
                     case PolygonShape poly:
+                    {
                         var verts = poly.Vertices;
 
                         for (var i = 0; i < poly.VertexCount; i++)
@@ -85,6 +99,7 @@ public sealed class ScaleCommand : LocalizedCommands
 
                         physics.SetVertices(uid, id, fixture, poly, verts, manager);
                         break;
+                    }
                     default:
                         throw new NotImplementedException();
                 }

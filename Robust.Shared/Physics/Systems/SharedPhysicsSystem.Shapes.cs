@@ -5,6 +5,7 @@ using Robust.Shared.Maths;
 using Robust.Shared.Physics.Collision.Shapes;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Physics.Dynamics;
+using Robust.Shared.Physics.Shapes;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.Physics.Systems;
@@ -133,6 +134,32 @@ public abstract partial class SharedPhysicsSystem
     #endregion
 
     #region Polygon
+
+    public void SetVertices(
+        EntityUid uid,
+        string fixtureId,
+        Fixture fixture,
+        Polygon poly,
+        Vector2[] vertices,
+        FixturesComponent? manager = null,
+        PhysicsComponent? body = null,
+        TransformComponent? xform = null)
+    {
+        if (!Resolve(uid, ref manager, ref body, ref xform))
+            return;
+
+        poly.Vertices = vertices;
+
+        if (body.CanCollide &&
+            TryComp<BroadphaseComponent>(xform.Broadphase?.Uid, out var broadphase) &&
+            TryComp<PhysicsMapComponent>(xform.MapUid, out var physicsMap))
+        {
+            _lookup.DestroyProxies(uid, fixtureId, fixture, xform, broadphase, physicsMap);
+            _lookup.CreateProxies(uid, fixtureId, fixture, xform, body);
+        }
+
+        _fixtures.FixtureUpdate(uid, manager: manager, body: body);
+    }
 
     public void SetVertices(
         EntityUid uid,

@@ -2,6 +2,7 @@ using System;
 using System.Numerics;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics.Collision.Shapes;
+using Robust.Shared.Physics.Shapes;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.Physics.Collision;
@@ -17,7 +18,7 @@ internal sealed partial class CollisionManager
     /// <param name="polygonB">The polygon B.</param>
     /// <param name="xfB">The xf B.</param>
     public void CollideEdgeAndPolygon(ref Manifold manifold, EdgeShape edgeA, in Transform xfA,
-        PolygonShape polygonB, in Transform xfB)
+        Polygon polygonB, in Transform xfB)
     {
         manifold.PointCount = 0;
 
@@ -44,10 +45,11 @@ internal sealed partial class CollisionManager
         // Can't use Spans because these may get attached to the manifold.
         var tempPolyVerts = new Vector2[tempPolyCount];
         var tempPolyNorms = new Vector2[tempPolyCount];
+        var verts = polygonB._vertices.AsSpan;
 
         for (var i = 0; i < tempPolyCount; ++i)
 	    {
-		    tempPolyVerts[i] = Transform.Mul(xf, polygonB.Vertices[i]);
+		    tempPolyVerts[i] = Transform.Mul(xf, verts[i]);
 		    tempPolyNorms[i] = Transform.Mul(xf.Quaternion2D, polygonB.Normals[i]);
 	    }
 

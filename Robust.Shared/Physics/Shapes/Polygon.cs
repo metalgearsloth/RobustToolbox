@@ -3,13 +3,14 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics.Collision.Shapes;
+using Robust.Shared.Serialization;
 using Robust.Shared.Serialization.Manager.Attributes;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.Physics.Shapes;
 
-// Internal so people don't use it when it will have breaking changes very soon.
-internal record struct Polygon : IPhysShape
+[DataDefinition, Serializable, NetSerializable]
+public partial record struct Polygon : IPhysShape
 {
     [DataField]
     public byte VertexCount { get; internal set; }
@@ -20,16 +21,39 @@ internal record struct Polygon : IPhysShape
     /// <remarks>
     /// Consider using _vertices if doing engine work.
     /// </remarks>
-    public Vector2[] Vertices => _vertices.AsSpan[..VertexCount].ToArray();
+    [DataField]
+    public Vector2[] Vertices
+    {
+        get => _vertices.AsSpan[..VertexCount].ToArray();
+        set
+        {
+            // Mostly for serialization... but content may also want to do it.
+            if (value.Length == 0)
+            {
+                VertexCount = 0;
+                return;
+            }
+
+            // Validate the verts; engine can just manually handle this but public callers may not have done so.
+            var hull = InternalPhysicsHull.ComputeHull(value.AsSpan(), VertexCount);
+            VertexCount = (byte) hull.Count;
+
+            hull.Points.CopyTo(_vertices.AsSpan);
+            Centroid = ComputeCentroid(_vertices.AsSpan[..VertexCount]);
+            CalculateNormals(_vertices.AsSpan, _normals.AsSpan, VertexCount);
+        }
+    }
 
     public Vector2[] Normals => _normals.AsSpan[..VertexCount].ToArray();
 
-    [DataField]
+    [NonSerialized]
     internal FixedArray8<Vector2> _vertices;
 
+    [NonSerialized]
     internal FixedArray8<Vector2> _normals;
 
-    public Vector2 Centroid;
+    [field: NonSerialized]
+    public Vector2 Centroid { get; internal set; }
 
     public int ChildCount => 1;
     public float Radius { get; set; } = PhysicsConstants.PolygonRadius;
@@ -67,6 +91,8 @@ internal record struct Polygon : IPhysShape
         _normals._01 = new Vector2(1.0f, 0.0f);
         _normals._02 = new Vector2(0.0f, 1.0f);
         _normals._03 = new Vector2(-1.0f, 0.0f);
+
+        Centroid = box.Center;
     }
 
     public Polygon(Box2Rotated bounds)
@@ -122,7 +148,7 @@ internal record struct Polygon : IPhysShape
         return new Polygon(polyShape);
     }
 
-    private void Set(InternalPhysicsHull hull)
+    internal void Set(InternalPhysicsHull hull)
     {
         DebugTools.Assert(hull.Count >= 3);
         var vertexCount = hull.Count;
@@ -209,6 +235,79 @@ internal record struct Polygon : IPhysShape
         return new Box2(lower - r, upper + r);
     }
 
+    public void SetAsBox(Box2Rotated bounds)
+    {
+        VertexCount = 4;
+
+        _vertices._00 = bounds.BottomLeft;
+        _vertices._01 = bounds.BottomRight;
+        _vertices._02 = bounds.TopRight;
+        _vertices._03 = bounds.TopLeft;
+
+        var hull = new InternalPhysicsHull(_vertices.AsSpan, VertexCount);
+        Set(hull);
+    }
+
+    public void SetAsBox(Box2 box)
+    {
+        VertexCount = 4;
+
+        _vertices._00 = box.BottomLeft;
+        _vertices._01 = box.BottomRight;
+        _vertices._02 = box.TopRight;
+        _vertices._03 = box.TopLeft;
+
+        _normals._00 = new Vector2(0.0f, -1.0f);
+        _normals._01 = new Vector2(1.0f, 0.0f);
+        _normals._02 = new Vector2(0.0f, 1.0f);
+        _normals._03 = new Vector2(-1.0f, 0.0f);
+
+        Centroid = box.Center;
+    }
+
+    public void SetAsBox(float halfWidth, float halfHeight)
+    {
+        VertexCount = 4;
+
+        _vertices._00 = new Vector2(-halfWidth, -halfHeight);
+        _vertices._01 = new Vector2(halfWidth, -halfHeight);
+        _vertices._02 = new Vector2(halfWidth,  halfHeight);
+        _vertices._03 = new Vector2(-halfWidth,  halfHeight);
+
+        _normals._00 = new Vector2(0.0f, -1.0f);
+        _normals._01 = new Vector2(1.0f, 0.0f);
+        _normals._02 = new Vector2(0.0f, 1.0f);
+        _normals._03 = new Vector2(-1.0f, 0.0f);
+
+        Centroid = Vector2.Zero;
+    }
+
+    public void SetAsBox(float halfWidth, float halfHeight, Vector2 center, float angle)
+    {
+        VertexCount = 4;
+
+        _vertices._00 = new Vector2(-halfWidth, -halfHeight);
+        _vertices._01 = new Vector2(halfWidth, -halfHeight);
+        _vertices._02 = new Vector2(halfWidth, halfHeight);
+        _vertices._03 = new Vector2(-halfWidth, halfHeight);
+
+        _normals._00 = new Vector2(0f, -1f);
+        _normals._01 = new Vector2(1f, 0f);
+        _normals._02 = new Vector2(0f, 1f);
+        _normals._03 = new Vector2(-1f, 0f);
+
+        Centroid = center;
+
+        var xf = new Transform(center, angle);
+
+        // Transform vertices and normals.
+        for (var i = 0; i < VertexCount; ++i)
+        {
+            _vertices.AsSpan[i] = Transform.Mul(xf, _vertices.AsSpan[i]);
+            _normals.AsSpan[i] = Transform.Mul(xf.Quaternion2D, _normals.AsSpan[i]);
+        }
+    }
+
     public bool Equals(IPhysShape? other)
     {
         if (other is SlimPolygon slim)
@@ -221,7 +320,8 @@ internal record struct Polygon : IPhysShape
 
     public bool Equals(Polygon other)
     {
-        if (VertexCount != other.VertexCount) return false;
+        if (VertexCount != other.VertexCount)
+            return false;
 
         var ourVerts = _vertices.AsSpan;
         var otherVerts = other._vertices.AsSpan;
@@ -229,13 +329,14 @@ internal record struct Polygon : IPhysShape
         for (var i = 0; i < VertexCount; i++)
         {
             var vert = ourVerts[i];
-            if (!vert.Equals(otherVerts[i])) return false;
+            if (!vert.Equals(otherVerts[i]))
+                return false;
         }
 
         return true;
     }
 
-    public bool Equals(SlimPolygon other)
+    internal bool Equals(SlimPolygon other)
     {
         if (VertexCount != other.VertexCount) return false;
 
@@ -245,7 +346,8 @@ internal record struct Polygon : IPhysShape
         for (var i = 0; i < VertexCount; i++)
         {
             var vert = ourVerts[i];
-            if (!vert.Equals(otherVerts[i])) return false;
+            if (!vert.Equals(otherVerts[i]))
+                return false;
         }
 
         return true;
