@@ -28,12 +28,27 @@ public abstract partial class SharedAudioSystem
 
     private void OnPresetStartup(EntityUid uid, AudioPresetComponent component, ComponentStartup args)
     {
+        if (component.Preset == null)
+            return;
+
         _auxiliaries[component.Preset] = uid;
     }
 
     private void OnPresetShutdown(EntityUid uid, AudioPresetComponent component, ComponentShutdown args)
     {
+        if (component.Preset == null)
+            return;
+
         _auxiliaries.Remove(component.Preset);
+    }
+
+    public void SetEffect(Entity<AudioComponent>? ent, EntityUid aux)
+    {
+        if (ent == null)
+            return;
+
+        ent.Value.Comp.Auxiliary = aux;
+        Dirty(ent.Value);
     }
 
     /// <summary>

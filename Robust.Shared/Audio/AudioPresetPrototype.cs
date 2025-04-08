@@ -6,19 +6,13 @@ namespace Robust.Shared.Audio;
 
 /// <summary>
 /// Contains audio defaults to set for sounds.
-/// This can be used by <see cref="Content.Shared.Audio.SharedContentAudioSystem"/> to apply an audio preset.
+/// This can be used to apply an audio EFX preset to a sound.
 /// </summary>
 [Prototype]
 public sealed partial class AudioPresetPrototype : IPrototype
 {
     [IdDataField]
     public string ID { get; } = default!;
-
-    /// <summary>
-    /// Should the engine automatically create an auxiliary audio effect slot for this.
-    /// </summary>
-    [DataField]
-    public bool CreateAuxiliary;
 
     [DataField]
     public float Density;
