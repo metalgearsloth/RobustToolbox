@@ -235,6 +235,21 @@ namespace Robust.UnitTesting
         }
 
         /// <summary>
+        /// Runs server and client for the specified number of ticks.
+        /// </summary>
+        public async Task WaitRunTicks(
+            ClientIntegrationInstance client,
+            ServerIntegrationInstance server,
+            int ticks = 10)
+        {
+            for (var i = 0; i < ticks; i++)
+            {
+                await server.WaitRunTicks(1);
+                await client.WaitRunTicks(1);
+            }
+        }
+
+        /// <summary>
         ///     Provides control over a running instance of the client or server.
         /// </summary>
         /// <remarks>
@@ -878,6 +893,31 @@ namespace Robust.UnitTesting
                 }
 
                 clientNetManager.NextConnectChannel = serverNetManager.MessageChannelWriter;
+            }
+
+            /// <summary>
+            /// Connects to the specified server instance.
+            /// </summary>
+            public async Task ConnectTo(ServerIntegrationInstance server)
+            {
+                var netMan = ResolveDependency<IClientNetManager>();
+                NUnit.Framework.Assert.DoesNotThrow(() => SetConnectTarget(server));
+
+                Assert(() =>
+                {
+                    netMan.ClientConnect(null!, 0, null!);
+                });
+
+                for (var i = 0; i < 10; i++)
+                {
+                    await server.WaitRunTicks(1);
+                    await WaitRunTicks(1);
+                }
+
+                Assert(() =>
+                {
+                    NUnit.Framework.Assert.That(netMan.IsConnected, Is.EqualTo(true));
+                });
             }
 
             public async Task CheckSandboxed(Assembly assembly)
