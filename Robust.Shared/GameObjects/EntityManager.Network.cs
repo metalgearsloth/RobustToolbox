@@ -1,7 +1,10 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Robust.Shared.Map;
+using Robust.Shared.Prototypes;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.GameObjects;
@@ -16,6 +19,31 @@ public partial class EntityManager
     /// Regular lookup uses MetadataComponent.
     /// </summary>
     protected readonly Dictionary<NetEntity, (EntityUid, MetaDataComponent)> NetEntityLookup = new(EntityCapacity);
+
+    /// <summary>
+    /// Buffer that tracks how many times a particular spawn path is called for a tick. This only matters for repeated calls to <see cref="GetEntityHash"/>.
+    /// </summary>
+    protected readonly Dictionary<string, byte>[] SpawnCallCounts = new Dictionary<string, byte>[SpawnBufferLength];
+
+    protected readonly Dictionary<int, NetEntity> PredictedEntityHashes = new();
+    private readonly Dictionary<NetEntity, int> _reverseEntityHash = new();
+
+    protected int CurrentSpawnCallIndex;
+
+    /// <summary>
+    /// How many ticks we store a buffer of calls for.
+    /// </summary>
+    private const int SpawnBufferLength = 20;
+
+    // If you unconst this PvsSystem.Dirty has the same issue.
+
+    private void InitializePredictedSpawns()
+    {
+        for (var i = 0; i < SpawnBufferLength; i++)
+        {
+            SpawnCallCounts[i] = new Dictionary<string, byte>();
+        }
+    }
 
     /// <summary>
     /// Clears an old inverse lookup for a particular entityuid.
@@ -42,6 +70,52 @@ public partial class EntityManager
     public virtual bool IsClientSide(EntityUid uid, MetaDataComponent? metadata = null)
     {
         return false;
+    }
+
+    public bool TryGetPredictedEntity(int hash, out NetEntity netEntity)
+    {
+        if (PredictedEntityHashes.TryGetValue(hash, out netEntity))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Gets the client and serverside hash of an entity spawn.
+    /// </summary>
+    public int GetEntityHash(EntProtoId entProto, [CallerMemberName] string? name = null)
+    {
+        /*
+         * TODO: Pass callermembername into predicted methods.
+         * Server still needs to call flagpredicted.
+         * Need to figure out wtf going on with assert.
+         */
+
+        var callCount = 0;
+
+        // Bump the call counter.
+        if (!string.IsNullOrEmpty(name))
+        {
+            DebugTools.Assert(CurrentSpawnCallIndex == _gameTiming.CurTick.Value % SpawnBufferLength);
+            var callCounts = SpawnCallCounts[CurrentSpawnCallIndex];
+
+            ref var count = ref CollectionsMarshal.GetValueRefOrAddDefault(callCounts, name, out _);
+            count += 1;
+            callCount = count;
+        }
+
+        return HashCode.Combine(_gameTiming.CurTick, entProto, name, callCount);
+    }
+
+    /// <summary>
+    /// Flushes <see cref="SpawnCallCounts"/>.
+    /// </summary>
+    internal void ResetSpawnCall()
+    {
+        SpawnCallCounts[CurrentSpawnCallIndex].Clear();
+        CurrentSpawnCallIndex = ((int)_gameTiming.CurTick.Value + 1) % SpawnBufferLength;
     }
 
     #region NetEntity

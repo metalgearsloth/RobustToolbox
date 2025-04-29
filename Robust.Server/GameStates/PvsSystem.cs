@@ -454,6 +454,7 @@ internal sealed partial class PvsSystem : EntitySystem
     private void AfterSerializeStates()
     {
         CleanupDirty();
+        EntityManager.ResetSpawnCall();
 
         if (_oldestAck == GameTick.MaxValue.Value)
         {

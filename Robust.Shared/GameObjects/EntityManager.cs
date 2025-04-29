@@ -155,6 +155,7 @@ namespace Robust.Shared.GameObjects
             _mainThreadId = Environment.CurrentManagedThreadId;
 #endif
 
+            InitializePredictedSpawns();
             Initialized = true;
         }
 
@@ -677,6 +678,12 @@ namespace Robust.Shared.GameObjects
             Entities.Remove(uid);
             // Need to get the ID above before MetadataComponent shutdown but only remove it after everything else is done.
             NetEntityLookup.Remove(metadata.NetEntity);
+
+            if (_reverseEntityHash.Remove(metadata.NetEntity, out var hash))
+            {
+                DebugTools.Assert(PredictedEntityHashes.ContainsKey(hash));
+                PredictedEntityHashes.Remove(hash);
+            }
         }
 
         public virtual void QueueDeleteEntity(EntityUid? uid)

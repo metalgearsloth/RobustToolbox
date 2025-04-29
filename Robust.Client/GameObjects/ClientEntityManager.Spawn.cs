@@ -112,12 +112,12 @@ public sealed partial class ClientEntityManager
 
     public override void FlagPredicted(Entity<MetaDataComponent?> ent)
     {
+        base.FlagPredicted(ent);
+
         if (!MetaQuery.Resolve(ent.Owner, ref ent.Comp))
             return;
 
         DebugTools.Assert(IsClientSide(ent.Owner, ent.Comp));
         EnsureComponent<PredictedSpawnComponent>(ent.Owner);
-
-        // TODO: Need to map call site or something, needs to be consistent between client and server.
     }
 }

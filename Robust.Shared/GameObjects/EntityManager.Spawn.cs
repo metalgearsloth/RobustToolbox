@@ -290,7 +290,14 @@ public partial class EntityManager
     /// </summary>
     public virtual void FlagPredicted(Entity<MetaDataComponent?> ent)
     {
+        if (!MetaQuery.Resolve(ent.Owner, ref ent.Comp, false) || ent.Comp.EntityPrototype == null)
+        {
+            return;
+        }
 
+        var entHash = GetEntityHash(ent.Comp.EntityPrototype);
+        _reverseEntityHash[ent.Comp.NetEntity] = entHash;
+        PredictedEntityHashes[entHash] = ent.Comp.NetEntity;
     }
 
     #endregion

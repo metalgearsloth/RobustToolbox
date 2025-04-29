@@ -579,6 +579,8 @@ namespace Robust.Client.GameStates
                 _entities.DeleteEntity(ent);
             }
 
+            _entities.ResetSpawnCall();
+
             foreach (var entity in system.DirtyEntities)
             {
                 DebugTools.Assert(toRemove.Count == 0);
