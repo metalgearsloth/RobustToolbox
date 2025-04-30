@@ -194,7 +194,7 @@ namespace Robust.Shared.Physics.Dynamics.Contacts
             {
                 var shapeA = FixtureA!.Shape;
                 var shapeB = FixtureB!.Shape;
-                touching = _manifoldManager.TestOverlap(shapeA,  ChildIndexA, shapeB, ChildIndexB, bodyATransform, bodyBTransform);
+                touching = _manifoldManager.TestOverlap(shapeA, ChildIndexA, shapeB, ChildIndexB, bodyATransform, bodyBTransform);
 
                 // Sensors don't generate manifolds.
                 Manifold.PointCount = 0;

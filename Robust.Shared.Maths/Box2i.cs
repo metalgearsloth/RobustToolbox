@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.Contracts;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -207,6 +208,7 @@ namespace Robust.Shared.Maths
         /// <summary>
         /// Multiplies each side of the box by the scalar.
         /// </summary>
+        [Pure]
         public Box2i Scale(int scalar)
         {
             return new Box2i(
@@ -214,6 +216,14 @@ namespace Robust.Shared.Maths
                 Bottom * scalar,
                 Right * scalar,
                 Top * scalar);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        [Pure]
+        public bool Intersects(in Box2i other)
+        {
+            return other.Bottom <= this.Top && other.Top >= this.Bottom && other.Right >= this.Left &&
+                   other.Left <= this.Right;
         }
     }
 

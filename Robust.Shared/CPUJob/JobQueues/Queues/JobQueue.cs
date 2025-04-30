@@ -23,7 +23,7 @@ namespace Robust.Shared.CPUJob.JobQueues.Queues
         /// <summary>
         /// How long the job's allowed to run for before suspending
         /// </summary>
-        public virtual double MaxTime { get; } = 0.002;
+        public virtual double MaxTime { get; set; } = 0.002;
 
         private readonly Queue<IJob> _pendingQueue = new();
         private readonly List<IJob> _waitingJobs = new();
