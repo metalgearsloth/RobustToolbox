@@ -1613,6 +1613,11 @@ public abstract partial class SharedMapSystem
         grid.LastTileModifiedTick = _timing.CurTick;
         Dirty(uid, grid);
 
+        if (shapeChanged && !mapChunk.SuppressCollisionRegeneration)
+        {
+            RegenerateCollision(uid, grid, mapChunk);
+        }
+
         // The map serializer currently sets tiles of unbound grids as part of the deserialization process
         // It properly sets SuppressOnTileChanged so that the event isn't spammed for every tile on the grid.
         // ParentMapId is not able to be accessed on unbound grids, so we can't even call this function for unbound grids.
@@ -1620,11 +1625,6 @@ public abstract partial class SharedMapSystem
         {
             var newTileRef = new TileRef(uid, gridTile, newTile);
             _mapInternal.RaiseOnTileChanged((uid, grid), newTileRef, oldTile, mapChunk.Indices);
-        }
-
-        if (shapeChanged && !mapChunk.SuppressCollisionRegeneration)
-        {
-            RegenerateCollision(uid, grid, mapChunk);
         }
     }
 
