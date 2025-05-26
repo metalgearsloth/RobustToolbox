@@ -102,6 +102,7 @@ namespace Robust.Shared.Maths
         /// <summary>
         ///     Returns the smallest rectangle that contains both of the rectangles.
         /// </summary>
+        [Pure]
         public readonly Box2i Union(in Box2i other)
         {
             var botLeft = Vector2i.ComponentMin(BottomLeft, other.BottomLeft);
@@ -224,6 +225,13 @@ namespace Robust.Shared.Maths
         {
             return other.Bottom <= this.Top && other.Top >= this.Bottom && other.Right >= this.Left &&
                    other.Left <= this.Right;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        [Pure]
+        public readonly Box2i Enlarged(int size)
+        {
+            return new(Left - size, Bottom - size, Right + size, Top + size);
         }
     }
 
