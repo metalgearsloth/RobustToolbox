@@ -87,6 +87,7 @@ namespace Robust.Shared.Physics.Systems
 
             // If you update this then update the delta state + GetState + HandleState!
             EntityManager.ComponentFactory.RegisterNetworkedFields(_physicsReg,
+                nameof(PhysicsComponent.SleepTime),
                 nameof(PhysicsComponent.CanCollide),
                 nameof(PhysicsComponent.BodyStatus),
                 nameof(PhysicsComponent.BodyType),
@@ -100,7 +101,7 @@ namespace Robust.Shared.Physics.Systems
                 nameof(PhysicsComponent.AngularVelocity),
                 nameof(PhysicsComponent.LinearVelocity));
 
-            _angularVelocityIndex = 10;
+            _angularVelocityIndex = 11;
 
             _anchorQuery = GetEntityQuery<CollideOnAnchorComponent>();
             _fixturesQuery = GetEntityQuery<FixturesComponent>();

@@ -47,6 +47,8 @@ public partial class SharedPhysicsSystem
         var xform = Transform(uid);
         var manager = EnsureComp<FixturesComponent>(uid);
 
+        // Need to derive awake status because if an entity is contained or static it's not awake and we don't want to serialize this for every single entity ingame.
+
         if (component.CanCollide && (_containerSystem.IsEntityOrParentInContainer(uid) || xform.MapID == MapId.Nullspace))
         {
             SetCanCollide(uid, false, false, manager: manager, body: component);
@@ -56,7 +58,7 @@ public partial class SharedPhysicsSystem
         {
             if (component.BodyType != BodyType.Static)
             {
-                SetAwake((uid, component), true);
+                SetAwake((uid, component), value: true);
             }
         }
 
@@ -96,6 +98,7 @@ public partial class SharedPhysicsSystem
                 {
                     args.State = new PhysicsVelocityDeltaState()
                     {
+                        SleepTime = component.Awake ? component.SleepTime : null,
                         AngularVelocity = component.AngularVelocity,
                         LinearVelocity = component.LinearVelocity,
                     };
@@ -104,6 +107,7 @@ public partial class SharedPhysicsSystem
                 {
                     args.State = new PhysicsLinearVelocityDeltaState()
                     {
+                        SleepTime = component.Awake ? component.SleepTime : null,
                         LinearVelocity = component.LinearVelocity,
                     };
                 }
@@ -114,6 +118,7 @@ public partial class SharedPhysicsSystem
 
         args.State = new PhysicsComponentState
         {
+            SleepTime = component.Awake ? component.SleepTime : null,
             CanCollide = component.CanCollide,
             SleepingAllowed = component.SleepingAllowed,
             FixedRotation = component.FixedRotation,
@@ -140,10 +145,14 @@ public partial class SharedPhysicsSystem
 
         if (args.Current is PhysicsLinearVelocityDeltaState linearState)
         {
+            SetAwake((uid, component), linearState.SleepTime != null, updateSleepTime: false);
+            SetSleepTime(component, linearState.SleepTime ?? 0f);
             SetLinearVelocity(uid, linearState.LinearVelocity, dirty: false, body: component, manager: manager);
         }
         else if (args.Current is PhysicsVelocityDeltaState velocityState)
         {
+            SetAwake((uid, component), velocityState.SleepTime != null, updateSleepTime: false);
+            SetSleepTime(component, velocityState.SleepTime ?? 0f);
             SetLinearVelocity(uid, velocityState.LinearVelocity, dirty: false, body: component, manager: manager);
             SetAngularVelocity(uid, velocityState.AngularVelocity, dirty: false, body: component, manager: manager);
         }
@@ -152,6 +161,10 @@ public partial class SharedPhysicsSystem
             SetSleepingAllowed(uid, component, newState.SleepingAllowed, dirty: false);
             SetFixedRotation(uid, newState.FixedRotation, body: component, dirty: false);
             SetCanCollide(uid, newState.CanCollide, body: component, dirty: false);
+
+            SetAwake((uid, component), newState.SleepTime != null, updateSleepTime: false);
+            SetSleepTime(component, newState.SleepTime ?? 0f);
+
             component.BodyStatus = newState.Status;
 
             SetLinearVelocity(uid, newState.LinearVelocity, dirty: false, body: component, manager: manager);
@@ -484,6 +497,9 @@ public partial class SharedPhysicsSystem
             body.Awake = true;
         }
 
+        // Yes sleeptime, we just derive the awake bool from sleep nullability
+        DirtyField(uid, body, nameof(PhysicsComponent.SleepTime));
+
         if (body.Awake)
             AddAwakeBody((uid, body, Transform(uid)));
         else
@@ -680,6 +696,7 @@ public partial class SharedPhysicsSystem
             return;
 
         body.SleepTime = value;
+        DirtyField(body.Owner, body, nameof(PhysicsComponent.SleepTime));
     }
 
     /// <summary>

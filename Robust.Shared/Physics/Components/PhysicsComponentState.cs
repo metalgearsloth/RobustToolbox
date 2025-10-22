@@ -12,6 +12,8 @@ namespace Robust.Shared.Physics.Components;
 [Serializable, NetSerializable]
 public record struct PhysicsLinearVelocityDeltaState : IComponentDeltaState<PhysicsComponentState>
 {
+    public bool Awake => SleepTime > 0f;
+    public float? SleepTime;
     public Vector2 LinearVelocity;
 
     public void ApplyToFullState(PhysicsComponentState fullState)
@@ -35,6 +37,8 @@ public record struct PhysicsLinearVelocityDeltaState : IComponentDeltaState<Phys
 [Serializable, NetSerializable]
 public record struct PhysicsVelocityDeltaState : IComponentDeltaState<PhysicsComponentState>
 {
+    public bool Awake => SleepTime > 0f;
+    public float? SleepTime;
     public Vector2 LinearVelocity;
     public float AngularVelocity;
 
@@ -58,6 +62,9 @@ public record struct PhysicsVelocityDeltaState : IComponentDeltaState<PhysicsCom
 [Serializable, NetSerializable]
 public sealed class PhysicsComponentState : IComponentState
 {
+    public bool Awake => SleepTime > 0f;
+    public float? SleepTime;
+
     public bool CanCollide;
     public bool SleepingAllowed;
     public bool FixedRotation;
