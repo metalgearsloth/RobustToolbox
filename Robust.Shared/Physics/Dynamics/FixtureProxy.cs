@@ -20,6 +20,7 @@
 * 3. This notice may not be removed or altered from any source distribution.
 */
 
+using System;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics.Components;
@@ -27,7 +28,7 @@ using Robust.Shared.ViewVariables;
 
 namespace Robust.Shared.Physics.Dynamics;
 
-public sealed class FixtureProxy
+public sealed class FixtureProxy : IEquatable<FixtureProxy>
 {
     public EntityUid Entity;
     public PhysicsComponent Body { get; internal set; }
@@ -65,5 +66,27 @@ public sealed class FixtureProxy
         FixtureId = fixtureId;
         Fixture = fixture;
         ChildIndex = childIndex;
+    }
+
+    public bool Equals(FixtureProxy? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        return Entity.Equals(other.Entity) &&
+               AABB.Equals(other.AABB) &&
+               ChildIndex == other.ChildIndex &&
+               FixtureId == other.FixtureId &&
+               Fixture.Equals(other.Fixture) &&
+               ProxyId.Equals(other.ProxyId);
+    }
+
+    public override bool Equals(object? obj)
+    {
+        return ReferenceEquals(this, obj) || obj is FixtureProxy other && Equals(other);
+    }
+
+    public override int GetHashCode()
+    {
+        return HashCode.Combine(Entity, AABB, ChildIndex, FixtureId, ProxyId);
     }
 }
