@@ -37,5 +37,17 @@ namespace Robust.Shared.Physics
         public const float DefaultRestitution = 0f;
 
         public const float DefaultDensity = 1f;
+
+        // Maximum number of colors in the constraint graph. Constraints that cannot
+        // find a color are added to the overflow set which are solved single-threaded.
+        // The compound barrel benchmark has minor overflow with 24 colors
+        public const int GraphColorCount = 24;
+
+        // Box2D uses limited speculative collision. This reduces jitter.
+        // Normally this is 2cm.
+        // @warning modifying this can have a significant impact on performance and stability
+        public const float SpeculativeDistance = 4.0f * LinearSlop;
+
+        public const int NullIndex = -1;
     }
 }

@@ -41,6 +41,15 @@ namespace Robust.Shared.Physics.Dynamics
     [DataDefinition]
     public sealed partial class Fixture : IEquatable<Fixture>, ISerializationHooks
     {
+        [NonSerialized]
+        public PhysicsComponent Body = default!;
+
+        [NonSerialized, ViewVariables]
+        public Box2 aabb;
+
+        [NonSerialized, ViewVariables]
+        public Box2 fatAABB;
+
         [ViewVariables]
         [field: NonSerialized]
         public FixtureProxy[] Proxies { get; set; } = Array.Empty<FixtureProxy>();

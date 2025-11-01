@@ -76,6 +76,16 @@ namespace Robust.Shared.Physics.Systems
                 true);
         }
 
+        public void Rebuild(bool fullBuild)
+        {
+            var query = AllEntityQuery<BroadphaseComponent>();
+
+            while (query.MoveNext(out var bUid, out var comp))
+            {
+                Rebuild(comp, fullBuild);
+            }
+        }
+
         public void Rebuild(BroadphaseComponent component, bool fullBuild)
         {
             component.StaticTree.Rebuild(fullBuild);

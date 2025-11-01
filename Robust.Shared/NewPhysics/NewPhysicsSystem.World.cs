@@ -22,6 +22,17 @@ public sealed partial class NewPhysicsSystem
 
     private PhysicsProfile _profile = new();
 
+    private float _invH;
+    private float _invDt;
+
+    private float _contactSpeed;
+    private float _contactHertz;
+    private float _contactDampingRatio;
+
+    private float _restitutionThreshold;
+    private float _maxLinearSpeed;
+    private bool _enableWarmStarting;
+
     /// <summary>
     ///  Simulate a world for one time step. This performs collision detection, integration, and constraint solution.
     /// <param name="timeStep">The amount of time to simulate, this should be a fixed number. Usually 1/60.</param>
@@ -32,7 +43,7 @@ public sealed partial class NewPhysicsSystem
         DebugTools.Assert(!float.IsNaN(timeStep) && timeStep > 0f);
         DebugTools.Assert(subStepCount > 0);
 
-        DebugTools.Assert((bool)!_locked);
+        DebugTools.Assert(!_locked);
 
         if (_locked)
             return;
@@ -59,7 +70,7 @@ public sealed partial class NewPhysicsSystem
         }
 
         _locked = true;
-        _broadphase.FindNewContacts(timeStep);
+        _broadphase.FindNewContacts();
 
         var context = new StepContext
         {
@@ -79,5 +90,20 @@ public sealed partial class NewPhysicsSystem
             context.h = 0.0f;
             context.inv_h = 0.0f;
         }
+
+        _invDt = context.inv_dt;
+        _invH = context.inv_h;
+
+        // Hertz values get reduced for large time steps
+        float contactHertz = MathF.Min(_contactHertz, 0.125f * context.inv_h );
+        context.contactSoftness = MakeSoft( contactHertz, _contactDampingRatio, context.h );
+        context.staticSoftness = MakeSoft( 2.0f * contactHertz, _contactDampingRatio, context.h );
+
+        context.restitutionThreshold = _restitutionThreshold;
+        context.maxLinearVelocity = _maxLinearSpeed;
+        context.enableWarmStarting = _enableWarmStarting;
+
+        // Update contacts
+        Collide(context);
     }
 }

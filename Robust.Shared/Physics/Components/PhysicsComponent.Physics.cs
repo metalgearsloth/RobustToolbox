@@ -42,6 +42,16 @@ public sealed partial class PhysicsComponent : Component, IComponentDelta
     public GameTick[] LastModifiedFields { get; set; }
 
     /// <summary>
+    /// Solver set of the body.
+    /// </summary>
+    public int SetIndex;
+
+    /// <summary>
+    /// Index of this body into its solver set.
+    /// </summary>
+    public int LocalIndex;
+
+    /// <summary>
     ///     Has this body been added to an island previously in this tick.
     /// </summary>
     [Access(typeof(SharedPhysicsSystem))]
