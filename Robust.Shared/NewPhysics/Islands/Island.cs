@@ -12,7 +12,7 @@ namespace Robust.Shared.NewPhysics.Islands;
 // https://en.wikipedia.org/wiki/Component_(graph_theory)
 // https://en.wikipedia.org/wiki/Dynamic_connectivity
 // map from int to solver set and index
-public sealed class Island
+internal sealed class Island
 {
     // index of solver set stored in b2World
     // may be B2_NULL_INDEX
@@ -30,7 +30,7 @@ public sealed class Island
 
     int headContact;
     int tailContact;
-    int contactCount;
+    public int contactCount;
 
     int headJoint;
     int tailJoint;
@@ -38,5 +38,5 @@ public sealed class Island
 
     // Keeps track of how many contacts have been removed from this island.
     // This is used to determine if an island is a candidate for splitting.
-    int constraintRemoveCount;
+    public int constraintRemoveCount;
 }

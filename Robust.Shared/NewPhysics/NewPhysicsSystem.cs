@@ -2,6 +2,9 @@ using System.Collections.Generic;
 using System.Threading;
 using Robust.Shared.GameObjects;
 using Robust.Shared.IoC;
+using Robust.Shared.NewPhysics.Islands;
+using Robust.Shared.NewPhysics.Joints;
+using Robust.Shared.Physics.Components;
 using Robust.Shared.Physics.Dynamics;
 using Robust.Shared.Threading;
 using Robust.Shared.Utility;
@@ -15,7 +18,10 @@ public sealed partial class NewPhysicsSystem : EntitySystem
      * Most notable:
      * - Fixtures are what box2d calls shapes, and RT shapes are the lightweight structures that can be used for queries etc.
      * - Where applicable rather than using Id references we just use actual references for the cold data (e.g. components). Any sim / hot data still uses Ids to reduce box2d differences and to keep them as structs in arrays.
+     * - Worlds don't exist as we use EntityManager to handle the same concept.
      */
+
+    // TODO: Check generations on contacts + bodies + ids.
 
     [Dependency] private readonly IParallelManager _parallel = default!;
 
@@ -31,16 +37,21 @@ public sealed partial class NewPhysicsSystem : EntitySystem
      * Physics data
      */
 
+    private List<PhysicsComponent> _bodies = new();
     private List<b2Contact> _contacts = new();
+    private List<Island> _islands = new();
     private List<Fixture> _shapes = new();
+    private List<b2Joint> _joints = new();
 
     /*
      * Pools
      */
 
-    private readonly IdPool _solverSetPool = new();
+    private readonly IdPool _bodyIdPool = new();
     private readonly IdPool _contactIdPool = new();
     private readonly IdPool _islandIdPool = new();
+    private readonly IdPool _jointIdPool = new();
+    private readonly IdPool _solverSetPool = new();
 
     // TODO: Cvar
     private bool _enableSpeculative;

@@ -8,15 +8,15 @@ namespace Robust.Shared.NewPhysics;
 public record struct b2Manifold
 {
     /// The unit normal vector in world space, points from shape A to bodyB
-    Vector2 normal;
+    internal Vector2 normal;
 
     /// Angular impulse applied for rolling resistance. N * m * s = kg * m^2 / s
-    float rollingImpulse;
+    internal float rollingImpulse;
 
     /// The manifold points, up to two are possible in 2D
-    FixedArray2<b2ManifoldPoint> points;
+    internal FixedArray2<b2ManifoldPoint> points;
 
     /// The number of contacts points, will be 0, 1, or 2
-    int pointCount;
+    internal int pointCount;
 
 }

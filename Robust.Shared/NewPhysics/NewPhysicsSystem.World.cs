@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Robust.Shared.IoC;
 using Robust.Shared.Physics.Systems;
 using Robust.Shared.Utility;
@@ -11,13 +12,13 @@ public sealed partial class NewPhysicsSystem
 
     private readonly BodyMoveEvent[] _bodyMoveEvents = new BodyMoveEvent[4];
     private readonly SensorBeginTouchEvent[] _sensorBeginEvents = new SensorBeginTouchEvent[4];
-    private readonly ContactBeginTouchEvent[] _contactBeginEvents = new ContactBeginTouchEvent[4];
+    private readonly List<ContactBeginTouchEvent> _contactBeginEvents = new(4);
     private readonly ContactHitEvent[] _contactHitEvents = new ContactHitEvent[4];
     private readonly JointEvent[] _jointEvents = new JointEvent[4];
 
     // End events are double buffered so that the user doesn't need to flush events
     private readonly SensorEndTouchEvent[][] _sensorEndEvents = new SensorEndTouchEvent[2][];
-    private readonly ContactEndTouchEvent[][] _contactEndEvents = new ContactEndTouchEvent[2][];
+    private readonly List<ContactEndTouchEvent>[] _contactEndEvents = new List<ContactEndTouchEvent>[2];
     private int _endEventArrayIndex;
 
     private PhysicsProfile _profile = new();
@@ -51,9 +52,10 @@ public sealed partial class NewPhysicsSystem
         // TODO: Add generations back for shapeids orrr alternatively just store the things directly probably.
 
         // Prepare event capture
+        _contactBeginEvents.Clear();
+
         Array.Clear(_bodyMoveEvents);
         Array.Clear(_sensorBeginEvents);
-        Array.Clear(_contactBeginEvents);
         Array.Clear(_contactHitEvents);
         Array.Clear(_jointEvents);
 
@@ -63,7 +65,7 @@ public sealed partial class NewPhysicsSystem
         {
             _endEventArrayIndex = 1 - _endEventArrayIndex;
             Array.Clear(_sensorEndEvents[_endEventArrayIndex]);
-            Array.Clear(_contactEndEvents[_endEventArrayIndex]);
+            _contactEndEvents[_endEventArrayIndex].Clear();
 
             // todo_erin would be useful to still process collision while paused
             return;

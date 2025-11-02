@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
@@ -8,6 +9,24 @@ namespace Robust.Shared.Utility
 {
     public static class Extensions
     {
+        /// <summary>
+        /// Sets a <see cref="BitArray"/> index and grows the array if relevant.
+        /// </summary>
+        public static void SetGrow(ref BitArray bits, int index, bool value)
+        {
+            if (index >= bits.Length)
+            {
+                // TODO: Don't need the intermediate array but BitArray has no API for this, nor a span API.
+                var newLength = Math.Min(Array.MaxLength, bits.Length * 2);
+
+                var newArray = new bool[newLength];
+                bits.CopyTo(newArray, 0);
+                bits = new BitArray(newArray);
+            }
+
+            bits.Set(index, value);
+        }
+
         /// <summary>
         /// Ensures that the specified array has the specified length.
         /// </summary>
@@ -79,7 +98,7 @@ namespace Robust.Shared.Utility
             // This method has no implementation details,
             // and changing the result of an operation is a breaking change.
             var old = list[index];
-            var replacement = list[list.Count - 1];
+            var replacement = list[^1];
             list[index] = replacement;
             // TODO: Any more efficient way to pop the last element off?
             list.RemoveAt(list.Count - 1);

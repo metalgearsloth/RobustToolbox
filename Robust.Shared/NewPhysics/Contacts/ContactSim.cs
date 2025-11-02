@@ -9,10 +9,8 @@ internal sealed class ContactSim()
     // Don't use a ref here so we can use it for bitset operations.
     public int contactId;
 
-#if B2_VALIDATE
 	public int bodyIdA;
 	public int bodyIdB;
-#endif
 
     // Transient body indices
     public int bodySimIndexA;

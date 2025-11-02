@@ -8,9 +8,11 @@ using Robust.Shared.NewPhysics.Joints;
 using Robust.Shared.Physics;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Physics.Dynamics;
+using Robust.Shared.Physics.Events;
 using Robust.Shared.Physics.Systems;
 using Robust.Shared.Threading;
 using Robust.Shared.Utility;
+using TerraFX.Interop.Windows;
 
 namespace Robust.Shared.NewPhysics;
 
@@ -147,6 +149,26 @@ public sealed partial class NewPhysicsSystem
         public List<ContactConstraint> _overflowConstraints = new();
     }
 
+    private ref ContactSim GetContactSim(b2Contact contact)
+    {
+        if (contact.setIndex == (int) SetType.AwakeSet && contact.colorIndex != PhysicsConstants.NullIndex)
+        {
+            // contact lives in constraint graph
+            DebugTools.Assert(0 <= contact.colorIndex && contact.colorIndex < PhysicsConstants.GraphColorCount);
+            var color = _constraintGraph.colors[contact.colorIndex];
+            var sims = CollectionsMarshal.AsSpan(color.ContactSims);
+
+            ref var sim = ref sims[contact.localIndex];
+            return ref sim;
+        }
+
+        var set = _solverSets[contact.setIndex];
+        var setSims = CollectionsMarshal.AsSpan(set.contactSims);
+        ref var setSim = ref setSims[contact.localIndex];
+
+        return ref setSim;
+    }
+
     private void Collide(StepContext context)
     {
         // Task that can be done in parallel with the narrow-phase
@@ -227,12 +249,13 @@ public sealed partial class NewPhysicsSystem
                     var contactId = j * _collideJob.BatchSize + j;
 
                     var contact = _contacts[contactId];
-			        DebugTools.Assert(contact.setIndex == SetType.AwakeSet);
+			        DebugTools.Assert(contact.setIndex == (int) SetType.AwakeSet);
 
 			        int colorIndex = contact.colorIndex;
 			        int localIndex = contact.localIndex;
 
 			        ContactSim contactSim;
+
 			        if (colorIndex != PhysicsConstants.NullIndex)
 			        {
 				        // contact lives in constraint graph
@@ -248,11 +271,6 @@ public sealed partial class NewPhysicsSystem
 			        var shapeA = shapes[contact.shapeIdA];
 			        var shapeB = shapes[contact.shapeIdB];
 
-                    var shapeIdA = shapeA.Id + 1;
-                    var shapeIdB = shapeB.Id + 1;
-
-                    var contactFullId = contactId + 1;
-
                     var flags = contact.flags;
                     var simFlags = contactSim.simFlags;
 
@@ -260,29 +278,29 @@ public sealed partial class NewPhysicsSystem
 			        {
 				        // Bounding boxes no longer overlap
 				        b2DestroyContact(contact, false );
-				        contact = NULL;
-				        contactSim = NULL;
 			        }
 			        else if ((simFlags & ContactSimFlags.SimStartedTouching ) == ContactSimFlags.SimStartedTouching)
 			        {
 				        DebugTools.Assert(contact.islandId == PhysicsConstants.NullIndex);
 
-				        if ( flags & b2_contactEnableContactEvents )
+				        if ( (flags & ContactFlags.ContactEnableContactEvents) == ContactFlags.ContactEnableContactEvents )
 				        {
                             // TODO: Startcollideevent
-				        }
+                            var ev = new ContactBeginTouchEvent();
+                            _contactBeginEvents.Add(ev);
+                        }
 
 				        DebugTools.Assert(contactSim.manifold.pointCount > 0 );
-				        DebugTools.Assert(contact.setIndex == SetType.AwakeSet );
+				        DebugTools.Assert(contact.setIndex == (int) SetType.AwakeSet);
 
 				        // Link first because this wakes colliding bodies and ensures the body sims
 				        // are in the correct place.
 				        contact.flags |= ContactFlags.ContactTouchingFlag;
-				        b2LinkContact( world, contact );
+				        LinkContact(contact);
 
 				        // Make sure these didn't change
-				        DebugTools.Assert( contact.colorIndex == PhysicsConstants.NullIndex );
-				        DebugTools.Assert( contact.localIndex == localIndex );
+				        DebugTools.Assert(contact.colorIndex == PhysicsConstants.NullIndex);
+				        DebugTools.Assert(contact.localIndex == localIndex);
 
 				        // Contact sim pointer may have become orphaned due to awake set growth,
 				        // so I just need to refresh it.
@@ -290,9 +308,8 @@ public sealed partial class NewPhysicsSystem
 
 				        contactSim.simFlags &= ~ContactSimFlags.SimStartedTouching;
 
-				        b2AddContactToGraph( world, contactSim, contact );
-				        b2RemoveNonTouchingContact( world, b2_awakeSet, localIndex );
-				        contactSim = NULL;
+				        AddContactToGraph(ref contactSim, contact );
+				        RemoveNonTouchingContact((int) SetType.AwakeSet, localIndex);
 			        }
 			        else if ( (simFlags & ContactSimFlags.SimStoppedTouching) == ContactSimFlags.SimStoppedTouching )
 			        {
@@ -302,19 +319,18 @@ public sealed partial class NewPhysicsSystem
 				        if ( (contact.flags & ContactFlags.ContactEnableContactEvents) == ContactFlags.ContactEnableContactEvents )
 				        {
                             // TODO: End collide event
-
-				        }
+                            var ev = new ContactEndTouchEvent();
+                            _contactEndEvents[endEventArrayIndex].Add(ev);
+                        }
 
 				        DebugTools.Assert(contactSim.manifold.pointCount == 0 );
 
-				        b2UnlinkContact( world, contact );
-				        int bodyIdA = contact.edges[0].bodyId;
-				        int bodyIdB = contact.edges[1].bodyId;
+				        b2UnlinkContact(contact);
+				        int bodyIdA = contact.edges._00.bodyId;
+				        int bodyIdB = contact.edges._01.bodyId;
 
-				        b2AddNonTouchingContact( world, contact, contactSim );
-				        b2RemoveContactFromGraph( world, bodyIdA, bodyIdB, colorIndex, localIndex );
-				        contact = NULL;
-				        contactSim = NULL;
+				        AddNonTouchingContact(contact, ref contactSim);
+				        RemoveContactFromGraph(bodyIdA, bodyIdB, colorIndex, localIndex);
 			        }
                 }
             }
@@ -323,14 +339,13 @@ public sealed partial class NewPhysicsSystem
             bitset.SetAll(false);
         }
 
-	    b2ValidateSolverSets( world );
-	    b2ValidateContacts( world );
+	    ValidateSolverSets();
+	    ValidateContacts();
     }
 
-
     private bool UpdateContact(ContactSim contactSim,
-        Fixture shapeA, Transform transformA, Vector2 centerOffsetA,
-        Fixture shapeB, Transform transformB, Vector2 centerOffsetB )
+        Fixture fixtureA, Transform transformA, Vector2 centerOffsetA,
+        Fixture fixtureB, Transform transformB, Vector2 centerOffsetB)
     {
         // Update the contact manifold and touching status.
         // Note: do not assume the shape AABBs are overlapping or are valid.
@@ -338,42 +353,41 @@ public sealed partial class NewPhysicsSystem
 	    var oldManifold = contactSim.manifold;
 
 	    // Compute new manifold
-	    b2ManifoldFcn* fcn = s_registers[shapeA->type][shapeB->type].fcn;
-	    contactSim.manifold = fcn( shapeA, transformA, shapeB, transformB, &contactSim->cache );
+	    contactSim.manifold = GetManifold(fixtureA.Shape, transformA, fixtureB.Shape, transformB, contactSim.cache);
 
 	    // Keep these updated in case the values on the shapes are modified
-	    contactSim.friction = world->frictionCallback( shapeA->material.friction, shapeA->material.userMaterialId,
-													    shapeB->material.friction, shapeB->material.userMaterialId );
-	    contactSim.restitution = world->restitutionCallback( shapeA->material.restitution, shapeA->material.userMaterialId,
-														      shapeB->material.restitution, shapeB->material.userMaterialId );
+	    contactSim.friction = world->frictionCallback( fixtureA->material.friction, fixtureA->material.userMaterialId,
+													    fixtureB->material.friction, fixtureB->material.userMaterialId );
+	    contactSim.restitution = world->restitutionCallback( fixtureA->material.restitution, fixtureA->material.userMaterialId,
+														      fixtureB->material.restitution, fixtureB->material.userMaterialId );
 
-	    if (shapeA->material.rollingResistance > 0.0f || shapeB->material.rollingResistance > 0.0f )
+	    if (fixtureA->material.rollingResistance > 0.0f || fixtureB->material.rollingResistance > 0.0f )
 	    {
-		    float radiusA = b2GetShapeRadius( shapeA );
-		    float radiusB = b2GetShapeRadius( shapeB );
+		    float radiusA = fixtureA.Shape.Radius;
+		    float radiusB = fixtureB.Shape.Radius;
 		    float maxRadius = MathF.Max(radiusA, radiusB);
 		    contactSim.rollingResistance =
-			    MathF.Max( shapeA->material.rollingResistance, shapeB->material.rollingResistance ) * maxRadius;
+			    MathF.Max( fixtureA->material.rollingResistance, fixtureB->material.rollingResistance ) * maxRadius;
 	    }
 	    else
 	    {
 		    contactSim.rollingResistance = 0.0f;
 	    }
 
-	    contactSim.tangentSpeed = shapeA->material.tangentSpeed + shapeB->material.tangentSpeed;
+	    contactSim.tangentSpeed = fixtureA->material.tangentSpeed + fixtureB->material.tangentSpeed;
 
 	    int pointCount = contactSim.manifold.pointCount;
 	    bool touching = pointCount > 0;
 
 	    if ( touching && world->preSolveFcn != NULL && ( contactSim.simFlags & ContactSimFlags.SimEnablePreSolveEvents ) != 0 )
         {
-            var shapeIdA = shapeA.Id + 1;
-            var shapeIdB = shapeB.Id + 1;
+            var shapeIdA = fixtureA.Id + 1;
+            var shapeIdB = fixtureB.Id + 1;
 
 		    ref var manifold = ref contactSim.manifold;
 		    float bestSeparation = manifold.points._00.separation;
 		    Vector2 bestPoint = manifold.points._00.point;
-            var pointSpan = manifold.points.AsSpan();
+            var pointSpan = manifold.points.AsSpan;
 
 		    // Get deepest point
 		    for ( int i = 1; i < manifold.pointCount; ++i )
@@ -387,7 +401,7 @@ public sealed partial class NewPhysicsSystem
 		    }
 
 		    // this call assumes thread safety
-		    touching = world->preSolveFcn( shapeIdA, shapeIdB, bestPoint, manifold->normal, world->preSolveContext );
+		    touching = world->preSolveFcn( shapeIdA, shapeIdB, bestPoint, manifold.normal, world->preSolveContext );
 		    if ( touching == false )
 		    {
 			    // disable contact
@@ -399,12 +413,12 @@ public sealed partial class NewPhysicsSystem
 	    // This flag is for testing
 	    if (_enableSpeculative == false && pointCount == 2 )
 	    {
-		    if ( contactSim.manifold.points.AsSpan()[0].separation > 1.5f * PhysicsConstants.LinearSlop )
+		    if ( contactSim.manifold.points._00.separation > 1.5f * PhysicsConstants.LinearSlop )
 		    {
-			    contactSim.manifold.points[0] = contactSim.manifold.points[1];
+			    contactSim.manifold.points._00 = contactSim.manifold.points._01;
 			    contactSim.manifold.pointCount = 1;
 		    }
-		    else if ( contactSim.manifold.points[0].separation > 1.5f * PhysicsConstants.LinearSlop )
+		    else if ( contactSim.manifold.points._00.separation > 1.5f * PhysicsConstants.LinearSlop )
 		    {
 			    contactSim.manifold.pointCount = 1;
 		    }
@@ -412,7 +426,7 @@ public sealed partial class NewPhysicsSystem
 		    pointCount = contactSim.manifold.pointCount;
 	    }
 
-	    if ( touching && ( shapeA.enableHitEvents || shapeB.enableHitEvents ) )
+	    if ( touching && ( fixtureA.enableHitEvents || fixtureB.enableHitEvents ) )
 	    {
 		    contactSim.simFlags |= ContactSimFlags.SimEnableHitEvent;
 	    }
@@ -431,7 +445,7 @@ public sealed partial class NewPhysicsSystem
 	    int unmatchedCount = 0;
 	    for ( int i = 0; i < pointCount; ++i )
 	    {
-		    ref var mp2 = ref contactSim.manifold.points.AsSpan()[i];
+		    ref var mp2 = ref contactSim.manifold.points.AsSpan[i];
 
 		    // shift anchors to be center of mass relative
 		    mp2.anchorA = mp2.anchorA - centerOffsetA;
@@ -447,7 +461,7 @@ public sealed partial class NewPhysicsSystem
 
 		    for ( int j = 0; j < oldManifold.pointCount; ++j )
 		    {
-			    ref var mp1 = ref oldManifold.points.AsSpan()[j];
+			    ref var mp1 = ref oldManifold.points.AsSpan[j];
 
 			    if (mp1.id == id2 )
 			    {
@@ -475,6 +489,403 @@ public sealed partial class NewPhysicsSystem
 	    }
 
 	    return touching;
+    }
 
+    // A contact is destroyed when:
+    // - broad-phase proxies stop overlapping
+    // - a body is destroyed
+    // - a body is disabled
+    // - a body changes type from dynamic to kinematic or static
+    // - a shape is destroyed
+    // - contact filtering is modified
+    private void b2DestroyContact(b2Contact contact, bool wakeBodies)
+    {
+	    // Remove pair from set
+	    uint64_t pairKey = B2_SHAPE_PAIR_KEY( contact->shapeIdA, contact->shapeIdB );
+	    b2RemoveKey( &world->broadPhase.pairSet, pairKey );
+
+	    b2ContactEdge edgeA = contact.edges._00;
+	    b2ContactEdge edgeB = contact.edges._01;
+
+	    int bodyIdA = edgeA.bodyId;
+	    int bodyIdB = edgeB.bodyId;
+	    b2Body* bodyA = b2BodyArray_Get( &world->bodies, bodyIdA );
+	    b2Body* bodyB = b2BodyArray_Get( &world->bodies, bodyIdB );
+
+	    var flags = contact.flags;
+	    bool touching = (flags & ContactFlags.ContactTouchingFlag) != 0;
+
+	    // End touch event
+	    if (touching && ( flags & ContactFlags.ContactEnableContactEvents) != 0 )
+	    {
+            _contactEndEvents[_endEventArrayIndex].Add(new ContactEndTouchEvent());
+	    }
+
+	    // Remove from body A
+	    if ( edgeA.prevKey != PhysicsConstants.NullIndex )
+	    {
+		    b2Contact* prevContact = b2ContactArray_Get( &world->contacts, edgeA->prevKey >> 1 );
+		    b2ContactEdge* prevEdge = prevContact->edges + ( edgeA->prevKey & 1 );
+		    prevEdge->nextKey = edgeA->nextKey;
+	    }
+
+	    if ( edgeA->nextKey != PhysicsConstants.NullIndex )
+	    {
+		    b2Contact* nextContact = b2ContactArray_Get( &world->contacts, edgeA->nextKey >> 1 );
+		    b2ContactEdge* nextEdge = nextContact->edges + ( edgeA->nextKey & 1 );
+		    nextEdge->prevKey = edgeA->prevKey;
+	    }
+
+	    int contactId = contact->contactId;
+
+	    int edgeKeyA = ( contactId << 1 ) | 0;
+	    if ( bodyA->headContactKey == edgeKeyA )
+	    {
+		    bodyA->headContactKey = edgeA->nextKey;
+	    }
+
+	    bodyA.contactCount -= 1;
+
+	    // Remove from body B
+	    if ( edgeB->prevKey != B2_NULL_INDEX )
+	    {
+		    b2Contact* prevContact = b2ContactArray_Get( &world->contacts, edgeB->prevKey >> 1 );
+		    b2ContactEdge* prevEdge = prevContact->edges + ( edgeB->prevKey & 1 );
+		    prevEdge->nextKey = edgeB->nextKey;
+	    }
+
+	    if ( edgeB->nextKey != B2_NULL_INDEX )
+	    {
+		    b2Contact* nextContact = b2ContactArray_Get( &world->contacts, edgeB->nextKey >> 1 );
+		    b2ContactEdge* nextEdge = nextContact->edges + ( edgeB->nextKey & 1 );
+		    nextEdge->prevKey = edgeB->prevKey;
+	    }
+
+	    int edgeKeyB = ( contactId << 1 ) | 1;
+	    if ( bodyB->headContactKey == edgeKeyB )
+	    {
+		    bodyB->headContactKey = edgeB->nextKey;
+	    }
+
+	    bodyB->contactCount -= 1;
+
+	    // Remove contact from the array that owns it
+	    if ( contact->islandId != B2_NULL_INDEX )
+	    {
+		    b2UnlinkContact( world, contact );
+	    }
+
+	    if ( contact->colorIndex != B2_NULL_INDEX )
+	    {
+		    // contact is an active constraint
+		    B2_ASSERT( contact->setIndex == b2_awakeSet );
+		    b2RemoveContactFromGraph( world, bodyIdA, bodyIdB, contact->colorIndex, contact->localIndex );
+	    }
+	    else
+	    {
+		    // contact is non-touching or is sleeping
+		    B2_ASSERT( contact->setIndex != b2_awakeSet || ( contact->flags & b2_contactTouchingFlag ) == 0 );
+		    b2SolverSet* set = b2SolverSetArray_Get( &world->solverSets, contact->setIndex );
+
+		    int movedIndex = b2ContactSimArray_RemoveSwap( &set->contactSims, contact->localIndex );
+		    if ( movedIndex != B2_NULL_INDEX )
+		    {
+			    b2ContactSim* movedContactSim = set->contactSims.data + contact->localIndex;
+			    b2Contact* movedContact = b2ContactArray_Get( &world->contacts, movedContactSim->contactId );
+			    movedContact->localIndex = contact->localIndex;
+		    }
+	    }
+
+	    // Free contact and id (preserve generation)
+	    contact->contactId = B2_NULL_INDEX;
+	    contact->setIndex = B2_NULL_INDEX;
+	    contact->colorIndex = B2_NULL_INDEX;
+	    contact->localIndex = B2_NULL_INDEX;
+	    b2FreeId( &world->contactIdPool, contactId );
+
+	    if ( wakeBodies && touching )
+	    {
+		    b2WakeBody(bodyA);
+		    b2WakeBody(bodyB);
+	    }
+    }
+
+    // Link a contact into an island.
+    private void LinkContact(b2Contact contact)
+    {
+	    DebugTools.Assert((contact.flags & ContactFlags.ContactTouchingFlag) != 0);
+
+	    int bodyIdA = contact.edges[0].bodyId;
+	    int bodyIdB = contact.edges[1].bodyId;
+
+	    var bodyA = b2BodyArray_Get( &world->bodies, bodyIdA );
+	    var bodyB = b2BodyArray_Get( &world->bodies, bodyIdB );
+
+	    DebugTools.Assert(bodyA.setIndex != (int) SetType.DisabledSet && bodyB.setIndex != (int) SetType.DisabledSet );
+	    DebugTools.Assert(bodyA.setIndex != (int) SetType.StaticSet || bodyB.setIndex != (int) SetType.StaticSet );
+
+	    // Wake bodyB if bodyA is awake and bodyB is sleeping
+	    if (bodyA.setIndex == (int) SetType.AwakeSet && bodyB.setIndex >= (int) SetType.FirstSleepingSet)
+	    {
+		    WakeSolverSet(bodyB.setIndex);
+	    }
+
+	    // Wake bodyA if bodyB is awake and bodyA is sleeping
+	    if (bodyB.setIndex == (int) SetType.AwakeSet && bodyA.setIndex >= (int) SetType.FirstSleepingSet)
+	    {
+		    WakeSolverSet(bodyA.setIndex);
+	    }
+
+	    int islandIdA = bodyA.islandId;
+	    int islandIdB = bodyB.islandId;
+
+	    // Static bodies have null island indices.
+	    B2_ASSERT( bodyA->setIndex != b2_staticSet || islandIdA == B2_NULL_INDEX );
+	    B2_ASSERT( bodyB->setIndex != b2_staticSet || islandIdB == B2_NULL_INDEX );
+	    B2_ASSERT( islandIdA != B2_NULL_INDEX || islandIdB != B2_NULL_INDEX );
+
+	    // Merge islands. This will destroy one of the islands.
+	    int finalIslandId = b2MergeIslands( world, islandIdA, islandIdB );
+
+	    // Add contact to the island that survived
+	    b2AddContactToIsland( world, finalIslandId, contact );
+    }
+
+    // This is called when a contact no longer has contact points or when a contact is destroyed.
+    private void b2UnlinkContact(b2Contact contact)
+    {
+	    DebugTools.Assert(contact.islandId != PhysicsConstants.NullIndex);
+
+	    // remove from island
+	    int islandId = contact.islandId;
+        var island = _islands[islandId];
+
+	    if (contact.islandPrev != PhysicsConstants.NullIndex)
+	    {
+		    var prevContact = _contacts[contact.islandPrev];
+		    DebugTools.Assert(prevContact.islandNext == contact.contactId);
+		    prevContact.islandNext = contact.islandNext;
+	    }
+
+	    if (contact.islandNext != PhysicsConstants.NullIndex)
+	    {
+		    var nextContact = _contacts[contact.islandNext];
+		    DebugTools.Assert(nextContact.islandPrev == contact.contactId);
+		    nextContact.islandPrev = contact.islandPrev;
+	    }
+
+	    if ( island->headContact == contact->contactId )
+	    {
+		    island->headContact = contact->islandNext;
+	    }
+
+	    if ( island->tailContact == contact->contactId )
+	    {
+		    island->tailContact = contact->islandPrev;
+	    }
+
+	    DebugTools.Assert(island.contactCount > 0);
+	    island.contactCount -= 1;
+	    island.constraintRemoveCount += 1;
+
+	    contact.islandId = PhysicsConstants.NullIndex;
+	    contact.islandPrev = PhysicsConstants.NullIndex;
+	    contact.islandNext = PhysicsConstants.NullIndex;
+
+	    ValidateIsland(islandId);
+    }
+
+    // Contacts are always created as non-touching. They get cloned into the constraint
+    // graph once they are found to be touching.
+    private void AddContactToGraph(ref ContactSim contactSim, b2Contact contact)
+    {
+	    DebugTools.Assert(contactSim.manifold.pointCount > 0 );
+        DebugTools.Assert((contactSim.simFlags & ContactSimFlags.SimTouchingFlag) == ContactSimFlags.SimTouchingFlag);
+        DebugTools.Assert((contact.flags & ContactFlags.ContactTouchingFlag) == ContactFlags.ContactTouchingFlag);
+
+	    var graph = _constraintGraph;
+	    int colorIndex = PhysicsConstants.OverflowIndex;
+
+	    var bodyIdA = contact.edges._00.bodyId;
+	    var bodyIdB = contact.edges._01.bodyId;
+
+        var bodyA = _bodies[bodyIdA];
+        var bodyB = _bodies[bodyIdB];
+
+	    var typeA = bodyA.BodyType;
+	    var typeB = bodyB.BodyType;
+	    DebugTools.Assert(typeA == BodyType.Dynamic || typeB == BodyType.Dynamic);
+
+	    if (typeA != BodyType.Static && typeB != BodyType.Static)
+	    {
+		    // Dynamic constraint colors cannot encroach on colors reserved for static constraints
+		    for ( int i = 0; i < PhysicsConstants.DynamicColorCount; ++i )
+		    {
+			    var color = graph.colors[i];
+
+			    if (color.BodySet.Get(bodyIdA) || color.BodySet.Get(bodyIdB))
+			    {
+				    continue;
+			    }
+
+			    if (typeA == BodyType.Dynamic)
+			    {
+                    Extensions.SetGrow(ref color.BodySet, bodyIdA, true);
+			    }
+
+			    if (typeB == BodyType.Dynamic)
+			    {
+                    Extensions.SetGrow(ref color.BodySet, bodyIdB, true);
+			    }
+
+			    colorIndex = i;
+			    break;
+		    }
+	    }
+	    else if (typeA == BodyType.Dynamic)
+	    {
+		    // Static constraint colors build from the end to get higher priority than dyn-dyn constraints
+		    for ( int i = PhysicsConstants.OverflowIndex - 1; i >= 1; --i )
+		    {
+			    var color = graph.colors[i];
+
+			    if (color.BodySet.Get(bodyIdA))
+			    {
+				    continue;
+			    }
+
+                Extensions.SetGrow(ref color.BodySet, bodyIdA, true);
+			    colorIndex = i;
+			    break;
+		    }
+	    }
+	    else if (typeB == BodyType.Dynamic)
+	    {
+		    // Static constraint colors build from the end to get higher priority than dyn-dyn constraints
+		    for ( int i = PhysicsConstants.OverflowIndex - 1; i >= 1; --i )
+		    {
+			    var color = graph.colors[i];
+
+                if (color.BodySet.Get(bodyIdB))
+			    {
+				    continue;
+			    }
+
+                Extensions.SetGrow(ref color.BodySet, bodyIdB, true);
+			    colorIndex = i;
+			    break;
+		    }
+	    }
+
+	    var newColor = graph.colors[colorIndex];
+	    contact.colorIndex = colorIndex;
+	    contact.localIndex = newColor.ContactSims.Count;
+
+        var newContact = new ContactSim();
+        newColor.ContactSims.Add(newContact);
+
+	    // todo perhaps skip this if the contact is already awake
+
+	    if (typeA == BodyType.Static)
+	    {
+		    newContact.bodySimIndexA = PhysicsConstants.NullIndex;
+		    newContact.invMassA = 0.0f;
+		    newContact.invIA = 0.0f;
+	    }
+	    else
+	    {
+		    DebugTools.Assert(bodyA.SetIndex == (int) SetType.AwakeSet);
+            var awakeSet = _solverSets[(int)SetType.AwakeSet];
+            var awakeSims = CollectionsMarshal.AsSpan(awakeSet.bodySims);
+
+		    int localIndex = bodyA.LocalIndex;
+		    newContact.bodySimIndexA = localIndex;
+
+		    ref var bodySimA = ref awakeSims[localIndex];
+		    newContact.invMassA = bodySimA.invMass;
+		    newContact.invIA = bodySimA.invInertia;
+	    }
+
+	    if (typeB == BodyType.Static)
+	    {
+		    newContact.bodySimIndexB = PhysicsConstants.NullIndex;
+		    newContact.invMassB = 0.0f;
+		    newContact.invIB = 0.0f;
+	    }
+	    else
+	    {
+		    DebugTools.Assert(bodyB.SetIndex == SetType.AwakeSet);
+            var awakeSet = _solverSets[(int)SetType.AwakeSet];
+            var awakeSims = CollectionsMarshal.AsSpan(awakeSet.bodySims);
+
+		    int localIndex = bodyB.LocalIndex;
+		    newContact.bodySimIndexB = localIndex;
+
+		    ref var bodySimB = ref awakeSims[localIndex];
+		    newContact.invMassB = bodySimB.invMass;
+		    newContact.invIB = bodySimB.invInertia;
+	    }
+    }
+
+    private void RemoveContactFromGraph(int bodyIdA, int bodyIdB, int colorIndex, int localIndex)
+    {
+	    var graph = _constraintGraph;
+
+	    DebugTools.Assert(0 <= colorIndex && colorIndex < PhysicsConstants.GraphColorCount);
+	    var color = graph.colors[colorIndex];
+
+	    if (colorIndex != PhysicsConstants.OverflowIndex)
+	    {
+		    // This might clear a bit for a kinematic or static body, but this has no effect
+            color.BodySet.Set(bodyIdA, false);
+            color.BodySet.Set(bodyIdB, false);
+	    }
+
+	    color.ContactSims.RemoveSwap(localIndex);
+        var movedIndex = color.ContactSims.Count;
+
+        if (movedIndex <= 0)
+            return;
+
+        var sims = CollectionsMarshal.AsSpan(color.ContactSims);
+
+        // Fix index on swapped contact
+        ref var movedContactSim = ref sims[localIndex];
+
+        // Fix moved contact
+        int movedId = movedContactSim.contactId;
+        var movedContact = _contacts[movedId];
+        DebugTools.Assert(movedContact.setIndex == SetType.AwakeSet);
+        DebugTools.Assert(movedContact.colorIndex == colorIndex);
+        DebugTools.Assert(movedContact.localIndex == movedIndex);
+        movedContact.localIndex = localIndex;
+    }
+
+    private void AddNonTouchingContact(b2Contact contact, ref ContactSim contactSim)
+    {
+        DebugTools.Assert(contact.setIndex == SetType.AwakeSet);
+        var set = _solverSets[(int) SetType.AwakeSet];
+        contact.colorIndex = PhysicsConstants.NullIndex;
+        contact.localIndex = set.contactSims.Count;
+
+        set.contactSims.Add(contactSim);
+    }
+
+    private void RemoveNonTouchingContact(int setIndex, int localIndex)
+    {
+        var set = _solverSets[setIndex];
+        set.contactSims.RemoveSwap(localIndex);
+        var movedIndex = set.contactSims.Count;
+
+        if (movedIndex <= 0)
+            return;
+
+        var sims = CollectionsMarshal.AsSpan(set.contactSims);
+        ref var movedContactSim = ref sims[localIndex];
+        var movedContact = _contacts[movedContactSim.contactId];
+        DebugTools.Assert((int) movedContact.setIndex == setIndex);
+        DebugTools.Assert(movedContact.localIndex == movedIndex);
+        DebugTools.Assert(movedContact.colorIndex == PhysicsConstants.NullIndex);
+        movedContact.localIndex = localIndex;
     }
 }

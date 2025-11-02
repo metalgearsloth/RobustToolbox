@@ -8,7 +8,7 @@ public sealed class b2Contact
 {
     // index of simulation set stored in b2World
     // B2_NULL_INDEX when slot is free
-    public SetType setIndex;
+    public int setIndex;
 
     // index into the constraint graph color array
     // B2_NULL_INDEX for non-touching or sleeping contacts
@@ -21,10 +21,10 @@ public sealed class b2Contact
 
     internal int shapeIdA;
     internal int shapeIdB;
-    int contactId;
+    internal int contactId;
 
     // A contact only belongs to an island if touching, otherwise B2_NULL_INDEX.
-    FixedArray2<b2ContactEdge> edges;
+    internal FixedArray2<b2ContactEdge> edges;
     int islandPrev;
     int islandNext;
     internal int islandId;

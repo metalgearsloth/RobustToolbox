@@ -43,6 +43,14 @@ namespace Robust.Shared.Physics
         // The compound barrel benchmark has minor overflow with 24 colors
         public const int GraphColorCount = 24;
 
+        // This holds constraints that cannot fit the graph color limit. This happens when a single dynamic body
+        // is touching many other bodies.
+        public const int OverflowIndex = GraphColorCount - 1;
+
+        // This keeps constraints involving two dynamic bodies at a lower solver priority than constraints
+        // involving a dynamic and static bodies. This reduces tunneling due to push through.
+        public const int DynamicColorCount = GraphColorCount - 4;
+
         // Box2D uses limited speculative collision. This reduces jitter.
         // Normally this is 2cm.
         // @warning modifying this can have a significant impact on performance and stability

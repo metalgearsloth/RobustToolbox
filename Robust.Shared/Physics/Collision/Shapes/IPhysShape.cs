@@ -11,7 +11,8 @@ namespace Robust.Shared.Physics.Collision.Shapes
         Edge = 1,
         Polygon = 2,
         Chain = 3,
-        TypeCount = 4, // Obviously increment this if you add something
+        Capsule = 4,
+        TypeCount = 5, // Obviously increment this if you add something
     }
 
     /// <summary>

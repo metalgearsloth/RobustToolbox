@@ -71,6 +71,14 @@ namespace Robust.Shared.Physics
             return new Vector2(t.Quaternion2D.C * vx + t.Quaternion2D.S * vy, -t.Quaternion2D.S * vx + t.Quaternion2D.C * vy);
         }
 
+        /// Transform a point (e.g. local space to world space)
+        [Pure]
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static Vector2 TransformPoint(in Transform t, Vector2 p)
+        {
+            return Mul(in t, p);
+        }
+
         [Pure]
         public static Vector2 Mul(in Transform transform, in Vector2 vector)
         {

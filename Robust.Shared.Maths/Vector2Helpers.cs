@@ -37,7 +37,14 @@ public static class Vector2Helpers
     {
         return new Vector2(a.X + s * b.X, a.Y + s * b.Y);
     }
-    
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [Pure]
+    public static Vector2 MulSub(Vector2 a, float s, Vector2 b)
+    {
+        return new(a.X - s * b.X, a.Y - s * b.Y);
+    }
+
     public static Vector2 GetLengthAndNormalize(this Vector2 v, ref float length)
     {
         length = v.Length();

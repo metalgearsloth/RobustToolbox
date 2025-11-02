@@ -1,3 +1,5 @@
+using Robust.Shared.Physics.Components;
+
 namespace Robust.Shared.NewPhysics;
 
 // A contact edge is used to connect bodies and contacts together
@@ -5,9 +7,9 @@ namespace Robust.Shared.NewPhysics;
 // is an edge. A contact edge belongs to a doubly linked list
 // maintained in each attached body. Each contact has two contact
 // edges, one for each attached body.
-internal sealed class b2ContactEdge
+internal record struct b2ContactEdge
 {
-    int bodyId;
-    int prevKey;
-    int nextKey;
+    public int bodyId;
+    public int prevKey;
+    public int nextKey;
 }

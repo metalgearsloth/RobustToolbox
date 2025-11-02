@@ -42,6 +42,9 @@ namespace Robust.Shared.Physics.Dynamics
     public sealed partial class Fixture : IEquatable<Fixture>, ISerializationHooks
     {
         [NonSerialized]
+        public int Id;
+
+        [NonSerialized]
         public PhysicsComponent Body = default!;
 
         [NonSerialized, ViewVariables]
