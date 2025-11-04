@@ -56,7 +56,7 @@ public sealed partial class NewPhysicsSystem : EntitySystem
     private readonly List<b2Contact> _contacts = new();
     private readonly List<Island> _islands = new();
     private readonly List<Fixture> _shapes = new();
-    private readonly List<b2Joint> _joints = new();
+    private readonly List<BaseJoint> _joints = new();
 
     /// <summary>
     /// Contact pairs

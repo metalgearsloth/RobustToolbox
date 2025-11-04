@@ -562,7 +562,7 @@ public sealed partial class NewPhysicsSystem
                 uint32_t wordCount = jointStateBitSet.blockCount;
                 uint64_t* bits = jointStateBitSet.bits;
 
-                b2Joint* jointArray = world.joints.data;
+                BaseJoint* jointArray = world.joints.data;
                 uint16_t worldIndex0 = world.worldId;
 
                 for (uint32_t k = 0; k < wordCount; ++k)
@@ -575,7 +575,7 @@ public sealed partial class NewPhysicsSystem
 
                         DebugTools.Assert(jointId < world.joints.capacity);
 
-                        b2Joint* joint = jointArray + jointId;
+                        BaseJoint* joint = jointArray + jointId;
 
                         DebugTools.Assert(joint.setIndex == b2_awakeSet);
 

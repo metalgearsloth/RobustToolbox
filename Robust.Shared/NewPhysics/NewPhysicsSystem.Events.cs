@@ -23,7 +23,7 @@ public sealed partial class NewPhysicsSystem
         // It's fine not to double-buffer these as contacts are only handled at the start of the physics step.
         foreach (var ev in _contactBeginEvents)
         {
-
+            // TODO: Check if it exists before dispatch.
         }
 
         // Where the double-buffer comes in handy because if a caller destroys the contact it doesn't mutate this list.

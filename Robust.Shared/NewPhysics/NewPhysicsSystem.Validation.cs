@@ -258,7 +258,7 @@ public sealed partial class NewPhysicsSystem
 				    for ( int i = 0; i < set.jointSims.Count; ++i )
 				    {
 					    b2JointSim* jointSim = set.jointSims.data + i;
-					    b2Joint* joint = b2JointArray_Get( &world.joints, jointSim.jointId );
+					    BaseJoint* joint = b2JointArray_Get( &world.joints, jointSim.jointId );
 					    DebugTools.Assert( joint.setIndex == setIndex );
 					    DebugTools.Assert( joint.colorIndex == PhysicsConstants.NullIndex );
 					    DebugTools.Assert( joint.localIndex == i );
@@ -336,7 +336,7 @@ public sealed partial class NewPhysicsSystem
 		    for ( int i = 0; i < color.jointSims.Count; ++i )
 		    {
 			    b2JointSim* jointSim = color.jointSims.data + i;
-			    b2Joint* joint = b2JointArray_Get( &world.joints, jointSim.jointId );
+			    BaseJoint* joint = b2JointArray_Get( &world.joints, jointSim.jointId );
 			    DebugTools.Assert( joint.setIndex == b2_awakeSet );
 			    DebugTools.Assert( joint.colorIndex == colorIndex );
 			    DebugTools.Assert( joint.localIndex == i );
@@ -501,7 +501,7 @@ public sealed partial class NewPhysicsSystem
 		    int jointId = island.headJoint;
 		    while ( jointId != PhysicsConstants.NullIndex )
 		    {
-			    b2Joint* joint = b2JointArray_Get( &world.joints, jointId );
+			    BaseJoint* joint = b2JointArray_Get( &world.joints, jointId );
 			    DebugTools.Assert( joint.setIndex == island.SetIndex );
 			    count += 1;
 

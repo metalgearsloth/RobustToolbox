@@ -5,7 +5,7 @@ namespace Robust.Shared.NewPhysics.Joints;
 
 // Map from b2JointId to b2Joint in the solver sets
 [ImplicitDataDefinitionForInheritors]
-internal abstract partial class b2Joint
+public abstract partial class BaseJoint
 {
     [DataField]
     public bool CollideConnected;
