@@ -26,7 +26,7 @@ public sealed partial class NewPhysicsSystem
 		    b2BodySim* simSrc = set->bodySims.data + i;
 
 		    b2Body* body = bodies + simSrc->bodyId;
-		    B2_ASSERT( body->setIndex == setIndex );
+		    DebugTools.Assert( body->setIndex == setIndex );
 		    body->setIndex = b2_awakeSet;
 		    body->localIndex = awakeSet->bodySims.count;
 
@@ -53,14 +53,14 @@ public sealed partial class NewPhysicsSystem
 
 			    if ( contact->setIndex != b2_disabledSet )
 			    {
-				    B2_ASSERT( contact->setIndex == b2_awakeSet || contact->setIndex == setIndex );
+				    DebugTools.Assert( contact->setIndex == b2_awakeSet || contact->setIndex == setIndex );
 				    continue;
 			    }
 
 			    int localIndex = contact->localIndex;
 			    b2ContactSim* contactSim = b2ContactSimArray_Get( &disabledSet->contactSims, localIndex );
 
-			    B2_ASSERT( ( contact->flags & b2_contactTouchingFlag ) == 0 && contactSim->manifold.pointCount == 0 );
+			    DebugTools.Assert( ( contact->flags & b2_contactTouchingFlag ) == 0 && contactSim->manifold.pointCount == 0 );
 
 			    contact->setIndex = b2_awakeSet;
 			    contact->localIndex = awakeSet->contactSims.count;
@@ -73,7 +73,7 @@ public sealed partial class NewPhysicsSystem
 				    // fix moved element
 				    b2ContactSim* movedContactSim = disabledSet->contactSims.data + localIndex;
 				    b2Contact* movedContact = b2ContactArray_Get( &world->contacts, movedContactSim->contactId );
-				    B2_ASSERT( movedContact->localIndex == movedLocalIndex );
+				    DebugTools.Assert( movedContact->localIndex == movedLocalIndex );
 				    movedContact->localIndex = localIndex;
 			    }
 		    }
@@ -86,10 +86,10 @@ public sealed partial class NewPhysicsSystem
 		    {
 			    b2ContactSim* contactSim = set->contactSims.data + i;
 			    b2Contact* contact = b2ContactArray_Get( &world->contacts, contactSim->contactId );
-			    B2_ASSERT( contact->flags & b2_contactTouchingFlag );
-			    B2_ASSERT( contactSim->simFlags & b2_simTouchingFlag );
-			    B2_ASSERT( contactSim->manifold.pointCount > 0 );
-			    B2_ASSERT( contact->setIndex == setIndex );
+			    DebugTools.Assert( contact->flags & b2_contactTouchingFlag );
+			    DebugTools.Assert( contactSim->simFlags & b2_simTouchingFlag );
+			    DebugTools.Assert( contactSim->manifold.pointCount > 0 );
+			    DebugTools.Assert( contact->setIndex == setIndex );
 			    b2AddContactToGraph( world, contactSim, contact );
 			    contact->setIndex = b2_awakeSet;
 		    }
@@ -102,7 +102,7 @@ public sealed partial class NewPhysicsSystem
 		    {
 			    b2JointSim* jointSim = set->jointSims.data + i;
 			    b2Joint* joint = b2JointArray_Get( &world->joints, jointSim->jointId );
-			    B2_ASSERT( joint->setIndex == setIndex );
+			    DebugTools.Assert( joint->setIndex == setIndex );
 			    b2AddJointToGraph( world, jointSim, joint );
 			    joint->setIndex = b2_awakeSet;
 		    }

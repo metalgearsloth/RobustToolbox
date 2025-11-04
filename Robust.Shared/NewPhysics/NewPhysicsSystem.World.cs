@@ -10,7 +10,7 @@ public sealed partial class NewPhysicsSystem
 {
     [Dependency] private readonly SharedBroadphaseSystem _broadphase = default!;
 
-    private readonly BodyMoveEvent[] _bodyMoveEvents = new BodyMoveEvent[4];
+    private readonly List<BodyMoveEvent> _bodyMoveEvents = new(4);
     private readonly SensorBeginTouchEvent[] _sensorBeginEvents = new SensorBeginTouchEvent[4];
     private readonly List<ContactBeginTouchEvent> _contactBeginEvents = new(4);
     private readonly ContactHitEvent[] _contactHitEvents = new ContactHitEvent[4];
@@ -107,5 +107,19 @@ public sealed partial class NewPhysicsSystem
 
         // Update contacts
         Collide(context);
+
+        // Integrate velocities, solve velocity constraints, and integrate positions.
+        if ( context.dt > 0.0f )
+        {
+            Solve(ref context);
+        }
+
+        OverlapSensors();
+
+        // Swap end event array buffers
+        _endEventArrayIndex = 1 - _endEventArrayIndex;
+        Array.Clear(_sensorEndEvents[_endEventArrayIndex]);
+        _contactEndEvents[_endEventArrayIndex].Clear();
+        _locked = false;
     }
 }

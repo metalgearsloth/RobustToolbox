@@ -16,25 +16,25 @@ internal sealed class Island
 {
     // index of solver set stored in b2World
     // may be B2_NULL_INDEX
-    int setIndex;
+    public int SetIndex;
 
     // island index within set
     // may be B2_NULL_INDEX
-    int localIndex;
+    public int LocalIndex;
 
-    int islandId;
+    public int islandId;
 
-    int headBody;
-    int tailBody;
-    int bodyCount;
+    public int headBody;
+    public int tailBody;
+    public int bodyCount;
 
-    int headContact;
-    int tailContact;
+    public int headContact;
+    public int tailContact;
     public int contactCount;
 
-    int headJoint;
-    int tailJoint;
-    int jointCount;
+    public int headJoint;
+    public int tailJoint;
+    public int jointCount;
 
     // Keeps track of how many contacts have been removed from this island.
     // This is used to determine if an island is a candidate for splitting.

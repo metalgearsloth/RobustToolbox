@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Robust.Shared.NewPhysics.Joints;
 using Robust.Shared.Physics;
 using Robust.Shared.Utility;
@@ -120,22 +121,24 @@ public sealed partial class NewPhysicsSystem
 				    var bodies = _bodies;
 				    DebugTools.Assert( set.bodySims.Count >= 0 );
 				    totalBodyCount += set.bodySims.Count;
+                    var sims = CollectionsMarshal.AsSpan(set.bodySims);
+
 				    for ( int i = 0; i < set.bodySims.Count; ++i )
 				    {
-					    ref var bodySim = ref set.bodySims[i];
+					    ref var bodySim = ref sims[i];
 
-					    int bodyId = bodySim.bodyId;
-					    DebugTools.Assert( 0 <= bodyId && bodyId < world.bodies.Count );
-					    b2Body* body = bodies + bodyId;
-					    DebugTools.Assert( body.setIndex == setIndex );
-					    DebugTools.Assert( body.localIndex == i );
+					    int bodyId = bodySim.BodyId;
+					    DebugTools.Assert( 0 <= bodyId && bodyId < _bodies.Count );
+					    var body = bodies[bodyId];
+					    DebugTools.Assert( body.SetIndex == setIndex );
+					    DebugTools.Assert( body.LocalIndex == i );
 
 					    if ( body.type == b2_dynamicBody )
 					    {
 						    DebugTools.Assert( body.flags & b2_dynamicFlag );
 					    }
 
-					    if ( setIndex == b2_disabledSet )
+					    if ( setIndex == (int) SetType.DisabledSet )
 					    {
 						    DebugTools.Assert( body.headContactKey == PhysicsConstants.NullIndex );
 					    }
@@ -170,15 +173,17 @@ public sealed partial class NewPhysicsSystem
 
 					    // Validate body contacts
 					    int contactKey = body.headContactKey;
+
 					    while ( contactKey != PhysicsConstants.NullIndex )
 					    {
 						    int contactId = contactKey >> 1;
 						    int edgeIndex = contactKey & 1;
 
-						    b2Contact* contact = _contacts[contactId];
-						    DebugTools.Assert( contact.setIndex != b2_staticSet );
-						    DebugTools.Assert( contact.edges[0].bodyId == bodyId || contact.edges[1].bodyId == bodyId );
-						    contactKey = contact.edges[edgeIndex].nextKey;
+						    var contact = _contacts[contactId];
+                            var edgeSpan = contact.edges.AsSpan;
+						    DebugTools.Assert( contact.setIndex != (int) SetType.StaticSet );
+						    DebugTools.Assert( contact.edges._00.bodyId == bodyId || contact.edges._01.bodyId == bodyId );
+						    contactKey = edgeSpan[edgeIndex].nextKey;
 					    }
 
 					    // Validate body joints
@@ -188,39 +193,39 @@ public sealed partial class NewPhysicsSystem
 						    int jointId = jointKey >> 1;
 						    int edgeIndex = jointKey & 1;
 
-						    b2Joint* joint = b2JointArray_Get( &world.joints, jointId );
+						    var joint = _joints[jointId];
 
 						    int otherEdgeIndex = edgeIndex ^ 1;
 
-						    b2Body* otherBody = b2BodyArray_Get( &world.bodies, joint.edges[otherEdgeIndex].bodyId );
+						    var otherBody = _bodies[joint.Edges[otherEdgeIndex].bodyId];
 
-						    if ( setIndex == b2_disabledSet || otherBody.setIndex == b2_disabledSet )
+						    if ( setIndex == (int) SetType.DisabledSet || otherBody.SetIndex == (int) SetType.DisabledSet )
 						    {
-							    DebugTools.Assert( joint.setIndex == b2_disabledSet );
+							    DebugTools.Assert( joint.SetIndex == (int) SetType.DisabledSet );
 						    }
-						    else if ( setIndex == b2_staticSet && otherBody.setIndex == b2_staticSet )
+						    else if ( setIndex == (int) SetType.StaticSet && otherBody.SetIndex == (int) SetType.StaticSet )
 						    {
-							    DebugTools.Assert( joint.setIndex == b2_staticSet );
+							    DebugTools.Assert( joint.SetIndex == (int) SetType.StaticSet );
 						    }
-						    else if ( body.type != b2_dynamicBody && otherBody.type != b2_dynamicBody )
+						    else if ( body.Comp.BodyType != BodyType.Dynamic && otherBody.Comp.BodyType != BodyType.Dynamic )
 						    {
-							    DebugTools.Assert( joint.setIndex == b2_staticSet );
+							    DebugTools.Assert( joint.SetIndex == (int) SetType.StaticSet );
 						    }
-						    else if ( setIndex == b2_awakeSet )
+						    else if ( setIndex == (int) SetType.AwakeSet )
 						    {
-							    DebugTools.Assert( joint.setIndex == b2_awakeSet );
+							    DebugTools.Assert( joint.SetIndex == (int) SetType.AwakeSet );
 						    }
-						    else if ( setIndex >= b2_firstSleepingSet )
+						    else if ( setIndex >= (int) SetType.FirstSleepingSet )
 						    {
-							    DebugTools.Assert( joint.setIndex == setIndex );
+							    DebugTools.Assert( joint.SetIndex == setIndex );
 						    }
 
-						    b2JointSim* jointSim = b2GetJointSim( world, joint );
+						    b2JointSim* jointSim = GetJointSim( world, joint );
 						    DebugTools.Assert( jointSim.jointId == jointId );
-						    DebugTools.Assert( jointSim.bodyIdA == joint.edges[0].bodyId );
-						    DebugTools.Assert( jointSim.bodyIdB == joint.edges[1].bodyId );
+						    DebugTools.Assert( jointSim.bodyIdA == joint.Edges[0].bodyId );
+						    DebugTools.Assert( jointSim.bodyIdB == joint.Edges[1].bodyId );
 
-						    jointKey = joint.edges[edgeIndex].nextKey;
+						    jointKey = joint.Edges[edgeIndex].nextKey;
 					    }
 				    }
 			    }
@@ -405,5 +410,128 @@ public sealed partial class NewPhysicsSystem
 		    DebugTools.Assert(shapeCount == body.shapeCount);
 	    }
     #endif
-    }void
+    }
+
+    [Conditional("DEBUG")]
+    private void ValidateIsland(int islandId)
+    {
+	    if ( islandId == PhysicsConstants.NullIndex )
+	    {
+		    return;
+	    }
+
+	    var island = _islands[islandId];
+	    DebugTools.Assert( island.islandId == islandId );
+	    DebugTools.Assert( island.SetIndex != PhysicsConstants.NullIndex );
+	    DebugTools.Assert( island.headBody != PhysicsConstants.NullIndex );
+
+	    {
+		    DebugTools.Assert( island.tailBody != PhysicsConstants.NullIndex );
+		    DebugTools.Assert( island.bodyCount > 0 );
+		    if ( island.bodyCount > 1 )
+		    {
+			    DebugTools.Assert( island.tailBody != island.headBody );
+		    }
+		    DebugTools.Assert( island.bodyCount <= _bodyIdPool.Count);
+
+		    int count = 0;
+		    int bodyId = island.headBody;
+		    while ( bodyId != PhysicsConstants.NullIndex )
+		    {
+			    b2Body* body = b2BodyArray_Get( &world.bodies, bodyId );
+			    DebugTools.Assert( body.islandId == islandId );
+			    DebugTools.Assert( body.setIndex == island.SetIndex );
+			    count += 1;
+
+			    if ( count == island.bodyCount )
+			    {
+				    DebugTools.Assert( bodyId == island.tailBody );
+			    }
+
+			    bodyId = body.islandNext;
+		    }
+		    DebugTools.Assert( count == island.bodyCount );
+	    }
+
+	    if ( island.headContact != PhysicsConstants.NullIndex )
+	    {
+		    DebugTools.Assert( island.tailContact != PhysicsConstants.NullIndex );
+		    DebugTools.Assert( island.contactCount > 0 );
+		    if ( island.contactCount > 1 )
+		    {
+			    DebugTools.Assert( island.tailContact != island.headContact );
+		    }
+		    DebugTools.Assert( island.contactCount <= b2GetIdCount( &world.contactIdPool ) );
+
+		    int count = 0;
+		    int contactId = island.headContact;
+		    while ( contactId != PhysicsConstants.NullIndex )
+		    {
+			    var contact = _contacts[contactId];
+			    DebugTools.Assert( contact.setIndex == island.SetIndex );
+			    DebugTools.Assert( contact.islandId == islandId );
+			    count += 1;
+
+			    if ( count == island.contactCount )
+			    {
+				    DebugTools.Assert( contactId == island.tailContact );
+			    }
+
+			    contactId = contact.islandNext;
+		    }
+		    DebugTools.Assert( count == island.contactCount );
+	    }
+	    else
+	    {
+		    DebugTools.Assert( island.tailContact == PhysicsConstants.NullIndex );
+		    DebugTools.Assert( island.contactCount == 0 );
+	    }
+
+	    if ( island.headJoint != PhysicsConstants.NullIndex )
+	    {
+		    DebugTools.Assert( island.tailJoint != PhysicsConstants.NullIndex );
+		    DebugTools.Assert( island.jointCount > 0 );
+		    if ( island.jointCount > 1 )
+		    {
+			    DebugTools.Assert( island.tailJoint != island.headJoint );
+		    }
+		    DebugTools.Assert( island.jointCount <= b2GetIdCount( &world.jointIdPool ) );
+
+		    int count = 0;
+		    int jointId = island.headJoint;
+		    while ( jointId != PhysicsConstants.NullIndex )
+		    {
+			    b2Joint* joint = b2JointArray_Get( &world.joints, jointId );
+			    DebugTools.Assert( joint.setIndex == island.SetIndex );
+			    count += 1;
+
+			    if ( count == island.jointCount )
+			    {
+				    DebugTools.Assert( jointId == island.tailJoint );
+			    }
+
+			    jointId = joint.islandNext;
+		    }
+		    DebugTools.Assert( count == island.jointCount );
+	    }
+	    else
+	    {
+		    DebugTools.Assert( island.tailJoint == PhysicsConstants.NullIndex );
+		    DebugTools.Assert( island.jointCount == 0 );
+	    }
+    }
+
+    [Conditional("DEBUG")]
+    private void ValidateNoEnlarged()
+    {
+        var query = AllEntityQuery<BroadphaseComponent>();
+
+        while (query.MoveNext(out var broadphaseUid, out var broadphase))
+        {
+            broadphase.DynamicTree.Tree.ValidateNoEnlarged();
+            broadphase.StaticTree.Tree.ValidateNoEnlarged();
+            broadphase.SundriesTree._b2Tree.ValidateNoEnlarged();
+            broadphase.SundriesTree._b2Tree.ValidateNoEnlarged();
+        }
+    }
 }

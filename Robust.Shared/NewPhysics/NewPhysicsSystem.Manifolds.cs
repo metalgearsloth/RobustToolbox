@@ -51,7 +51,21 @@ public sealed partial class NewPhysicsSystem
                     case PhysShapeCircle circleB:
                         return CollidePolygonAndCircle(polyA, transformA, circleB, transformB);
                     case Polygon polyB:
-                        return CollidePolygons(polyA, transformA, polyB, transformB, cache);
+                        return CollidePolygons(polyA, transformA, polyB, transformB);
+                    default:
+                        throw new ArgumentOutOfRangeException();
+                }
+            }
+            case Segment segmentA:
+            {
+                switch (shapeB)
+                {
+                    case Capsule capsuleB:
+                        return CollideSegmentAndCapsule(segmentA, transformA, capsuleB, transformB);
+                    case Polygon polyB:
+                        return CollideSegmentAndPolygon(segmentA, transformA, polyB, transformB);
+                    case PhysShapeCircle circleB:
+                        return CollideSegmentAndCircle(segmentA, transformA, circleB, transformB);
                     default:
                         throw new ArgumentOutOfRangeException();
                 }
@@ -67,35 +81,35 @@ public sealed partial class NewPhysicsSystem
     // Adds some logic to support clipping to get two contact points
     private b2Manifold CollideCapsules(in Capsule capsuleA, in Transform xfA, in Capsule capsuleB, in Transform xfB)
     {
-	    var origin = capsuleA.center1;
+	    var origin = capsuleA.Center1;
 
 	    // Shift polyA to origin
 	    // pw = q * pb + p
 	    // pw = q * (pbs + origin) + p
 	    // pw = q * pbs + (p + q * origin)
-	    b2Transform sfA = { b2Add( xfA.p, b2RotateVector( xfA.q, origin ) ), xfA.q };
-	    b2Transform xf = b2InvMulTransforms( sfA, xfB );
+	    var sfA = new Transform(xfA.Position + Quaternion2D.RotateVector( xfA.Quaternion2D, origin ), xfA.Quaternion2D);
+	    var xf = Physics.Transform.InvMulTransforms( sfA, xfB );
 
-	    b2Vec2 p1 = b2Vec2_zero;
-	    b2Vec2 q1 = b2Sub( capsuleA->center2, origin );
+        var p1 = Vector2.Zero;
+        var q1 = capsuleA.Center2 - origin;
 
-	    b2Vec2 p2 = b2TransformPoint( xf, capsuleB->center1 );
-	    b2Vec2 q2 = b2TransformPoint( xf, capsuleB->center2 );
+	    var p2 = Physics.Transform.TransformPoint( xf, capsuleB.Center1 );
+	    var q2 = Physics.Transform.TransformPoint( xf, capsuleB.Center2 );
 
-	    b2Vec2 d1 = b2Sub( q1, p1 );
-	    b2Vec2 d2 = b2Sub( q2, p2 );
+	    var d1 = q1 - p1;
+        var d2 = q2 - p2;
 
-	    float dd1 = b2Dot( d1, d1 );
-	    float dd2 = b2Dot( d2, d2 );
+	    float dd1 = Vector2.Dot( d1, d1 );
+	    float dd2 = Vector2.Dot( d2, d2 );
 
-	    const float epsSqr = FLT_EPSILON * FLT_EPSILON;
-	    B2_ASSERT( dd1 > epsSqr && dd2 > epsSqr );
+	    const float epsSqr = float.Epsilon * float.Epsilon;
+	    DebugTools.Assert( dd1 > epsSqr && dd2 > epsSqr );
 
-	    b2Vec2 r = b2Sub( p1, p2 );
-	    float rd1 = b2Dot( r, d1 );
-	    float rd2 = b2Dot( r, d2 );
+	    var r = p1 - p2;
+	    float rd1 = Vector2.Dot( r, d1 );
+	    float rd2 = Vector2.Dot( r, d2 );
 
-	    float d12 = b2Dot( d1, d2 );
+	    float d12 = Vector2.Dot( d1, d2 );
 
 	    float denom = dd1 * dd2 - d12 * d12;
 
@@ -104,7 +118,7 @@ public sealed partial class NewPhysicsSystem
 	    if ( denom != 0.0f )
 	    {
 		    // not parallel
-		    f1 = b2ClampFloat( ( d12 * rd2 - rd1 * dd2 ) / denom, 0.0f, 1.0f );
+		    f1 = Math.Clamp( ( d12 * rd2 - rd1 * dd2 ) / denom, 0.0f, 1.0f );
 	    }
 
 	    // Compute point on segment 2 closest to p1 + f1 * d1
@@ -114,43 +128,43 @@ public sealed partial class NewPhysicsSystem
 	    if ( f2 < 0.0f )
 	    {
 		    f2 = 0.0f;
-		    f1 = b2ClampFloat( -rd1 / dd1, 0.0f, 1.0f );
+		    f1 = Math.Clamp( -rd1 / dd1, 0.0f, 1.0f );
 	    }
 	    else if ( f2 > 1.0f )
 	    {
 		    f2 = 1.0f;
-		    f1 = b2ClampFloat( ( d12 - rd1 ) / dd1, 0.0f, 1.0f );
+		    f1 = Math.Clamp( ( d12 - rd1 ) / dd1, 0.0f, 1.0f );
 	    }
 
-	    b2Vec2 closest1 = b2MulAdd( p1, f1, d1 );
-	    b2Vec2 closest2 = b2MulAdd( p2, f2, d2 );
-	    float distanceSquared = b2DistanceSquared( closest1, closest2 );
+	    var closest1 = Vector2Helpers.MulAdd( p1, f1, d1 );
+	    var closest2 = Vector2Helpers.MulAdd( p2, f2, d2 );
+	    float distanceSquared = (closest1 - closest2).LengthSquared();
 
-	    b2Manifold manifold = { 0 };
-	    float radiusA = capsuleA->radius;
-	    float radiusB = capsuleB->radius;
+        b2Manifold manifold = new();
+	    float radiusA = capsuleA.Radius;
+	    float radiusB = capsuleB.Radius;
 	    float radius = radiusA + radiusB;
-	    float maxDistance = radius + B2_SPECULATIVE_DISTANCE;
+	    float maxDistance = radius + PhysicsConstants.SpeculativeDistance;
 
-	    if ( distanceSquared > maxDistance * maxDistance )
+	    if (distanceSquared > maxDistance * maxDistance)
 	    {
 		    return manifold;
 	    }
 
-	    float distance = sqrtf( distanceSquared );
+	    float distance = MathF.Sqrt(distanceSquared);
 
-	    float length1, length2;
-	    b2Vec2 u1 = b2GetLengthAndNormalize( &length1, d1 );
-	    b2Vec2 u2 = b2GetLengthAndNormalize( &length2, d2 );
+	    float length1 = 0f, length2 = 0f;
+        var u1 = d1.GetLengthAndNormalize(ref length1);
+        var u2 = d2.GetLengthAndNormalize(ref length2);
 
 	    // Does segment B project outside segment A?
-	    float fp2 = b2Dot( b2Sub( p2, p1 ), u1 );
-	    float fq2 = b2Dot( b2Sub( q2, p1 ), u1 );
+	    float fp2 = Vector2.Dot(p2 - p1, u1);
+	    float fq2 = Vector2.Dot(q2 - p1, u1);
 	    bool outsideA = ( fp2 <= 0.0f && fq2 <= 0.0f ) || ( fp2 >= length1 && fq2 >= length1 );
 
 	    // Does segment A project outside segment B?
-	    float fp1 = b2Dot( b2Sub( p1, p2 ), u2 );
-	    float fq1 = b2Dot( b2Sub( q1, p2 ), u2 );
+	    float fp1 = Vector2.Dot(p1 - p2, u2);
+	    float fq1 = Vector2.Dot(q1 - p2, u2);
 	    bool outsideB = ( fp1 <= 0.0f && fq1 <= 0.0f ) || ( fp1 >= length2 && fq1 >= length2 );
 
 	    if ( outsideA == false && outsideB == false )
@@ -160,13 +174,13 @@ public sealed partial class NewPhysicsSystem
 		    // in that case the algorithm falls back to single point collision
 
 		    // find reference edge using SAT
-		    b2Vec2 normalA;
+		    Vector2 normalA;
 		    float separationA;
 
 		    {
-			    normalA = b2LeftPerp( u1 );
-			    float ss1 = b2Dot( b2Sub( p2, p1 ), normalA );
-			    float ss2 = b2Dot( b2Sub( q2, p1 ), normalA );
+			    normalA = u1.LeftPerp();
+			    float ss1 = Vector2.Dot( p2 - p1, normalA );
+			    float ss2 = Vector2.Dot( q2 - p1, normalA );
 			    float s1p = ss1 < ss2 ? ss1 : ss2;
 			    float s1n = -ss1 < -ss2 ? -ss1 : -ss2;
 
@@ -177,16 +191,16 @@ public sealed partial class NewPhysicsSystem
 			    else
 			    {
 				    separationA = s1n;
-				    normalA = b2Neg( normalA );
+				    normalA = -normalA;
 			    }
 		    }
 
-		    b2Vec2 normalB;
+		    Vector2 normalB;
 		    float separationB;
 		    {
-			    normalB = b2LeftPerp( u2 );
-			    float ss1 = b2Dot( b2Sub( p1, p2 ), normalB );
-			    float ss2 = b2Dot( b2Sub( q1, p2 ), normalB );
+			    normalB = u2.LeftPerp();
+			    float ss1 = Vector2.Dot(p1 - p2, normalB);
+			    float ss2 = Vector2.Dot(q1 - p2, normalB);
 			    float s1p = ss1 < ss2 ? ss1 : ss2;
 			    float s1n = -ss1 < -ss2 ? -ss1 : -ss2;
 
@@ -197,7 +211,7 @@ public sealed partial class NewPhysicsSystem
 			    else
 			    {
 				    separationB = s1n;
-				    normalB = b2Neg( normalB );
+				    normalB = -normalB;
 			    }
 		    }
 
@@ -217,34 +231,33 @@ public sealed partial class NewPhysicsSystem
 			    }
 			    else if ( fq2 < 0.0f && fp2 > 0.0f )
 			    {
-				    cq = b2Lerp( q2, p2, ( 0.0f - fq2 ) / ( fp2 - fq2 ) );
+				    cq = Vector2.Lerp( q2, p2, ( 0.0f - fq2 ) / ( fp2 - fq2 ) );
 			    }
 
 			    // clip to q1
 			    if ( fp2 > length1 && fq2 < length1 )
 			    {
-				    cp = b2Lerp( p2, q2, ( fp2 - length1 ) / ( fp2 - fq2 ) );
+				    cp = Vector2.Lerp( p2, q2, ( fp2 - length1 ) / ( fp2 - fq2 ) );
 			    }
 			    else if ( fq2 > length1 && fp2 < length1 )
 			    {
-				    cq = b2Lerp( q2, p2, ( fq2 - length1 ) / ( fq2 - fp2 ) );
+				    cq = Vector2.Lerp( q2, p2, ( fq2 - length1 ) / ( fq2 - fp2 ) );
 			    }
 
-			    float sp = b2Dot( b2Sub( cp, p1 ), normalA );
-			    float sq = b2Dot( b2Sub( cq, p1 ), normalA );
+			    float sp = Vector2.Dot(cp - p1, normalA);
+			    float sq = Vector2.Dot(cq - p1, normalA);
 
-			    if ( sp <= distance + B2_LINEAR_SLOP || sq <= distance + B2_LINEAR_SLOP )
+			    if ( sp <= distance + PhysicsConstants.LinearSlop || sq <= distance + PhysicsConstants.LinearSlop )
 			    {
-				    b2ManifoldPoint* mp;
-				    mp = manifold.points + 0;
-				    mp->anchorA = b2MulAdd( cp, 0.5f * ( radiusA - radiusB - sp ), normalA );
-				    mp->separation = sp - radius;
-				    mp->id = B2_MAKE_ID( 0, 0 );
+				    ref var mp = ref manifold.points._00;
+				    mp.anchorA = Vector2Helpers.MulAdd( cp, 0.5f * ( radiusA - radiusB - sp ), normalA );
+				    mp.separation = sp - radius;
+				    mp.id = MakeId( 0, 0 );
 
-				    mp = manifold.points + 1;
-				    mp->anchorA = b2MulAdd( cq, 0.5f * ( radiusA - radiusB - sq ), normalA );
-				    mp->separation = sq - radius;
-				    mp->id = B2_MAKE_ID( 0, 1 );
+				    ref var mp2 = ref manifold.points._01;
+				    mp2.anchorA = Vector2Helpers.MulAdd( cq, 0.5f * ( radiusA - radiusB - sq ), normalA );
+				    mp2.separation = sq - radius;
+				    mp2.id = MakeId( 0, 1 );
 				    manifold.pointCount = 2;
 			    }
 		    }
@@ -253,43 +266,43 @@ public sealed partial class NewPhysicsSystem
 			    // normal always points from A to B
 			    manifold.normal = -normalB;
 
-			    b2Vec2 cp = p1;
-			    b2Vec2 cq = q1;
+			    var cp = p1;
+			    var cq = q1;
 
 			    // clip to p2
 			    if ( fp1 < 0.0f && fq1 > 0.0f )
 			    {
-				    cp = b2Lerp( p1, q1, ( 0.0f - fp1 ) / ( fq1 - fp1 ) );
+				    cp = Vector2.Lerp( p1, q1, ( 0.0f - fp1 ) / ( fq1 - fp1 ) );
 			    }
 			    else if ( fq1 < 0.0f && fp1 > 0.0f )
 			    {
-				    cq = b2Lerp( q1, p1, ( 0.0f - fq1 ) / ( fp1 - fq1 ) );
+				    cq = Vector2.Lerp( q1, p1, ( 0.0f - fq1 ) / ( fp1 - fq1 ) );
 			    }
 
 			    // clip to q2
 			    if ( fp1 > length2 && fq1 < length2 )
 			    {
-				    cp = b2Lerp( p1, q1, ( fp1 - length2 ) / ( fp1 - fq1 ) );
+				    cp = Vector2.Lerp( p1, q1, ( fp1 - length2 ) / ( fp1 - fq1 ) );
 			    }
 			    else if ( fq1 > length2 && fp1 < length2 )
 			    {
-				    cq = b2Lerp( q1, p1, ( fq1 - length2 ) / ( fq1 - fp1 ) );
+				    cq = Vector2.Lerp( q1, p1, ( fq1 - length2 ) / ( fq1 - fp1 ) );
 			    }
 
-			    float sp = b2Dot( b2Sub( cp, p2 ), normalB );
-			    float sq = b2Dot( b2Sub( cq, p2 ), normalB );
+			    float sp = Vector2.Dot( cp - p2, normalB );
+			    float sq = Vector2.Dot( cq - p2, normalB );
 
-			    if ( sp <= distance + B2_LINEAR_SLOP || sq <= distance + B2_LINEAR_SLOP )
+			    if ( sp <= distance + PhysicsConstants.LinearSlop || sq <= distance + PhysicsConstants.LinearSlop )
 			    {
-				    b2ManifoldPoint* mp;
-				    mp = manifold.points + 0;
-				    mp->anchorA = b2MulAdd( cp, 0.5f * ( radiusB - radiusA - sp ), normalB );
-				    mp->separation = sp - radius;
-				    mp->id = B2_MAKE_ID( 0, 0 );
-				    mp = manifold.points + 1;
-				    mp->anchorA = b2MulAdd( cq, 0.5f * ( radiusB - radiusA - sq ), normalB );
-				    mp->separation = sq - radius;
-				    mp->id = B2_MAKE_ID( 1, 0 );
+				    ref var mp = ref manifold.points._00;
+				    mp.anchorA = Vector2Helpers.MulAdd( cp, 0.5f * ( radiusB - radiusA - sp ), normalB );
+				    mp.separation = sp - radius;
+				    mp.id = MakeId( 0, 0 );
+
+                    ref var mp2 = ref manifold.points._01;
+				    mp2.anchorA = Vector2Helpers.MulAdd( cq, 0.5f * ( radiusB - radiusA - sq ), normalB );
+				    mp2.separation = sq - radius;
+				    mp2.id = MakeId( 1, 0 );
 				    manifold.pointCount = 2;
 			    }
 		    }
@@ -298,39 +311,41 @@ public sealed partial class NewPhysicsSystem
 	    if ( manifold.pointCount == 0 )
 	    {
 		    // single point collision
-		    b2Vec2 normal = b2Sub( closest2, closest1 );
-		    if ( b2Dot( normal, normal ) > epsSqr )
+		    var normal = closest2 - closest1;
+		    if ( Vector2.Dot( normal, normal ) > epsSqr )
 		    {
-			    normal = b2Normalize( normal );
+			    normal = normal.Normalized();
 		    }
 		    else
 		    {
-			    normal = b2LeftPerp( u1 );
+			    normal = u1.LeftPerp();
 		    }
 
-		    b2Vec2 c1 = b2MulAdd( closest1, radiusA, normal );
-		    b2Vec2 c2 = b2MulAdd( closest2, -radiusB, normal );
+		    var c1 = Vector2Helpers.MulAdd( closest1, radiusA, normal );
+		    var c2 = Vector2Helpers.MulAdd( closest2, -radiusB, normal );
 
 		    int i1 = f1 == 0.0f ? 0 : 1;
 		    int i2 = f2 == 0.0f ? 0 : 1;
 
 		    manifold.normal = normal;
-		    manifold.points[0].anchorA = b2Lerp( c1, c2, 0.5f );
-		    manifold.points[0].separation = sqrtf( distanceSquared ) - radius;
-		    manifold.points[0].id = B2_MAKE_ID( i1, i2 );
+		    manifold.points._00.anchorA = Vector2.Lerp( c1, c2, 0.5f );
+		    manifold.points._00.separation = MathF.Sqrt( distanceSquared ) - radius;
+		    manifold.points._00.id = MakeId( i1, i2 );
 		    manifold.pointCount = 1;
 	    }
 
 	    // Convert manifold to world space
-	    manifold.normal = b2RotateVector( xfA.q, manifold.normal );
+	    manifold.normal = Quaternion2D.RotateVector( xfA.Quaternion2D, manifold.normal );
+        var manPoints = manifold.points.AsSpan;
+
 	    for ( int i = 0; i < manifold.pointCount; ++i )
 	    {
-		    b2ManifoldPoint* mp = manifold.points + i;
+		    ref var mp = ref manPoints[i];
 
 		    // anchor points relative to shape origin in world space
-		    mp->anchorA = b2RotateVector( xfA.q, b2Add( mp->anchorA, origin ) );
-		    mp->anchorB = b2Add( mp->anchorA, b2Sub( xfA.p, xfB.p ) );
-		    mp->point = b2Add( xfA.p, mp->anchorA );
+		    mp.anchorA = Quaternion2D.RotateVector( xfA.Quaternion2D, mp.anchorA + origin);
+		    mp.anchorB = mp.anchorA + xfA.Position - xfB.Position;
+		    mp.point = xfA.Position + mp.anchorA;
 	    }
 
 	    return manifold;
@@ -347,8 +362,8 @@ public sealed partial class NewPhysicsSystem
         var pB = Physics.Transform.TransformPoint(xf, circleB.Position);
 
         // Compute closest point
-        var p1 = capsuleA.center1;
-        var p2 = capsuleA.center2;
+        var p1 = capsuleA.Center1;
+        var p2 = capsuleA.Center2;
 
         var e = p2 - p1;
 
@@ -375,9 +390,9 @@ public sealed partial class NewPhysicsSystem
             pA = Vector2Helpers.MulAdd( p1, s, e );
         }
 
-        float distance;
-        dis
-        var normal = b2GetLengthAndNormalize( &distance, b2Sub( pB, pA ) );
+        float distance = 0f;
+
+        var normal = (pB - pA).GetLengthAndNormalize(ref distance);
 
         float radiusA = capsuleA.Radius;
         float radiusB = circleB.Radius;
@@ -419,8 +434,8 @@ public sealed partial class NewPhysicsSystem
         var pointA = circleA.Position;
         var pointB = Physics.Transform.TransformPoint(xf, circleB.Position);
 
-        float distance;
-        var normal = b2GetLengthAndNormalize( &distance, b2Sub( pointB, pointA ) );
+        float distance = 0f;
+        var normal = (pointB - pointA).GetLengthAndNormalize(ref distance);
 
         float radiusA = circleA.Radius;
         float radiusB = circleB.Radius;
@@ -449,6 +464,32 @@ public sealed partial class NewPhysicsSystem
     #endregion
 
     #region Polygons
+
+    private Polygon MakeCapsule(Vector2 p1, Vector2 p2, float radius)
+    {
+        var shape = new Polygon();
+        shape._vertices._00 = p1;
+        shape._vertices._01 = p2;
+        shape.Centroid = Vector2.Lerp( p1, p2, 0.5f );
+
+        var d = p2 - p1;
+        DebugTools.Assert(d.LengthSquared() > float.Epsilon);
+        var axis = d.Normalized();
+        var normal = Vector2Helpers.Cross(axis, 1f);
+
+        shape._normals._00 = normal;
+        shape._normals._01 = -normal;
+        shape.VertexCount = 2;
+        shape.Radius = radius;
+
+        return shape;
+    }
+
+    private b2Manifold CollidePolygonAndCapsule(in Polygon polygonA, Transform xfA, in Capsule capsuleB, Transform xfB)
+    {
+        var polyB = MakeCapsule(capsuleB.Center1, capsuleB.Center2, capsuleB.Radius);
+        return CollidePolygons(polygonA, xfA, polyB, xfB);
+    }
 
     private b2Manifold CollidePolygonAndCircle(in Polygon polygonA, Transform xfA, PhysShapeCircle circleB, Transform xfB)
     {
@@ -498,70 +539,70 @@ public sealed partial class NewPhysicsSystem
 	    if ( u1 < 0.0f && separation > float.Epsilon )
 	    {
 		    // Circle center is closest to v1 and safely outside the polygon
-		    var normal = b2Normalize(center - v1);
+		    var normal = (center - v1).Normalized();
 		    separation = Vector2.Dot(center - v1, normal);
 		    if ( separation > radius + speculativeDistance )
 		    {
 			    return manifold;
 		    }
 
-		    b2Vec2 cA = Vector2Helpers.MulAdd( v1, radiusA, normal );
-		    b2Vec2 cB = Vector2Helpers.MulSub( center, radiusB, normal );
-		    b2Vec2 contactPointA = b2Lerp( cA, cB, 0.5f );
+		    var cA = Vector2Helpers.MulAdd( v1, radiusA, normal );
+            var cB = Vector2Helpers.MulSub( center, radiusB, normal );
+            var contactPointA = Vector2.Lerp( cA, cB, 0.5f );
 
-		    manifold.normal = b2RotateVector( xfA.q, normal );
-		    b2ManifoldPoint* mp = manifold.points + 0;
-		    mp->anchorA = b2RotateVector( xfA.q, contactPointA );
-		    mp->anchorB = b2Add( mp->anchorA, b2Sub( xfA.p, xfB.p ) );
-		    mp->point = b2Add( xfA.p, mp->anchorA );
-		    mp->separation = b2Dot( b2Sub( cB, cA ), normal );
-		    mp->id = 0;
+		    manifold.normal = Quaternion2D.RotateVector( xfA.Quaternion2D, normal );
+            ref var mp = ref manifold.points._00;
+		    mp.anchorA = Quaternion2D.RotateVector( xfA.Quaternion2D, contactPointA );
+		    mp.anchorB = mp.anchorA + xfA.Position - xfB.Position;
+		    mp.point = xfA.Position + mp.anchorA;
+		    mp.separation = Vector2.Dot(cB - cA, normal);
+		    mp.id = 0;
 		    manifold.pointCount = 1;
 	    }
-	    else if ( u2 < 0.0f && separation > FLT_EPSILON )
+	    else if ( u2 < 0.0f && separation > float.Epsilon )
 	    {
 		    // Circle center is closest to v2 and safely outside the polygon
-		    b2Vec2 normal = b2Normalize( b2Sub( center, v2 ) );
-		    separation = b2Dot( b2Sub( center, v2 ), normal );
+		    var normal = (center - v2).Normalized();
+		    separation = Vector2.Dot( center - v2, normal );
 		    if ( separation > radius + speculativeDistance )
 		    {
 			    return manifold;
 		    }
 
-		    b2Vec2 cA = b2MulAdd( v2, radiusA, normal );
-		    b2Vec2 cB = b2MulSub( center, radiusB, normal );
-		    b2Vec2 contactPointA = b2Lerp( cA, cB, 0.5f );
+		    var cA = Vector2Helpers.MulAdd( v2, radiusA, normal );
+            var cB = Vector2Helpers.MulSub( center, radiusB, normal );
+            var contactPointA = Vector2.Lerp( cA, cB, 0.5f );
 
-		    manifold.normal = b2RotateVector( xfA.q, normal );
-		    b2ManifoldPoint* mp = manifold.points + 0;
-		    mp->anchorA = b2RotateVector( xfA.q, contactPointA );
-		    mp->anchorB = b2Add( mp->anchorA, b2Sub( xfA.p, xfB.p ) );
-		    mp->point = b2Add( xfA.p, mp->anchorA );
-		    mp->separation = b2Dot( b2Sub( cB, cA ), normal );
-		    mp->id = 0;
+		    manifold.normal = Quaternion2D.RotateVector( xfA.Quaternion2D, normal );
+		    ref var mp = ref manifold.points._00;
+		    mp.anchorA = Quaternion2D.RotateVector( xfA.Quaternion2D, contactPointA );
+		    mp.anchorB = mp.anchorA + xfA.Position - xfB.Position;
+		    mp.point = xfA.Position + mp.anchorA;
+		    mp.separation = Vector2.Dot(cB - cA, normal );
+		    mp.id = 0;
 		    manifold.pointCount = 1;
 	    }
 	    else
 	    {
 		    // Circle center is between v1 and v2. Center may be inside polygon
-		    b2Vec2 normal = normals[normalIndex];
-		    manifold.normal = b2RotateVector( xfA.q, normal );
+		    var normal = normals[normalIndex];
+		    manifold.normal = Quaternion2D.RotateVector( xfA.Quaternion2D, normal );
 
 		    // cA is the projection of the circle center onto to the reference edge
-		    b2Vec2 cA = b2MulAdd( center, radiusA - b2Dot( b2Sub( center, v1 ), normal ), normal );
+		    var cA = Vector2Helpers.MulAdd( center, radiusA - Vector2.Dot(center - v1, normal ), normal );
 
 		    // cB is the deepest point on the circle with respect to the reference edge
-		    b2Vec2 cB = b2MulSub( center, radiusB, normal );
+		    var cB = Vector2Helpers.MulSub( center, radiusB, normal );
 
-		    b2Vec2 contactPointA = b2Lerp( cA, cB, 0.5f );
+		    var contactPointA = Vector2.Lerp( cA, cB, 0.5f );
 
 		    // The contact point is the midpoint in world space
-		    b2ManifoldPoint* mp = manifold.points + 0;
-		    mp->anchorA = b2RotateVector( xfA.q, contactPointA );
-		    mp->anchorB = b2Add( mp->anchorA, b2Sub( xfA.p, xfB.p ) );
-		    mp->point = b2Add( xfA.p, mp->anchorA );
-		    mp->separation = separation - radius;
-		    mp->id = 0;
+		    ref var mp = ref manifold.points._00;
+		    mp.anchorA = Quaternion2D.RotateVector( xfA.Quaternion2D, contactPointA );
+		    mp.anchorB = mp.anchorA + xfA.Position - xfB.Position;
+		    mp.point = xfA.Position + mp.anchorA;
+		    mp.separation = separation - radius;
+		    mp.id = 0;
 		    manifold.pointCount = 1;
 	    }
 
@@ -575,7 +616,7 @@ public sealed partial class NewPhysicsSystem
     // if (separation > speculation_distance)
     //   return
     // find reference and incident edge
-    // if separation >= 0.1f * B2_LINEAR_SLOP
+    // if separation >= 0.1f * PhysicsConstants.LinearSlop
     //   compute closest points between reference and incident edge
     //   if vertices are closest
     //      single vertex-vertex contact
@@ -585,7 +626,7 @@ public sealed partial class NewPhysicsSystem
     // else
     //   clip edges
     // end
-    private b2Manifold CollidePolygons(in Polygon polygonA, in Transform xfA, in Polygon polygonB, in Transform xfB, SimplexCache cache)
+    private b2Manifold CollidePolygons(in Polygon polygonA, in Transform xfA, in Polygon polygonB, in Transform xfB)
     {
         var origin = polygonA._vertices._00;
 	    float linearSlop = PhysicsConstants.LinearSlop;
@@ -822,8 +863,8 @@ public sealed partial class NewPhysicsSystem
 		    {
 			    // v11 - v21
 			    b2Vec2 normal = b2Sub( v21, v11 );
-			    B2_ASSERT( result.distanceSquared > 0.0f );
-			    float distance = sqrtf( result.distanceSquared );
+			    DebugTools.Assert( result.distanceSquared > 0.0f );
+			    float distance = MathF.Sqrt( result.distanceSquared );
 			    if ( distance > B2_SPECULATIVE_DISTANCE + radius )
 			    {
 				    return manifold;
@@ -832,21 +873,21 @@ public sealed partial class NewPhysicsSystem
 			    normal.x *= invDistance;
 			    normal.y *= invDistance;
 
-			    b2Vec2 c1 = b2MulAdd( v11, localPolyA.radius, normal );
-			    b2Vec2 c2 = b2MulAdd( v21, -localPolyB.radius, normal );
+			    b2Vec2 c1 = Vector2Helpers.MulAdd( v11, localPolyA.radius, normal );
+			    b2Vec2 c2 = Vector2Helpers.MulAdd( v21, -localPolyB.radius, normal );
 
 			    manifold.normal = normal;
-			    manifold.points[0].anchorA = b2Lerp( c1, c2, 0.5f );
-			    manifold.points[0].separation = distance - radius;
-			    manifold.points[0].id = B2_MAKE_ID( i11, i21 );
+			    manifold.points._00.anchorA = Vector2.Lerp( c1, c2, 0.5f );
+			    manifold.points._00.separation = distance - radius;
+			    manifold.points._00.id = B2_MAKE_ID( i11, i21 );
 			    manifold.pointCount = 1;
 		    }
 		    else if ( result.fraction1 == 0.0f && result.fraction2 == 1.0f )
 		    {
 			    // v11 - v22
 			    b2Vec2 normal = b2Sub( v22, v11 );
-			    B2_ASSERT( result.distanceSquared > 0.0f );
-			    float distance = sqrtf( result.distanceSquared );
+			    DebugTools.Assert( result.distanceSquared > 0.0f );
+			    float distance = MathF.Sqrt( result.distanceSquared );
 			    if ( distance > B2_SPECULATIVE_DISTANCE + radius )
 			    {
 				    return manifold;
@@ -855,21 +896,21 @@ public sealed partial class NewPhysicsSystem
 			    normal.x *= invDistance;
 			    normal.y *= invDistance;
 
-			    b2Vec2 c1 = b2MulAdd( v11, localPolyA.radius, normal );
-			    b2Vec2 c2 = b2MulAdd( v22, -localPolyB.radius, normal );
+			    b2Vec2 c1 = Vector2Helpers.MulAdd( v11, localPolyA.radius, normal );
+			    b2Vec2 c2 = Vector2Helpers.MulAdd( v22, -localPolyB.radius, normal );
 
 			    manifold.normal = normal;
-			    manifold.points[0].anchorA = b2Lerp( c1, c2, 0.5f );
-			    manifold.points[0].separation = distance - radius;
-			    manifold.points[0].id = B2_MAKE_ID( i11, i22 );
+			    manifold.points._00.anchorA = Vector2.Lerp( c1, c2, 0.5f );
+			    manifold.points._00.separation = distance - radius;
+			    manifold.points._00.id = B2_MAKE_ID( i11, i22 );
 			    manifold.pointCount = 1;
 		    }
 		    else if ( result.fraction1 == 1.0f && result.fraction2 == 0.0f )
 		    {
 			    // v12 - v21
 			    b2Vec2 normal = b2Sub( v21, v12 );
-			    B2_ASSERT( result.distanceSquared > 0.0f );
-			    float distance = sqrtf( result.distanceSquared );
+			    DebugTools.Assert( result.distanceSquared > 0.0f );
+			    float distance = MathF.Sqrt( result.distanceSquared );
 			    if ( distance > B2_SPECULATIVE_DISTANCE + radius )
 			    {
 				    return manifold;
@@ -878,21 +919,21 @@ public sealed partial class NewPhysicsSystem
 			    normal.x *= invDistance;
 			    normal.y *= invDistance;
 
-			    b2Vec2 c1 = b2MulAdd( v12, localPolyA.radius, normal );
-			    b2Vec2 c2 = b2MulAdd( v21, -localPolyB.radius, normal );
+			    b2Vec2 c1 = Vector2Helpers.MulAdd( v12, localPolyA.radius, normal );
+			    b2Vec2 c2 = Vector2Helpers.MulAdd( v21, -localPolyB.radius, normal );
 
 			    manifold.normal = normal;
-			    manifold.points[0].anchorA = b2Lerp( c1, c2, 0.5f );
-			    manifold.points[0].separation = distance - radius;
-			    manifold.points[0].id = B2_MAKE_ID( i12, i21 );
+			    manifold.points._00.anchorA = Vector2.Lerp( c1, c2, 0.5f );
+			    manifold.points._00.separation = distance - radius;
+			    manifold.points._00.id = B2_MAKE_ID( i12, i21 );
 			    manifold.pointCount = 1;
 		    }
 		    else if ( result.fraction1 == 1.0f && result.fraction2 == 1.0f )
 		    {
 			    // v12 - v22
 			    b2Vec2 normal = b2Sub( v22, v12 );
-			    B2_ASSERT( result.distanceSquared > 0.0f );
-			    float distance = sqrtf( result.distanceSquared );
+			    DebugTools.Assert( result.distanceSquared > 0.0f );
+			    float distance = MathF.Sqrt( result.distanceSquared );
 			    if ( distance > B2_SPECULATIVE_DISTANCE + radius )
 			    {
 				    return manifold;
@@ -901,13 +942,13 @@ public sealed partial class NewPhysicsSystem
 			    normal.x *= invDistance;
 			    normal.y *= invDistance;
 
-			    b2Vec2 c1 = b2MulAdd( v12, localPolyA.radius, normal );
-			    b2Vec2 c2 = b2MulAdd( v22, -localPolyB.radius, normal );
+			    b2Vec2 c1 = Vector2Helpers.MulAdd( v12, localPolyA.radius, normal );
+			    b2Vec2 c2 = Vector2Helpers.MulAdd( v22, -localPolyB.radius, normal );
 
 			    manifold.normal = normal;
-			    manifold.points[0].anchorA = b2Lerp( c1, c2, 0.5f );
-			    manifold.points[0].separation = distance - radius;
-			    manifold.points[0].id = B2_MAKE_ID( i12, i22 );
+			    manifold.points._00.anchorA = Vector2.Lerp( c1, c2, 0.5f );
+			    manifold.points._00.separation = distance - radius;
+			    manifold.points._00.id = B2_MAKE_ID( i12, i22 );
 			    manifold.pointCount = 1;
 		    }
 		    else
@@ -1195,6 +1236,34 @@ public sealed partial class NewPhysicsSystem
         result.closest2 = Vector2Helpers.MulAdd(p2, result.fraction2, d2);
         result.distanceSquared = (result.closest1 - result.closest2).LengthSquared();
         return result;
+    }
+
+    #endregion
+
+    #region Segment
+
+    private b2Manifold CollideSegmentAndCapsule(in Segment segmentA, in Transform xfA, in Capsule capsuleB, in Transform xfB)
+    {
+        var capsuleA = new Capsule(segmentA.Point1, segmentA.Point2, 0f);
+        return CollideCapsules(in capsuleA, xfA, capsuleB, xfB);
+    }
+
+    private b2Manifold CollideSegmentAndCircle(in Segment segmentA, Transform xfA, in PhysShapeCircle circleB, in Transform xfB)
+    {
+        var capsuleA = new Capsule()
+        {
+            Center1 = segmentA.Point1,
+            Center2 = segmentA.Point2,
+            Radius = 0f,
+        };
+
+        return CollideCapsuleAndCircle(in capsuleA, xfA, circleB, xfB);
+    }
+
+    private b2Manifold CollideSegmentAndPolygon(in Segment segmentA, in Transform xfA, in Polygon polygonB, in Transform xfB )
+    {
+        var polygonA = MakeCapsule(segmentA.Point1, segmentA.Point2, 0.0f );
+        return CollidePolygons(polygonA, xfA, polygonB, xfB );
     }
 
     #endregion

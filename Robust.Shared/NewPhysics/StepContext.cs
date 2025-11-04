@@ -1,9 +1,10 @@
 using System.Collections.Generic;
+using Robust.Shared.NewPhysics.Bodies;
 
 namespace Robust.Shared.NewPhysics;
 
 // Context for a time step. Recreated each time step.
-internal record struct StepContext
+internal sealed class StepContext
 {
     // time step
     public float dt;
@@ -31,4 +32,11 @@ internal record struct StepContext
     // despite being an array of pointers, these are contiguous sub-arrays corresponding
     // to constraint graph colors
     public List<ContactSim> contacts;
+
+    public int BulletBodyCount;
+
+    public int[] BulletBodies;
+
+    public List<BodySim> sims;
+    public List<BodyState> states;
 }

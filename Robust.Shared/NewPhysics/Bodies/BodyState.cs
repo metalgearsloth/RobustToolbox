@@ -2,19 +2,19 @@ using System.Numerics;
 
 namespace Robust.Shared.NewPhysics.Bodies;
 
-public record struct BodyState
+internal record struct BodyState
 {
-    Vector2 linearVelocity;
-    float angularVelocity;
+    public Vector2 linearVelocity;
+    public float angularVelocity;
 
     // b2BodyFlags
     // Important flags: locking, dynamic
-    uint flags;
+    public uint flags;
 
     // Using delta position reduces round-off error far from the origin
-    Vector2 deltaPosition;
+    public Vector2 deltaPosition;
 
     // Using delta rotation because I cannot access the full rotation on static bodies in
     // the solver and must use zero delta rotation for static bodies (c,s) = (1,0)
-    Quaternion deltaRotation;
+    public Quaternion deltaRotation;
 }

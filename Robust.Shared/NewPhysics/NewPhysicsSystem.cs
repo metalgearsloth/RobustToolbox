@@ -4,6 +4,7 @@ using Robust.Shared.GameObjects;
 using Robust.Shared.IoC;
 using Robust.Shared.NewPhysics.Islands;
 using Robust.Shared.NewPhysics.Joints;
+using Robust.Shared.NewPhysics.Solver;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Physics.Dynamics;
 using Robust.Shared.Threading;
@@ -22,12 +23,17 @@ public sealed partial class NewPhysicsSystem : EntitySystem
      */
 
     // TODO: Check generations on contacts + bodies + ids.
+    // TODO: Implement pairset for the broadphase checking rather than dictionary lookups.
 
     [Dependency] private readonly IParallelManager _parallel = default!;
 
     private CollideJob _collideJob = default!;
     private RebuildJob _rebuildJob = default!;
     private WaitHandle _rebuildHandle = default!;
+    private SolveStageJob _solveJob = default!;
+    private SplitIslandJob _splitJob = default!;
+    private WaitHandle _splitHandle = default!;
+    private FinalizeBodiesJob _finalizeJob = default!;
 
     private ConstraintGraph _constraintGraph = new();
 
@@ -37,11 +43,25 @@ public sealed partial class NewPhysicsSystem : EntitySystem
      * Physics data
      */
 
-    private List<PhysicsComponent> _bodies = new();
-    private List<b2Contact> _contacts = new();
-    private List<Island> _islands = new();
-    private List<Fixture> _shapes = new();
-    private List<b2Joint> _joints = new();
+    // Identify islands for splitting as follows:
+    // - I want to split islands so smaller islands can sleep
+    // - when a body comes to rest and its sleep timer trips, I can look at the island and flag it for splitting
+    //   if it has removed constraints
+    // - islands that have removed constraints must be put split first because I don't want to wake bodies incorrectly
+    // - otherwise I can use the awake islands that have bodies wanting to sleep as the splitting candidates
+    // - if no bodies want to sleep then there is no reason to perform island splitting
+    private int _splitIslandId;
+
+    private readonly List<Entity<PhysicsComponent>> _bodies = new();
+    private readonly List<b2Contact> _contacts = new();
+    private readonly List<Island> _islands = new();
+    private readonly List<Fixture> _shapes = new();
+    private readonly List<b2Joint> _joints = new();
+
+    /// <summary>
+    /// Contact pairs
+    /// </summary>
+    private HashSet<ulong> _pairSet = new();
 
     /*
      * Pools
@@ -70,6 +90,15 @@ public sealed partial class NewPhysicsSystem : EntitySystem
         {
             Broadphase = _broadphase,
         };
+
+        _solveJob = new();
+
+        _splitJob = new()
+        {
+            System = this,
+        };
+
+        _finalizeJob = new();
 
         InitializeSolverSets();
     }
@@ -109,5 +138,8 @@ public sealed partial class NewPhysicsSystem : EntitySystem
     {
         base.Update(frameTime);
         Step(frameTime, _substeps);
+        // Run event dispatch as its own step
+        // Box2d just fills up arrays and lets the caller deal with it.
+        DispatchEvents(frameTime);
     }
 }

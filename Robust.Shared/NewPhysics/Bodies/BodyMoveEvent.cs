@@ -14,7 +14,7 @@ namespace Robust.Shared.NewPhysics;
 /// @note If sleeping is disabled all dynamic and kinematic bodies will trigger move events.
 internal record struct BodyMoveEvent
 {
-    Transform transform;
-    BodyId bodyId;
-    bool fellAsleep;
+    public Transform transform;
+    public BodyId bodyId;
+    public bool fellAsleep;
 }

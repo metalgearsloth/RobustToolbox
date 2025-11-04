@@ -25,6 +25,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Maths;
+using Robust.Shared.NewPhysics;
 using Robust.Shared.Physics.Collision.Shapes;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Physics.Dynamics.Contacts;
@@ -43,6 +44,24 @@ namespace Robust.Shared.Physics.Dynamics
     {
         [NonSerialized]
         public int Id;
+
+        [DataField]
+        public SurfaceMaterial Material = new();
+
+        [DataField]
+        public bool EnableSensorEvents = true;
+
+        [DataField]
+        public bool EnableContactEvents = true;
+
+        [DataField]
+        public bool EnableCustomFiltering = true;
+
+        [DataField]
+        public bool EnableHitEvents = true;
+
+        [DataField]
+        public bool EnablePreSolveEvents = false;
 
         [NonSerialized]
         public PhysicsComponent Body = default!;
@@ -174,6 +193,7 @@ namespace Robust.Shared.Physics.Dynamics
             fixture.CollisionLayer = CollisionLayer;
             fixture.CollisionMask = CollisionMask;
             fixture.Density = Density;
+            fixture.Material = new SurfaceMaterial(fixture.Material);
         }
 
         /// <summary>
@@ -185,7 +205,8 @@ namespace Robust.Shared.Physics.Dynamics
                    CollisionLayer == other.CollisionLayer &&
                    CollisionMask == other.CollisionMask &&
                    Shape.Equals(other.Shape) &&
-                   MathHelper.CloseTo(Density, other.Density);
+                   MathHelper.CloseTo(Density, other.Density) &&
+                   Material.Equals(other.Material);
         }
 
         // This is a crude equals mainly to avoid having to re-create the fixtures every time a state comes in.

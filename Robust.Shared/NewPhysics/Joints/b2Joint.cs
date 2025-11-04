@@ -1,37 +1,39 @@
+using Robust.Shared.Serialization.Manager.Attributes;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.NewPhysics.Joints;
 
 // Map from b2JointId to b2Joint in the solver sets
-internal sealed class b2Joint
+[ImplicitDataDefinitionForInheritors]
+internal abstract partial class b2Joint
 {
+    [DataField]
+    public bool CollideConnected;
+
     // index of simulation set stored in b2World
     // B2_NULL_INDEX when slot is free
-    int setIndex;
+    internal int SetIndex;
 
     // index into the constraint graph color array, may be B2_NULL_INDEX for sleeping/disabled joints
     // B2_NULL_INDEX when slot is free
-    int colorIndex;
+    internal int ColorIndex;
 
     // joint index within set or graph color
     // B2_NULL_INDEX when slot is free
-    int localIndex;
+    internal int LocalIndex;
 
-    FixedArray2<b2JointEdge> edges;
+    internal FixedArray2<b2JointEdge> Edges;
 
-    int jointId;
-    int islandId;
-    int islandPrev;
-    int islandNext;
+    internal int JointId;
+    internal int IslandId;
+    internal int IslandPrev;
+    internal int IslandNext;
 
-    float drawScale;
+    internal float DrawScale;
 
-    b2JointType type;
+    internal b2JointType Type;
 
     // This is monotonically advanced when a body is allocated in this slot
     // Used to check for invalid b2JointId
-    ushort generation;
-
-    bool collideConnected;
-
+    internal ushort Generation;
 }

@@ -299,6 +299,13 @@ public static class Vector2Helpers
         return new(-s * a.Y, s * a.X);
     }
 
+    /// Get a left pointing perpendicular vector. Equivalent to b2CrossSV(1.0f, v)
+    [Pure]
+    public static Vector2 LeftPerp(this Vector2 v)
+    {
+        return new(-v.Y, v.X);
+    }
+
     [Pure]
     public static Vector2 RightPerp(this Vector2 v)
     {

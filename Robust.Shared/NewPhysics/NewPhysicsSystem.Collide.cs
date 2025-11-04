@@ -3,7 +3,10 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using Robust.Shared.Collections;
 using Robust.Shared.NewPhysics.Bodies;
+using Robust.Shared.NewPhysics.Contacts;
+using Robust.Shared.NewPhysics.Islands;
 using Robust.Shared.NewPhysics.Joints;
 using Robust.Shared.Physics;
 using Robust.Shared.Physics.Components;
@@ -103,14 +106,14 @@ public sealed partial class NewPhysicsSystem
 
 			    // To make this work, the time of impact code needs to adjust the target
 			    // distance based on the number of TOI events for a body.
-			    // if (touching && bodySimB->isFast)
+			    // if (touching && bodySimB.isFast)
 			    //{
-			    //	b2Manifold* manifold = &contactSim->manifold;
-			    //	int pointCount = manifold->pointCount;
+			    //	b2Manifold* manifold = &contactSim.manifold;
+			    //	int pointCount = manifold.pointCount;
 			    //	for (int i = 0; i < pointCount; ++i)
 			    //	{
 			    //		// trick the solver into pushing the fast shapes apart
-			    //		manifold->points[i].separation -= 0.25f * B2_SPECULATIVE_DISTANCE;
+			    //		manifold.points[i].separation -= 0.25f * B2_SPECULATIVE_DISTANCE;
 			    //	}
 			    //}
 		    }
@@ -146,7 +149,14 @@ public sealed partial class NewPhysicsSystem
         public List<JointSim> JointSims = new();
 
         // transient
-        public List<ContactConstraint> _overflowConstraints = new();
+        // box2d uses a union for this but we don't have that luxury unless we start being unsafe with it.
+        public ValueList<b2ContactConstraintSIMD> SimdConstraints = new();
+        public ValueList<ContactConstraint> OverflowConstraints = new();
+    }
+
+    private ulong B2_SHAPE_PAIR_KEY(int K1, int K2)
+    {
+        return K1 < K2 ? (ulong) K1 << 32 | (ulong)K2 : (ulong)K2 << 32 | (ulong)K1;
     }
 
     private ref ContactSim GetContactSim(b2Contact contact)
@@ -169,7 +179,7 @@ public sealed partial class NewPhysicsSystem
         return ref setSim;
     }
 
-    private void Collide(StepContext context)
+    private void Collide(ref StepContext context)
     {
         // Task that can be done in parallel with the narrow-phase
 	    // - rebuild the collision tree for dynamic and kinematic bodies to keep their query performance good
@@ -277,7 +287,7 @@ public sealed partial class NewPhysicsSystem
 			        if ( (simFlags & ContactSimFlags.SimDisjoint) == ContactSimFlags.SimDisjoint )
 			        {
 				        // Bounding boxes no longer overlap
-				        b2DestroyContact(contact, false );
+				        DestroyContact(contact, false );
 			        }
 			        else if ((simFlags & ContactSimFlags.SimStartedTouching ) == ContactSimFlags.SimStartedTouching)
 			        {
@@ -325,7 +335,7 @@ public sealed partial class NewPhysicsSystem
 
 				        DebugTools.Assert(contactSim.manifold.pointCount == 0 );
 
-				        b2UnlinkContact(contact);
+				        UnlinkContact(contact);
 				        int bodyIdA = contact.edges._00.bodyId;
 				        int bodyIdB = contact.edges._01.bodyId;
 
@@ -356,30 +366,31 @@ public sealed partial class NewPhysicsSystem
 	    contactSim.manifold = GetManifold(fixtureA.Shape, transformA, fixtureB.Shape, transformB, contactSim.cache);
 
 	    // Keep these updated in case the values on the shapes are modified
-	    contactSim.friction = world->frictionCallback( fixtureA->material.friction, fixtureA->material.userMaterialId,
-													    fixtureB->material.friction, fixtureB->material.userMaterialId );
-	    contactSim.restitution = world->restitutionCallback( fixtureA->material.restitution, fixtureA->material.userMaterialId,
-														      fixtureB->material.restitution, fixtureB->material.userMaterialId );
+	    contactSim.friction = DefaultFrictionCallback(fixtureA.Material.Friction, fixtureA.Material.UserMaterialId,
+													    fixtureB.Material.Friction, fixtureB.Material.UserMaterialId);
 
-	    if (fixtureA->material.rollingResistance > 0.0f || fixtureB->material.rollingResistance > 0.0f )
+        contactSim.restitution = DefaultRestitutionCallback(fixtureA.Material.Restitution, fixtureA.Material.UserMaterialId,
+														      fixtureB.Material.Restitution, fixtureB.Material.UserMaterialId);
+
+	    if (fixtureA.Material.RollingResistance > 0.0f || fixtureB.Material.RollingResistance > 0.0f )
 	    {
 		    float radiusA = fixtureA.Shape.Radius;
 		    float radiusB = fixtureB.Shape.Radius;
 		    float maxRadius = MathF.Max(radiusA, radiusB);
 		    contactSim.rollingResistance =
-			    MathF.Max( fixtureA->material.rollingResistance, fixtureB->material.rollingResistance ) * maxRadius;
+			    MathF.Max(fixtureA.Material.RollingResistance, fixtureB.Material.RollingResistance) * maxRadius;
 	    }
 	    else
 	    {
 		    contactSim.rollingResistance = 0.0f;
 	    }
 
-	    contactSim.tangentSpeed = fixtureA->material.tangentSpeed + fixtureB->material.tangentSpeed;
+	    contactSim.tangentSpeed = fixtureA.Material.TangentSpeed + fixtureB.Material.TangentSpeed;
 
 	    int pointCount = contactSim.manifold.pointCount;
 	    bool touching = pointCount > 0;
 
-	    if ( touching && world->preSolveFcn != NULL && ( contactSim.simFlags & ContactSimFlags.SimEnablePreSolveEvents ) != 0 )
+	    if ( touching && ( contactSim.simFlags & ContactSimFlags.SimEnablePreSolveEvents ) != 0 )
         {
             var shapeIdA = fixtureA.Id + 1;
             var shapeIdB = fixtureB.Id + 1;
@@ -400,8 +411,11 @@ public sealed partial class NewPhysicsSystem
 			    }
 		    }
 
+            // TODO: Pre-Solve callback
+            var preSolve = 0;
+
 		    // this call assumes thread safety
-		    touching = world->preSolveFcn( shapeIdA, shapeIdB, bestPoint, manifold.normal, world->preSolveContext );
+		    touching = world.preSolveFcn( shapeIdA, shapeIdB, bestPoint, manifold.normal, world.preSolveContext);
 		    if ( touching == false )
 		    {
 			    // disable contact
@@ -426,7 +440,7 @@ public sealed partial class NewPhysicsSystem
 		    pointCount = contactSim.manifold.pointCount;
 	    }
 
-	    if ( touching && ( fixtureA.enableHitEvents || fixtureB.enableHitEvents ) )
+	    if ( touching && ( fixtureA.EnableHitEvents || fixtureB.EnableHitEvents ) )
 	    {
 		    contactSim.simFlags |= ContactSimFlags.SimEnableHitEvent;
 	    }
@@ -443,6 +457,7 @@ public sealed partial class NewPhysicsSystem
 	    // Match old contact ids to new contact ids and copy the
 	    // stored impulses to warm start the solver.
 	    int unmatchedCount = 0;
+
 	    for ( int i = 0; i < pointCount; ++i )
 	    {
 		    ref var mp2 = ref contactSim.manifold.points.AsSpan[i];
@@ -491,6 +506,11 @@ public sealed partial class NewPhysicsSystem
 	    return touching;
     }
 
+    private void RemoveKey(ulong pairKey)
+    {
+        _pairSet.Remove(pairKey);
+    }
+
     // A contact is destroyed when:
     // - broad-phase proxies stop overlapping
     // - a body is destroyed
@@ -498,19 +518,19 @@ public sealed partial class NewPhysicsSystem
     // - a body changes type from dynamic to kinematic or static
     // - a shape is destroyed
     // - contact filtering is modified
-    private void b2DestroyContact(b2Contact contact, bool wakeBodies)
+    private void DestroyContact(b2Contact contact, bool wakeBodies)
     {
 	    // Remove pair from set
-	    uint64_t pairKey = B2_SHAPE_PAIR_KEY( contact->shapeIdA, contact->shapeIdB );
-	    b2RemoveKey( &world->broadPhase.pairSet, pairKey );
+	    var pairKey = B2_SHAPE_PAIR_KEY(contact.shapeIdA, contact.shapeIdB );
+	    RemoveKey(pairKey);
 
 	    b2ContactEdge edgeA = contact.edges._00;
 	    b2ContactEdge edgeB = contact.edges._01;
 
 	    int bodyIdA = edgeA.bodyId;
 	    int bodyIdB = edgeB.bodyId;
-	    b2Body* bodyA = b2BodyArray_Get( &world->bodies, bodyIdA );
-	    b2Body* bodyB = b2BodyArray_Get( &world->bodies, bodyIdB );
+        var bodyA = _bodies[bodyIdA];
+        var bodyB = _bodies[bodyIdB];
 
 	    var flags = contact.flags;
 	    bool touching = (flags & ContactFlags.ContactTouchingFlag) != 0;
@@ -523,90 +543,91 @@ public sealed partial class NewPhysicsSystem
 
 	    // Remove from body A
 	    if ( edgeA.prevKey != PhysicsConstants.NullIndex )
-	    {
-		    b2Contact* prevContact = b2ContactArray_Get( &world->contacts, edgeA->prevKey >> 1 );
-		    b2ContactEdge* prevEdge = prevContact->edges + ( edgeA->prevKey & 1 );
-		    prevEdge->nextKey = edgeA->nextKey;
+        {
+            var prevContact = _contacts[edgeA.prevKey >> 1];
+		    ref var prevEdge = ref prevContact.edges._00;
+		    prevEdge.nextKey = edgeA.nextKey;
 	    }
 
-	    if ( edgeA->nextKey != PhysicsConstants.NullIndex )
+	    if ( edgeA.nextKey != PhysicsConstants.NullIndex )
 	    {
-		    b2Contact* nextContact = b2ContactArray_Get( &world->contacts, edgeA->nextKey >> 1 );
-		    b2ContactEdge* nextEdge = nextContact->edges + ( edgeA->nextKey & 1 );
-		    nextEdge->prevKey = edgeA->prevKey;
+		    var nextContact = _contacts[edgeA.nextKey >> 1];
+		    ref var nextEdge = ref nextContact.edges._01;
+		    nextEdge.prevKey = edgeA.prevKey;
 	    }
 
-	    int contactId = contact->contactId;
+	    int contactId = contact.contactId;
 
 	    int edgeKeyA = ( contactId << 1 ) | 0;
-	    if ( bodyA->headContactKey == edgeKeyA )
+	    if ( bodyA.headContactKey == edgeKeyA )
 	    {
-		    bodyA->headContactKey = edgeA->nextKey;
+		    bodyA.headContactKey = edgeA.nextKey;
 	    }
 
-	    bodyA.contactCount -= 1;
+	    bodyA.ContactCount -= 1;
 
 	    // Remove from body B
-	    if ( edgeB->prevKey != B2_NULL_INDEX )
+	    if ( edgeB.prevKey != PhysicsConstants.NullIndex )
 	    {
-		    b2Contact* prevContact = b2ContactArray_Get( &world->contacts, edgeB->prevKey >> 1 );
-		    b2ContactEdge* prevEdge = prevContact->edges + ( edgeB->prevKey & 1 );
-		    prevEdge->nextKey = edgeB->nextKey;
+		    var prevContact = _contacts[edgeB.prevKey >> 1];
+		    ref var prevEdge = ref prevContact.edges._00;
+		    prevEdge.nextKey = edgeB.nextKey;
 	    }
 
-	    if ( edgeB->nextKey != B2_NULL_INDEX )
+	    if ( edgeB.nextKey != PhysicsConstants.NullIndex )
 	    {
-		    b2Contact* nextContact = b2ContactArray_Get( &world->contacts, edgeB->nextKey >> 1 );
-		    b2ContactEdge* nextEdge = nextContact->edges + ( edgeB->nextKey & 1 );
-		    nextEdge->prevKey = edgeB->prevKey;
+		    var nextContact = _contacts[edgeB.nextKey >> 1];
+		    ref var nextEdge = ref nextContact.edges._01;
+		    nextEdge.prevKey = edgeB.prevKey;
 	    }
 
 	    int edgeKeyB = ( contactId << 1 ) | 1;
-	    if ( bodyB->headContactKey == edgeKeyB )
+	    if ( bodyB.headContactKey == edgeKeyB )
 	    {
-		    bodyB->headContactKey = edgeB->nextKey;
+		    bodyB.headContactKey = edgeB.nextKey;
 	    }
 
-	    bodyB->contactCount -= 1;
+	    bodyB.ContactCount -= 1;
 
 	    // Remove contact from the array that owns it
-	    if ( contact->islandId != B2_NULL_INDEX )
+	    if ( contact.islandId != PhysicsConstants.NullIndex )
 	    {
-		    b2UnlinkContact( world, contact );
+		    UnlinkContact(contact);
 	    }
 
-	    if ( contact->colorIndex != B2_NULL_INDEX )
+	    if ( contact.colorIndex != PhysicsConstants.NullIndex )
 	    {
 		    // contact is an active constraint
-		    B2_ASSERT( contact->setIndex == b2_awakeSet );
-		    b2RemoveContactFromGraph( world, bodyIdA, bodyIdB, contact->colorIndex, contact->localIndex );
+		    DebugTools.Assert( contact.setIndex == (int) SetType.AwakeSet );
+		    RemoveContactFromGraph( bodyIdA, bodyIdB, contact.colorIndex, contact.localIndex );
 	    }
 	    else
 	    {
 		    // contact is non-touching or is sleeping
-		    B2_ASSERT( contact->setIndex != b2_awakeSet || ( contact->flags & b2_contactTouchingFlag ) == 0 );
-		    b2SolverSet* set = b2SolverSetArray_Get( &world->solverSets, contact->setIndex );
+		    DebugTools.Assert( contact.setIndex != (int) SetType.AwakeSet || ( contact.flags & ContactFlags.ContactTouchingFlag ) == 0 );
+		    var set = _solverSets[contact.setIndex];
 
-		    int movedIndex = b2ContactSimArray_RemoveSwap( &set->contactSims, contact->localIndex );
-		    if ( movedIndex != B2_NULL_INDEX )
+		    var movedContactSim = set.contactSims.RemoveSwap(contact.localIndex);
+            var movedIndex = set.contactSims.Count;
+
+		    if ( movedIndex != PhysicsConstants.NullIndex )
 		    {
-			    b2ContactSim* movedContactSim = set->contactSims.data + contact->localIndex;
-			    b2Contact* movedContact = b2ContactArray_Get( &world->contacts, movedContactSim->contactId );
-			    movedContact->localIndex = contact->localIndex;
+			    var movedContact = _contacts[movedContactSim.contactId];
+			    movedContact.localIndex = contact.localIndex;
 		    }
 	    }
 
 	    // Free contact and id (preserve generation)
-	    contact->contactId = B2_NULL_INDEX;
-	    contact->setIndex = B2_NULL_INDEX;
-	    contact->colorIndex = B2_NULL_INDEX;
-	    contact->localIndex = B2_NULL_INDEX;
-	    b2FreeId( &world->contactIdPool, contactId );
+	    contact.contactId = PhysicsConstants.NullIndex;
+	    contact.setIndex = PhysicsConstants.NullIndex;
+	    contact.colorIndex = PhysicsConstants.NullIndex;
+	    contact.localIndex = PhysicsConstants.NullIndex;
+	    _contactIdPool.FreeId(contactId);
 
 	    if ( wakeBodies && touching )
 	    {
-		    b2WakeBody(bodyA);
-		    b2WakeBody(bodyB);
+		    WakeBody(bodyA);
+		    WakeBody(bodyB);
 	    }
     }
 
@@ -615,44 +636,47 @@ public sealed partial class NewPhysicsSystem
     {
 	    DebugTools.Assert((contact.flags & ContactFlags.ContactTouchingFlag) != 0);
 
-	    int bodyIdA = contact.edges[0].bodyId;
-	    int bodyIdB = contact.edges[1].bodyId;
+	    int bodyIdA = contact.edges._00.bodyId;
+	    int bodyIdB = contact.edges._01.bodyId;
 
-	    var bodyA = b2BodyArray_Get( &world->bodies, bodyIdA );
-	    var bodyB = b2BodyArray_Get( &world->bodies, bodyIdB );
+	    var entA = _bodies[bodyIdA];
+	    var entB = _bodies[bodyIdB];
 
-	    DebugTools.Assert(bodyA.setIndex != (int) SetType.DisabledSet && bodyB.setIndex != (int) SetType.DisabledSet );
-	    DebugTools.Assert(bodyA.setIndex != (int) SetType.StaticSet || bodyB.setIndex != (int) SetType.StaticSet );
+        var bodyA = entA.Comp;
+        var bodyB = entB.Comp;
+
+	    DebugTools.Assert(bodyA.SetIndex != (int) SetType.DisabledSet && bodyB.SetIndex != (int) SetType.DisabledSet );
+	    DebugTools.Assert(bodyA.SetIndex != (int) SetType.StaticSet || bodyB.SetIndex != (int) SetType.StaticSet );
 
 	    // Wake bodyB if bodyA is awake and bodyB is sleeping
-	    if (bodyA.setIndex == (int) SetType.AwakeSet && bodyB.setIndex >= (int) SetType.FirstSleepingSet)
+	    if (bodyA.SetIndex == (int) SetType.AwakeSet && bodyB.SetIndex >= (int) SetType.FirstSleepingSet)
 	    {
-		    WakeSolverSet(bodyB.setIndex);
+		    WakeSolverSet(bodyB.SetIndex);
 	    }
 
 	    // Wake bodyA if bodyB is awake and bodyA is sleeping
-	    if (bodyB.setIndex == (int) SetType.AwakeSet && bodyA.setIndex >= (int) SetType.FirstSleepingSet)
+	    if (bodyB.SetIndex == (int) SetType.AwakeSet && bodyA.SetIndex >= (int) SetType.FirstSleepingSet)
 	    {
-		    WakeSolverSet(bodyA.setIndex);
+		    WakeSolverSet(bodyA.SetIndex);
 	    }
 
-	    int islandIdA = bodyA.islandId;
-	    int islandIdB = bodyB.islandId;
+	    int islandIdA = bodyA.IslandId;
+	    int islandIdB = bodyB.IslandId;
 
 	    // Static bodies have null island indices.
-	    B2_ASSERT( bodyA->setIndex != b2_staticSet || islandIdA == B2_NULL_INDEX );
-	    B2_ASSERT( bodyB->setIndex != b2_staticSet || islandIdB == B2_NULL_INDEX );
-	    B2_ASSERT( islandIdA != B2_NULL_INDEX || islandIdB != B2_NULL_INDEX );
+	    DebugTools.Assert( bodyA.SetIndex != (int) SetType.StaticSet || islandIdA == PhysicsConstants.NullIndex );
+        DebugTools.Assert( bodyB.SetIndex != (int) SetType.StaticSet || islandIdB == PhysicsConstants.NullIndex );
+        DebugTools.Assert( islandIdA != PhysicsConstants.NullIndex || islandIdB != PhysicsConstants.NullIndex );
 
 	    // Merge islands. This will destroy one of the islands.
-	    int finalIslandId = b2MergeIslands( world, islandIdA, islandIdB );
+	    int finalIslandId = MergeIslands( islandIdA, islandIdB );
 
 	    // Add contact to the island that survived
-	    b2AddContactToIsland( world, finalIslandId, contact );
+	    AddContactToIsland( finalIslandId, contact );
     }
 
     // This is called when a contact no longer has contact points or when a contact is destroyed.
-    private void b2UnlinkContact(b2Contact contact)
+    private void UnlinkContact(b2Contact contact)
     {
 	    DebugTools.Assert(contact.islandId != PhysicsConstants.NullIndex);
 
@@ -674,14 +698,14 @@ public sealed partial class NewPhysicsSystem
 		    nextContact.islandPrev = contact.islandPrev;
 	    }
 
-	    if ( island->headContact == contact->contactId )
+	    if ( island.headContact == contact.contactId )
 	    {
-		    island->headContact = contact->islandNext;
+		    island.headContact = contact.islandNext;
 	    }
 
-	    if ( island->tailContact == contact->contactId )
+	    if ( island.tailContact == contact.contactId )
 	    {
-		    island->tailContact = contact->islandPrev;
+		    island.tailContact = contact.islandPrev;
 	    }
 
 	    DebugTools.Assert(island.contactCount > 0);
@@ -712,8 +736,8 @@ public sealed partial class NewPhysicsSystem
         var bodyA = _bodies[bodyIdA];
         var bodyB = _bodies[bodyIdB];
 
-	    var typeA = bodyA.BodyType;
-	    var typeB = bodyB.BodyType;
+	    var typeA = bodyA.Comp.BodyType;
+	    var typeB = bodyB.Comp.BodyType;
 	    DebugTools.Assert(typeA == BodyType.Dynamic || typeB == BodyType.Dynamic);
 
 	    if (typeA != BodyType.Static && typeB != BodyType.Static)
@@ -855,7 +879,7 @@ public sealed partial class NewPhysicsSystem
         // Fix moved contact
         int movedId = movedContactSim.contactId;
         var movedContact = _contacts[movedId];
-        DebugTools.Assert(movedContact.setIndex == SetType.AwakeSet);
+        DebugTools.Assert(movedContact.setIndex == (int) SetType.AwakeSet);
         DebugTools.Assert(movedContact.colorIndex == colorIndex);
         DebugTools.Assert(movedContact.localIndex == movedIndex);
         movedContact.localIndex = localIndex;
@@ -863,7 +887,7 @@ public sealed partial class NewPhysicsSystem
 
     private void AddNonTouchingContact(b2Contact contact, ref ContactSim contactSim)
     {
-        DebugTools.Assert(contact.setIndex == SetType.AwakeSet);
+        DebugTools.Assert(contact.setIndex == (int) SetType.AwakeSet);
         var set = _solverSets[(int) SetType.AwakeSet];
         contact.colorIndex = PhysicsConstants.NullIndex;
         contact.localIndex = set.contactSims.Count;
@@ -887,5 +911,15 @@ public sealed partial class NewPhysicsSystem
         DebugTools.Assert(movedContact.localIndex == movedIndex);
         DebugTools.Assert(movedContact.colorIndex == PhysicsConstants.NullIndex);
         movedContact.localIndex = localIndex;
+    }
+
+    private static float DefaultFrictionCallback( float frictionA, ulong materialA, float frictionB, ulong materialB )
+    {
+        return MathF.Sqrt( frictionA * frictionB );
+    }
+
+    private static float DefaultRestitutionCallback( float restitutionA, ulong materialA, float restitutionB, ulong materialB )
+    {
+        return MathF.Max( restitutionA, restitutionB );
     }
 }

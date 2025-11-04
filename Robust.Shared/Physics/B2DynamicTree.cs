@@ -2488,5 +2488,18 @@ namespace Robust.Shared.Physics
                 return data;
             }
         }
+
+        [Conditional("DEBUG")]
+        public void ValidateNoEnlarged()
+        {
+            int capacity = Capacity;
+            var nodes = _nodes;
+            for ( int i = 0; i < capacity; ++i )
+            {
+                var node = nodes[i];
+                // TODO:
+                throw new NotImplementedException();
+            }
+        }
     }
 }
