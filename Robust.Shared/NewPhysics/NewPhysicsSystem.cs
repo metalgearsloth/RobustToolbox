@@ -1,7 +1,11 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
+using Robust.Shared.Collections;
 using Robust.Shared.GameObjects;
 using Robust.Shared.IoC;
+using Robust.Shared.NewPhysics.Bodies;
+using Robust.Shared.NewPhysics.Contacts;
 using Robust.Shared.NewPhysics.Islands;
 using Robust.Shared.NewPhysics.Joints;
 using Robust.Shared.NewPhysics.Solver;
@@ -52,6 +56,8 @@ public sealed partial class NewPhysicsSystem : EntitySystem
     // - if no bodies want to sleep then there is no reason to perform island splitting
     private int _splitIslandId;
 
+    // Box2D cheats with joints because it uses a union.
+
     private readonly List<Entity<PhysicsComponent>> _bodies = new();
     private readonly List<b2Contact> _contacts = new();
     private readonly List<Island> _islands = new();
@@ -61,7 +67,7 @@ public sealed partial class NewPhysicsSystem : EntitySystem
     /// <summary>
     /// Contact pairs
     /// </summary>
-    private HashSet<ulong> _pairSet = new();
+    private readonly HashSet<ulong> _pairSet = new();
 
     /*
      * Pools
@@ -73,12 +79,76 @@ public sealed partial class NewPhysicsSystem : EntitySystem
     private readonly IdPool _jointIdPool = new();
     private readonly IdPool _solverSetPool = new();
 
+    /*
+     * Event buffer
+     */
+
+    private readonly List<BodyMoveEvent> _bodyMoveEvents = new(4);
+    private readonly List<SensorBeginTouchEvent> _sensorBeginEvents = new (4);
+    private readonly List<ContactBeginTouchEvent> _contactBeginEvents = new(4);
+    private readonly List<ContactHitEvent> _contactHitEvents = new(4);
+    private readonly List<JointEvent> _jointEvents = new(4);
+
+    // End events are double buffered so that the user doesn't need to flush events
+    private readonly List<SensorEndTouchEvent>[] _sensorEndEvents = new List<SensorEndTouchEvent>[2];
+    private readonly List<ContactEndTouchEvent>[] _contactEndEvents = new List<ContactEndTouchEvent>[2];
+    private int _endEventArrayIndex;
+
+    /*
+     * Step context
+     */
+    // Box2D has this as its own struct but in that case it makes sense as it has multi-world support
+    // For us EntityManager is this (his) world
+    // On Box2D some of the data uses pointers between the graph colors and a flat list so we just keep the flat lists instead.
+
+    private float _dt;
+    private float _invDt;
+    private int _substepCount;
+    private float _h;
+    private float _invH;
+
+    private Softness _contactSoftness;
+    private Softness _staticSoftness;
+
+    private float _restitutionThreshold;
+    private float _maxLinearSpeed;
+    private bool _enableWarmStarting;
+
+    private readonly ValueList<SolverStage> _contextStages = new();
+    private readonly ValueList<SolverBlock> _contextBodyBlocks = new();
+    private readonly ValueList<SolverBlock> _contextContactBlocks = new();
+    private readonly ValueList<SolverBlock> _contextJointBlocks = new();
+    private readonly ValueList<SolverBlock> _contextGraphBlocks = new();
+
+    private ValueList<ContactSim> _contextContacts = new();
+    private ValueList<JointSim> _contextJoints = new();
+
+    private int _activeColorCount;
+    private int _stageCount;
+
+    private int _simdWidth;
+    // todo_erin 4 seems good but more benchmarking would be good
+    private const int blocksPerWorker = 4;
+    private int _simdShift;
+
+    private int _bulletBodyCount;
+    private List<int> _bulletBodies = new();
+    private List<BodySim> _sims = default!;
+    private List<BodyState> _states = default!;
+
+    /*
+     * CVars
+     */
+
     // TODO: Cvar
     private bool _enableSpeculative;
 
     private int _substeps = 4;
 
     internal bool _locked;
+
+    const int Iterations = 1;
+    const int RelaxIterations = 1;
 
     public override void Initialize()
     {

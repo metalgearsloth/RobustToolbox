@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+using System.Diagnostics.Contracts;
 using System.Numerics;
 
 namespace Robust.Shared.Maths
@@ -61,6 +62,7 @@ namespace Robust.Shared.Maths
             EY.Y = 0f;
         }
 
+        [Pure]
         public Matrix22 GetInverse()
         {
             float a = EX.X, b = EY.X, c = EX.Y, d = EY.Y;
@@ -77,6 +79,7 @@ namespace Robust.Shared.Maths
         /// Solve A * x = b, where b is a column vector. This is more efficient
         /// than computing the inverse in one-shot cases.
         /// </summary>
+        [Pure]
         public Vector2 Solve(Vector2 b)
         {
             float a11 = EX.X, a12 = EY.X, a21 = EX.Y, a22 = EY.Y;
@@ -87,6 +90,15 @@ namespace Robust.Shared.Maths
             }
 
             return new Vector2(det * (a22 * b.X - a12 * b.Y), det * (a11 * b.Y - a21 * b.X));
+        }
+
+        [Pure]
+        public static Vector2 operator *(Matrix22 A, Vector2 v)
+        {
+            return new Vector2(
+                A.EX.X * v.X + A.EY.X * v.Y,
+                A.EX.Y * v.X + A.EY.Y * v.Y
+            );
         }
     }
 }

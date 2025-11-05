@@ -11,15 +11,15 @@ public abstract partial class BaseJoint
     public bool CollideConnected;
 
     // index of simulation set stored in b2World
-    // B2_NULL_INDEX when slot is free
+    // PhysicsConstants.NullIndex when slot is free
     internal int SetIndex;
 
-    // index into the constraint graph color array, may be B2_NULL_INDEX for sleeping/disabled joints
-    // B2_NULL_INDEX when slot is free
+    // index into the constraint graph color array, may be PhysicsConstants.NullIndex for sleeping/disabled joints
+    // PhysicsConstants.NullIndex when slot is free
     internal int ColorIndex;
 
     // joint index within set or graph color
-    // B2_NULL_INDEX when slot is free
+    // PhysicsConstants.NullIndex when slot is free
     internal int LocalIndex;
 
     internal FixedArray2<b2JointEdge> Edges;

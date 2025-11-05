@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using Robust.Shared.Collections;
 using Robust.Shared.IoC;
+using Robust.Shared.Maths;
 using Robust.Shared.Physics.Systems;
 using Robust.Shared.Utility;
 
@@ -10,29 +12,11 @@ public sealed partial class NewPhysicsSystem
 {
     [Dependency] private readonly SharedBroadphaseSystem _broadphase = default!;
 
-    private readonly List<BodyMoveEvent> _bodyMoveEvents = new(4);
-    private readonly SensorBeginTouchEvent[] _sensorBeginEvents = new SensorBeginTouchEvent[4];
-    private readonly List<ContactBeginTouchEvent> _contactBeginEvents = new(4);
-    private readonly ContactHitEvent[] _contactHitEvents = new ContactHitEvent[4];
-    private readonly JointEvent[] _jointEvents = new JointEvent[4];
-
-    // End events are double buffered so that the user doesn't need to flush events
-    private readonly SensorEndTouchEvent[][] _sensorEndEvents = new SensorEndTouchEvent[2][];
-    private readonly List<ContactEndTouchEvent>[] _contactEndEvents = new List<ContactEndTouchEvent>[2];
-    private int _endEventArrayIndex;
-
     private PhysicsProfile _profile = new();
-
-    private float _invH;
-    private float _invDt;
 
     private float _contactSpeed;
     private float _contactHertz;
     private float _contactDampingRatio;
-
-    private float _restitutionThreshold;
-    private float _maxLinearSpeed;
-    private bool _enableWarmStarting;
 
     /// <summary>
     ///  Simulate a world for one time step. This performs collision detection, integration, and constraint solution.
@@ -54,17 +38,35 @@ public sealed partial class NewPhysicsSystem
         // Prepare event capture
         _contactBeginEvents.Clear();
 
-        Array.Clear(_bodyMoveEvents);
-        Array.Clear(_sensorBeginEvents);
-        Array.Clear(_contactHitEvents);
-        Array.Clear(_jointEvents);
+        _bodyMoveEvents.Clear();
+
+        _sensorBeginEvents.Clear();
+        _contactHitEvents.Clear();
+        _contactHitEvents.Clear();
+        _jointEvents.Clear();
+
+        // Just because Box2D allocates these per tick we'll put them here.
+        _sims = null;
+        _states = null;
+
+        if (NumericsHelpers.Vector256Enabled)
+        {
+            _simdWidth = 8;
+        }
+        else
+        {
+            // Yes Box2D defaults to 4 even if no SSE2
+            _simdWidth = 4;
+        }
+
+        _simdShift = (int)Math.Log2(_simdWidth);
 
         // TODO: Clear profile
 
         if (timeStep == 0f)
         {
             _endEventArrayIndex = 1 - _endEventArrayIndex;
-            Array.Clear(_sensorEndEvents[_endEventArrayIndex]);
+            _sensorEndEvents[_endEventArrayIndex].Clear();
             _contactEndEvents[_endEventArrayIndex].Clear();
 
             // todo_erin would be useful to still process collision while paused
@@ -74,51 +76,41 @@ public sealed partial class NewPhysicsSystem
         _locked = true;
         _broadphase.FindNewContacts();
 
-        var context = new StepContext
-        {
-            dt = timeStep,
-            subStepCount = Math.Max(1, subStepCount)
-        };
+        _dt = timeStep;
+        _substepCount = Math.Max(1, subStepCount);
 
-        if ( timeStep > 0.0f )
+        if (timeStep > 0f)
         {
-            context.inv_dt = 1.0f / timeStep;
-            context.h = timeStep / context.subStepCount;
-            context.inv_h = context.subStepCount * context.inv_dt;
+            _invDt = 1f / timeStep;
+            _h = timeStep / _substepCount;
+            _invH = _substepCount * _invDt;
         }
         else
         {
-            context.inv_dt = 0.0f;
-            context.h = 0.0f;
-            context.inv_h = 0.0f;
+            _invDt = 0f;
+            _h = 0f;
+            _invH = 0f;
         }
 
-        _invDt = context.inv_dt;
-        _invH = context.inv_h;
-
         // Hertz values get reduced for large time steps
-        float contactHertz = MathF.Min(_contactHertz, 0.125f * context.inv_h );
-        context.contactSoftness = MakeSoft( contactHertz, _contactDampingRatio, context.h );
-        context.staticSoftness = MakeSoft( 2.0f * contactHertz, _contactDampingRatio, context.h );
-
-        context.restitutionThreshold = _restitutionThreshold;
-        context.maxLinearVelocity = _maxLinearSpeed;
-        context.enableWarmStarting = _enableWarmStarting;
+        float contactHertz = MathF.Min(_contactHertz, 0.125f * _invH );
+        _contactSoftness = MakeSoft( contactHertz, _contactDampingRatio, _h );
+        _staticSoftness = MakeSoft( 2.0f * contactHertz, _contactDampingRatio, _h );
 
         // Update contacts
-        Collide(context);
+        Collide();
 
         // Integrate velocities, solve velocity constraints, and integrate positions.
-        if ( context.dt > 0.0f )
+        if (_dt > 0.0f)
         {
-            Solve(ref context);
+            Solve();
         }
 
         OverlapSensors();
 
         // Swap end event array buffers
         _endEventArrayIndex = 1 - _endEventArrayIndex;
-        Array.Clear(_sensorEndEvents[_endEventArrayIndex]);
+        _sensorEndEvents[_endEventArrayIndex].Clear();
         _contactEndEvents[_endEventArrayIndex].Clear();
         _locked = false;
     }

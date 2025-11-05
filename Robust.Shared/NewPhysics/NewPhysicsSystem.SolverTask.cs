@@ -11,7 +11,6 @@ public sealed partial class NewPhysicsSystem
     private sealed class SolveStageJob : IParallelRobustJob
     {
         public NewPhysicsSystem System = default!;
-        public StepContext Context = default!;
         public SolverStage Stage;
 
         public void Execute(int index)
@@ -20,164 +19,86 @@ public sealed partial class NewPhysicsSystem
             var block = Stage.blocks[index];
 
             var stageType = Stage.type;
-            var blockType = (b2SolverBlockType) block.blockType;
+            var blockType = (b2SolverBlockType)block.blockType;
             int startIndex = block.startIndex;
             int endIndex = startIndex + block.count;
 
-            switch ( stageType )
+            switch (stageType)
             {
                 case SolverStageType.b2_stagePrepareJoints:
-                    PrepareJointsTask(startIndex, endIndex, Context);
+                    System.PrepareJointsTask(startIndex, endIndex);
                     break;
 
                 case SolverStageType.b2_stagePrepareContacts:
-                    PrepareContactsTask( startIndex, endIndex, in Context);
+                    System.PrepareContactsTask(startIndex, endIndex);
                     break;
 
                 case SolverStageType.b2_stageIntegrateVelocities:
-                    IntegrateVelocitiesTask(startIndex, endIndex, Context);
+                    System.IntegrateVelocitiesTask(startIndex, endIndex);
                     break;
 
                 case SolverStageType.b2_stageWarmStart:
-                    if ( blockType == b2SolverBlockType.b2_graphContactBlock )
+                    if (blockType == b2SolverBlockType.b2_graphContactBlock)
                     {
-                        WarmStartContactsTask( startIndex, endIndex, context, stage->colorIndex );
+                        System.WarmStartContactsTask(startIndex, endIndex, Stage.colorIndex);
                     }
-                    else if ( blockType == b2SolverBlockType.b2_graphJointBlock )
+                    else if (blockType == b2SolverBlockType.b2_graphJointBlock)
                     {
-                        WarmStartJointsTask( startIndex, endIndex, context, stage->colorIndex );
+                        System.WarmStartJointsTask(startIndex, endIndex, Stage.colorIndex);
                     }
+
                     break;
 
                 case SolverStageType.b2_stageSolve:
-                    if ( blockType == b2SolverBlockType.b2_graphContactBlock )
+                    if (blockType == b2SolverBlockType.b2_graphContactBlock)
                     {
-                        SolveContactsTask( startIndex, endIndex, context, stage->colorIndex, true );
+                        System.SolveContactsTask(startIndex, endIndex, Stage.colorIndex, true);
                     }
-                    else if ( blockType == b2SolverBlockType.b2_graphJointBlock )
+                    else if (blockType == b2SolverBlockType.b2_graphJointBlock)
                     {
-                        SolveJointsTask( startIndex, endIndex, context, stage->colorIndex, true, workerIndex );
+                        System.SolveJointsTask(startIndex, endIndex, Stage.colorIndex, true, index);
                     }
+
                     break;
 
                 case SolverStageType.b2_stageIntegratePositions:
-                    IntegratePositionsTask( startIndex, endIndex, context );
+                    System.IntegratePositionsTask(startIndex, endIndex);
                     break;
 
                 case SolverStageType.b2_stageRelax:
-                    if ( blockType == b2SolverBlockType.b2_graphContactBlock )
+                    if (blockType == b2SolverBlockType.b2_graphContactBlock)
                     {
-                        SolveContactsTask( startIndex, endIndex, context, stage->colorIndex, false );
+                        System.SolveContactsTask(startIndex, endIndex, Stage.colorIndex, false);
                     }
-                    else if ( blockType == b2SolverBlockType.b2_graphJointBlock )
+                    else if (blockType == b2SolverBlockType.b2_graphJointBlock)
                     {
-                        SolveJointsTask( startIndex, endIndex, context, stage->colorIndex, false, workerIndex );
+                        System.SolveJointsTask(startIndex, endIndex, Stage.colorIndex, false, index);
                     }
+
                     break;
 
                 case SolverStageType.b2_stageRestitution:
-                    if ( blockType == b2SolverBlockType.b2_graphContactBlock )
+                    if (blockType == b2SolverBlockType.b2_graphContactBlock)
                     {
-                        ApplyRestitutionTask( startIndex, endIndex, context, stage->colorIndex );
+                        System.ApplyRestitutionTask(startIndex, endIndex, Stage.colorIndex);
                     }
+
                     break;
 
                 case SolverStageType.b2_stageStoreImpulses:
-                    StoreImpulsesTask( startIndex, endIndex, context );
+                    System.StoreImpulsesTask(startIndex, endIndex);
                     break;
             }
         }
-
-        // Integrate velocities and apply damping
-        private void IntegrateVelocitiesTask( int startIndex, int endIndex)
-        {
-	        b2TracyCZoneNC( integrate_velocity, "IntVel", b2_colorDeepPink, true );
-
-	        b2BodyState* states = context->states;
-	        b2BodySim* sims = context->sims;
-
-	        b2Vec2 gravity = context->world->gravity;
-	        float h = context->h;
-	        float maxLinearSpeed = context->maxLinearVelocity;
-	        float maxAngularSpeed = B2_MAX_ROTATION * context->inv_dt;
-	        float maxLinearSpeedSquared = maxLinearSpeed * maxLinearSpeed;
-	        float maxAngularSpeedSquared = maxAngularSpeed * maxAngularSpeed;
-
-	        for ( int i = startIndex; i < endIndex; ++i )
-	        {
-		        b2BodySim* sim = sims + i;
-		        b2BodyState* state = states + i;
-
-		        b2Vec2 v = state->linearVelocity;
-		        float w = state->angularVelocity;
-
-		        // Apply forces, torque, gravity, and damping
-		        // Apply damping.
-		        // Differential equation: dv/dt + c * v = 0
-		        // Solution: v(t) = v0 * exp(-c * t)
-		        // Time step: v(t + dt) = v0 * exp(-c * (t + dt)) = v0 * exp(-c * t) * exp(-c * dt) = v(t) * exp(-c * dt)
-		        // v2 = exp(-c * dt) * v1
-		        // Pade approximation:
-		        // v2 = v1 * 1 / (1 + c * dt)
-		        float linearDamping = 1.0f / ( 1.0f + h * sim->linearDamping );
-		        float angularDamping = 1.0f / ( 1.0f + h * sim->angularDamping );
-
-		        // Gravity scale will be zero for kinematic bodies
-		        float gravityScale = sim->invMass > 0.0f ? sim->gravityScale : 0.0f;
-
-		        // lvd = h * im * f + h * g
-		        b2Vec2 linearVelocityDelta = b2Add( b2MulSV( h * sim->invMass, sim->force ), b2MulSV( h * gravityScale, gravity ) );
-		        float angularVelocityDelta = h * sim->invInertia * sim->torque;
-
-		        v = b2MulAdd( linearVelocityDelta, linearDamping, v );
-		        w = angularVelocityDelta + angularDamping * w;
-
-		        // Clamp to max linear speed
-		        if ( b2Dot( v, v ) > maxLinearSpeedSquared )
-		        {
-			        float ratio = maxLinearSpeed / b2Length( v );
-			        v = b2MulSV( ratio, v );
-			        sim->flags |= b2_isSpeedCapped;
-		        }
-
-		        // Clamp to max angular speed
-		        if ( w * w > maxAngularSpeedSquared && ( sim->flags & b2_allowFastRotation ) == 0 )
-		        {
-			        float ratio = maxAngularSpeed / b2AbsFloat( w );
-			        w *= ratio;
-			        sim->flags |= b2_isSpeedCapped;
-		        }
-
-		        if ( state->flags & b2_lockLinearX )
-		        {
-			        v.x = 0.0f;
-		        }
-
-		        if ( state->flags & b2_lockLinearY )
-		        {
-			        v.y = 0.0f;
-		        }
-
-		        if ( state->flags & b2_lockAngularZ )
-		        {
-			        w = 0.0f;
-		        }
-
-		        state->linearVelocity = v;
-		        state->angularVelocity = w;
-	        }
-
-	        b2TracyCZoneEnd( integrate_velocity );
-        }
     }
 
-    private void ExecuteMainStage(in SolverStage stage, ref StepContext context)
+    private void ExecuteMainStage(in SolverStage stage)
     {
         _solveJob.Stage = stage;
         _parallel.ProcessNow(_solveJob, stage.blockCount);
     }
 
-    private void SolverTask(ref StepContext context)
+    private void SolverTask()
     {
         // Okay now we have all the work blocks.
         // In Box2D it makes a task for each thread and does manual work-stealing, with the main thread orchestrating it.
@@ -196,25 +117,22 @@ public sealed partial class NewPhysicsSystem
 		b2_stageStoreImpulses
 		*/
 
-		int bodySyncIndex = 1;
 		int stageIndex = 0;
-        var stages = context.Stages;
+        var activeColorCount = _activeColorCount;
 
 		// This stage loops over all awake joints
-		ExecuteMainStage(stages[stageIndex], ref context);
+		ExecuteMainStage(_contextStages[stageIndex++]);
 
 		// This stage loops over all contact constraints
-		DebugTools.Assert(stages[stageIndex].type == SolverStageType.b2_stagePrepareContacts );
-		ExecuteMainStage(stages[stageIndex], ref context);
+		DebugTools.Assert(_contextStages[stageIndex].type == SolverStageType.b2_stagePrepareContacts );
+		ExecuteMainStage(_contextStages[stageIndex++]);
 		stageIndex += 1;
 
-		int graphSyncIndex = 1;
+        // Single-threaded overflow work. These constraints don't fit in the graph coloring.
+		PrepareOverflowJoints();
+		PrepareOverflowContacts();
 
-		// Single-threaded overflow work. These constraints don't fit in the graph coloring.
-		PrepareOverflowJoints( context );
-		PrepareOverflowContacts( context );
-
-		int subStepCount = context.subStepCount;
+		int subStepCount = _substepCount;
 
 		for ( int i = 0; i < subStepCount; ++i )
 		{
@@ -223,111 +141,84 @@ public sealed partial class NewPhysicsSystem
 			int iterStageIndex = stageIndex;
 
 			// integrate velocities
-			syncBits = ( bodySyncIndex << 16 ) | iterStageIndex;
-			B2_ASSERT( stages[iterStageIndex].type == b2_stageIntegrateVelocities );
-			ExecuteMainStage( stages[iterStageIndex], context, syncBits );
+			DebugTools.Assert( _contextStages[iterStageIndex].type == SolverStageType.b2_stageIntegrateVelocities );
+			ExecuteMainStage( _contextStages[iterStageIndex]);
 			iterStageIndex += 1;
-			bodySyncIndex += 1;
-
-			profile->integrateVelocities += b2GetMillisecondsAndReset( &ticks );
 
 			// warm start constraints
-			b2WarmStartOverflowJoints( context );
-			b2WarmStartOverflowContacts( context );
+			WarmStartOverflowJoints();
+			WarmStartOverflowContacts();
 
 			for ( int colorIndex = 0; colorIndex < activeColorCount; ++colorIndex )
 			{
-				syncBits = ( graphSyncIndex << 16 ) | iterStageIndex;
-				B2_ASSERT( stages[iterStageIndex].type == b2_stageWarmStart );
-				b2ExecuteMainStage( stages + iterStageIndex, context, syncBits );
+				DebugTools.Assert(_contextStages[iterStageIndex].type == SolverStageType.b2_stageWarmStart);
+				ExecuteMainStage(_contextStages[iterStageIndex]);
 				iterStageIndex += 1;
 			}
-			graphSyncIndex += 1;
 
-			profile->warmStart += b2GetMillisecondsAndReset( &ticks );
-
-			// solve constraints
+            // solve constraints
 			bool useBias = true;
 
-			for ( int j = 0; j < ITERATIONS; ++j )
+			for ( int j = 0; j < Iterations; ++j )
 			{
 				// Overflow constraints have lower priority
-				SolveOverflowJoints( context, useBias );
-				SolveOverflowContacts( context, useBias );
+				SolveOverflowJoints(useBias);
+				SolveOverflowContacts(useBias);
 
 				for ( int colorIndex = 0; colorIndex < activeColorCount; ++colorIndex )
 				{
-					syncBits = ( graphSyncIndex << 16 ) | iterStageIndex;
-					B2_ASSERT( stages[iterStageIndex].type == b2_stageSolve );
-					b2ExecuteMainStage( stages + iterStageIndex, context, syncBits );
+					DebugTools.Assert(_contextStages[iterStageIndex].type == SolverStageType.b2_stageSolve);
+					ExecuteMainStage(_contextStages[iterStageIndex]);
 					iterStageIndex += 1;
 				}
-				graphSyncIndex += 1;
-			}
-
-			profile->solveImpulses += b2GetMillisecondsAndReset( &ticks );
+            }
 
 			// integrate positions
-			B2_ASSERT( stages[iterStageIndex].type == b2_stageIntegratePositions );
-			syncBits = ( bodySyncIndex << 16 ) | iterStageIndex;
-			ExecuteMainStage(stages[iterStageIndex], ref context);
+			DebugTools.Assert( _contextStages[iterStageIndex].type == SolverStageType.b2_stageIntegratePositions );
+			ExecuteMainStage(_contextStages[iterStageIndex]);
 			iterStageIndex += 1;
-			bodySyncIndex += 1;
-
-			profile->integratePositions += b2GetMillisecondsAndReset( &ticks );
 
 			// relax constraints
 			useBias = false;
-			for ( int j = 0; j < RELAX_ITERATIONS; ++j )
+			for ( int j = 0; j < RelaxIterations; ++j )
 			{
-				b2SolveOverflowJoints( context, useBias );
-				b2SolveOverflowContacts( context, useBias );
+				SolveOverflowJoints(useBias);
+				SolveOverflowContacts(useBias);
 
 				for ( int colorIndex = 0; colorIndex < activeColorCount; ++colorIndex )
 				{
-					syncBits = ( graphSyncIndex << 16 ) | iterStageIndex;
-					B2_ASSERT( stages[iterStageIndex].type == b2_stageRelax );
-					b2ExecuteMainStage( stages + iterStageIndex, context, syncBits );
+					DebugTools.Assert(_contextStages[iterStageIndex].type == SolverStageType.b2_stageRelax);
+					ExecuteMainStage(_contextStages[iterStageIndex]);
 					iterStageIndex += 1;
 				}
-				graphSyncIndex += 1;
-			}
+            }
         }
 
 		// advance the stage according to the sub-stepping tasks just completed
 		// integrate velocities / warm start / solve / integrate positions / relax
-		stageIndex += 1 + activeColorCount + ITERATIONS * activeColorCount + 1 + RELAX_ITERATIONS * activeColorCount;
+		stageIndex += 1 + activeColorCount + Iterations * activeColorCount + 1 + RelaxIterations * activeColorCount;
 
 		// Restitution
 		{
-			ApplyOverflowRestitution( context );
+			ApplyOverflowRestitution();
 
 			int iterStageIndex = stageIndex;
 			for ( int colorIndex = 0; colorIndex < activeColorCount; ++colorIndex )
 			{
-				syncBits = ( graphSyncIndex << 16 ) | iterStageIndex;
-				B2_ASSERT( stages[iterStageIndex].type == b2_stageRestitution );
-				ExecuteMainStage( stages + iterStageIndex, context, syncBits );
+				DebugTools.Assert(_contextStages[iterStageIndex].type == SolverStageType.b2_stageRestitution);
+				ExecuteMainStage(_contextStages[iterStageIndex]);
 				iterStageIndex += 1;
 			}
 			// graphSyncIndex += 1;
 			stageIndex += activeColorCount;
 		}
 
-		profile->applyRestitution += b2GetMillisecondsAndReset( &ticks );
+		StoreOverflowImpulses();
 
-		StoreOverflowImpulses( context );
+		DebugTools.Assert(_contextStages[stageIndex].type == SolverStageType.b2_stageStoreImpulses);
+		ExecuteMainStage(_contextStages[stageIndex]);
 
-		syncBits = ( contactSyncIndex << 16 ) | stageIndex;
-		B2_ASSERT( stages[stageIndex].type == b2_stageStoreImpulses );
-		ExecuteMainStage( stages + stageIndex, context, syncBits );
-
-		profile->storeImpulses += b2GetMillisecondsAndReset( &ticks );
-
-		// Signal workers to finish
-		b2AtomicStoreU32( &context->atomicSyncBits, UINT_MAX );
-
-		B2_ASSERT( stageIndex + 1 == context->stageCount );
+		DebugTools.Assert(stageIndex + 1 == _stageCount);
 		return;
     }
 }

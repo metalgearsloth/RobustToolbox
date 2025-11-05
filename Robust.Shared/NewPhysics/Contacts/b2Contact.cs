@@ -7,26 +7,26 @@ namespace Robust.Shared.NewPhysics;
 public sealed class b2Contact
 {
     // index of simulation set stored in b2World
-    // B2_NULL_INDEX when slot is free
+    // PhysicsConstants.NullIndex when slot is free
     public int setIndex;
 
     // index into the constraint graph color array
-    // B2_NULL_INDEX for non-touching or sleeping contacts
-    // B2_NULL_INDEX when slot is free
+    // PhysicsConstants.NullIndex for non-touching or sleeping contacts
+    // PhysicsConstants.NullIndex when slot is free
     internal int colorIndex;
 
     // contact index within set or graph color
-    // B2_NULL_INDEX when slot is free
+    // PhysicsConstants.NullIndex when slot is free
     internal int localIndex;
 
     internal int shapeIdA;
     internal int shapeIdB;
     internal int contactId;
 
-    // A contact only belongs to an island if touching, otherwise B2_NULL_INDEX.
+    // A contact only belongs to an island if touching, otherwise PhysicsConstants.NullIndex.
     internal FixedArray2<b2ContactEdge> edges;
-    int islandPrev;
-    int islandNext;
+    internal int islandPrev;
+    internal int islandNext;
     internal int islandId;
 
     internal ContactFlags flags;

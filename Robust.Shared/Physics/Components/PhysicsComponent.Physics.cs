@@ -41,35 +41,35 @@ public sealed partial class PhysicsComponent : Component, IComponentDelta
     public GameTick LastFieldUpdate { get; set; }
     public GameTick[] LastModifiedFields { get; set; }
 
+    [ViewVariables]
+    internal int Id;
+
     /// <summary>
     /// Solver set of the body.
     /// </summary>
-    public int SetIndex;
+    [ViewVariables]
+    internal int SetIndex;
 
     /// <summary>
     /// Index of this body into its solver set.
     /// </summary>
-    public int LocalIndex;
+    [ViewVariables]
+    internal int LocalIndex;
 
-    /// <summary>
-    ///     Has this body been added to an island previously in this tick.
-    /// </summary>
-    [Access(typeof(SharedPhysicsSystem))]
-    public bool Island;
+    [ViewVariables]
+    internal int IslandId;
 
-    /// <summary>
-    ///     Store the body's index within the island so we can lookup its data.
-    ///     Key is Island's ID and value is our index.
-    /// </summary>
-    [Access(typeof(SharedPhysicsSystem))]
-    public Dictionary<int, int> IslandIndex = new();
+    [ViewVariables]
+    internal int headContactKey;
 
-    [ViewVariables] public int ContactCount => Contacts.Count;
+    [ViewVariables]
+    internal int islandNext;
 
-    /// <summary>
-    ///     Linked-list of all of our contacts.
-    /// </summary>
-    internal readonly LinkedList<Contact> Contacts = new();
+    [ViewVariables]
+    internal int islandPrev;
+
+    [ViewVariables]
+    public int ContactCount { get; internal set; }
 
     [DataField]
     public bool IgnorePaused;

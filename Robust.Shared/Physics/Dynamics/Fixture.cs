@@ -87,13 +87,6 @@ namespace Robust.Shared.Physics.Dynamics
         public EntityUid Owner;
 
         /// <summary>
-        /// All of the other fixtures this fixture has a contact with.
-        /// </summary>
-        [ViewVariables]
-        [NonSerialized]
-        public Dictionary<Fixture, Contact> Contacts = new();
-
-        /// <summary>
         /// Contact friction between 2 bodies. Not tile-friction for top-down.
         /// </summary>
         [ViewVariables(VVAccess.ReadWrite), DataField("friction"), Access(typeof(SharedPhysicsSystem), typeof(FixtureSystem), Friend = AccessPermissions.ReadWriteExecute, Other = AccessPermissions.Read)]

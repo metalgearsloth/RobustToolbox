@@ -12,7 +12,7 @@ internal record struct JointSim
     public int bodyIdA;
     public int bodyIdB;
 
-    public JointType type;
+    public b2JointType type;
 
     public Transform localFrameA;
     public Transform localFrameB;

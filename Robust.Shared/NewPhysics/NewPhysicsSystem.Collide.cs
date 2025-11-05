@@ -145,8 +145,8 @@ public sealed partial class NewPhysicsSystem
         public BitArray BodySet = new(64);
 
         // cache friendly arrays
-        public List<ContactSim> ContactSims = new();
-        public List<JointSim> JointSims = new();
+        public ValueList<ContactSim> ContactSims = new();
+        public ValueList<JointSim> JointSims = new();
 
         // transient
         // box2d uses a union for this but we don't have that luxury unless we start being unsafe with it.
@@ -179,7 +179,7 @@ public sealed partial class NewPhysicsSystem
         return ref setSim;
     }
 
-    private void Collide(ref StepContext context)
+    private void Collide()
     {
         // Task that can be done in parallel with the narrow-phase
 	    // - rebuild the collision tree for dynamic and kinematic bodies to keep their query performance good
@@ -412,16 +412,6 @@ public sealed partial class NewPhysicsSystem
 		    }
 
             // TODO: Pre-Solve callback
-            var preSolve = 0;
-
-		    // this call assumes thread safety
-		    touching = world.preSolveFcn( shapeIdA, shapeIdB, bestPoint, manifold.normal, world.preSolveContext);
-		    if ( touching == false )
-		    {
-			    // disable contact
-			    pointCount = 0;
-			    manifold.pointCount = 0;
-		    }
 	    }
 
 	    // This flag is for testing
@@ -529,8 +519,10 @@ public sealed partial class NewPhysicsSystem
 
 	    int bodyIdA = edgeA.bodyId;
 	    int bodyIdB = edgeB.bodyId;
-        var bodyA = _bodies[bodyIdA];
-        var bodyB = _bodies[bodyIdB];
+        var entA = _bodies[bodyIdA];
+        var entB = _bodies[bodyIdB];
+        var bodyA = _bodies[bodyIdA].Comp;
+        var bodyB = _bodies[bodyIdB].Comp;
 
 	    var flags = contact.flags;
 	    bool touching = (flags & ContactFlags.ContactTouchingFlag) != 0;
@@ -626,8 +618,8 @@ public sealed partial class NewPhysicsSystem
 
 	    if ( wakeBodies && touching )
 	    {
-		    WakeBody(bodyA);
-		    WakeBody(bodyB);
+		    WakeBody(entA);
+		    WakeBody(entB);
 	    }
     }
 
@@ -733,11 +725,13 @@ public sealed partial class NewPhysicsSystem
 	    var bodyIdA = contact.edges._00.bodyId;
 	    var bodyIdB = contact.edges._01.bodyId;
 
-        var bodyA = _bodies[bodyIdA];
-        var bodyB = _bodies[bodyIdB];
+        var entA = _bodies[bodyIdA];
+        var entB = _bodies[bodyIdB];
+        var bodyA = entA.Comp;
+        var bodyB = entB.Comp;
 
-	    var typeA = bodyA.Comp.BodyType;
-	    var typeB = bodyB.Comp.BodyType;
+	    var typeA = bodyA.BodyType;
+	    var typeB = bodyB.BodyType;
 	    DebugTools.Assert(typeA == BodyType.Dynamic || typeB == BodyType.Dynamic);
 
 	    if (typeA != BodyType.Static && typeB != BodyType.Static)
@@ -838,7 +832,7 @@ public sealed partial class NewPhysicsSystem
 	    }
 	    else
 	    {
-		    DebugTools.Assert(bodyB.SetIndex == SetType.AwakeSet);
+		    DebugTools.Assert(bodyB.SetIndex == (int) SetType.AwakeSet);
             var awakeSet = _solverSets[(int)SetType.AwakeSet];
             var awakeSims = CollectionsMarshal.AsSpan(awakeSet.bodySims);
 

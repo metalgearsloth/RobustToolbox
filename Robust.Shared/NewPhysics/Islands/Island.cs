@@ -15,11 +15,11 @@ namespace Robust.Shared.NewPhysics.Islands;
 internal sealed class Island
 {
     // index of solver set stored in b2World
-    // may be B2_NULL_INDEX
+    // may be PhysicsConstants.NullIndex
     public int SetIndex;
 
     // island index within set
-    // may be B2_NULL_INDEX
+    // may be PhysicsConstants.NullIndex
     public int LocalIndex;
 
     public int islandId;

@@ -30,7 +30,7 @@ public sealed partial class NewPhysicsSystem
         // massScale = hw^2 / (1 + hw^2)
         // impulseScale = 1 / (1 + hw^2)
 
-        // w -> inf
+        // w . inf
         // bias = 1/h
         // massScale = 1
         // impulseScale = 0

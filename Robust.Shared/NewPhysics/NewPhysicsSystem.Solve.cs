@@ -15,7 +15,7 @@ public sealed partial class NewPhysicsSystem
     /// <summary>
     /// Solve with graph coloring
     /// </summary>
-    private void Solve(ref StepContext context)
+    private void Solve()
     {
         // Are there any awake bodies? This scenario should not be important for profiling.
         var awakeSet = _solverSets[(int) SetType.AwakeSet];
@@ -32,14 +32,15 @@ public sealed partial class NewPhysicsSystem
         // Solve constraints using graph coloring
         {
             // Prepare buffers for bullets
-            context.BulletBodyCount = 0;
-            context.BulletBodies = new int[awakeBodyCount];
+            _bulletBodyCount = 0;
+            _bulletBodies.Clear();
+            _bulletBodies.EnsureCapacity(awakeBodyCount);
 
             var graph = _constraintGraph;
             var colors = graph.colors;
 
-            context.sims = awakeSet.bodySims;
-            context.states = awakeSet.bodyStates;
+            _sims = awakeSet.bodySims;
+            _states = awakeSet.bodyStates;
 
             // count contacts, joints, and colors
             int awakeJointCount = 0;
@@ -67,22 +68,7 @@ public sealed partial class NewPhysicsSystem
 
             int workerCount = _parallel.ParallelProcessCount;
 
-            // todo_erin 4 seems good but more benchmarking would be good
-            const int blocksPerWorker = 4;
-
             var maxBlockCount = blocksPerWorker * workerCount;
-            int simdWidth;
-
-            if (NumericsHelpers.Vector256Enabled)
-            {
-                simdWidth = 8;
-            }
-            else
-            {
-                simdWidth = 4;
-            }
-
-            var simdShift = (int) Math.Log2(simdWidth);
 
             // Configure blocks for tasks that parallel-for bodies
             int bodyBlockSize = 1 << 5;
@@ -127,7 +113,7 @@ public sealed partial class NewPhysicsSystem
                     activeColorIndices[c] = i;
 
                     // 4/8-way SIMD
-                    int colorContactCountSIMD = colorContactCount > 0 ? ((colorContactCount - 1) >> simdShift) + 1 : 0;
+                    int colorContactCountSIMD = colorContactCount > 0 ? ((colorContactCount - 1) >> _simdShift) + 1 : 0;
 
                     // 4/8-way SIMD
                     colorContactCounts[c] = colorContactCountSIMD;
@@ -184,10 +170,13 @@ public sealed partial class NewPhysicsSystem
             }
 
             activeColorCount = c;
-            var contacts = new ValueList<ContactSim>(simdWidth + simdContactCount);
+
+            _contextContacts.Clear();
+            _contextContacts.EnsureCapacity(_simdWidth + simdContactCount);
 
             // Gather joint pointers for easy parallel-for traversal.
-            var joints = new ValueList<JointSim>(awakeJointCount);
+            _contextJoints.Clear();
+            _contextJoints.EnsureCapacity(awakeJointCount);
 
             int overflowContactCount = colors[PhysicsConstants.OverflowIndex].ContactSims.Count;
             var overflowContactConstraints = graph.colors[PhysicsConstants.OverflowIndex].OverflowConstraints;
@@ -212,14 +201,15 @@ public sealed partial class NewPhysicsSystem
                     {
                         for (int k = 0; k < colorContactCount; ++k)
                         {
-                            contacts.Add(color.ContactSims[k]);
+                            // Box2D allocates into the array here but we already have the list and can just add so.
+                            _contextContacts.Add(color.ContactSims[k]);
                         }
 
                         // remainder
-                        int colorContactCountSIMD = ((colorContactCount - 1) >> simdShift) + 1;
-                        for (int k = colorContactCount; k < simdWidth * colorContactCountSIMD; ++k)
+                        int colorContactCountSIMD = ((colorContactCount - 1) >> _simdShift) + 1;
+                        for (int k = colorContactCount; k < _simdWidth * colorContactCountSIMD; ++k)
                         {
-                            contacts.Add(null!);
+                            _contextContacts.Add(null!);
                         }
 
                         contactBase += colorContactCountSIMD;
@@ -228,7 +218,7 @@ public sealed partial class NewPhysicsSystem
                     int colorJointCount = color.JointSims.Count;
                     for (int k = 0; k < colorJointCount; ++k)
                     {
-                        joints[jointBase + k] = color.JointSims[k];
+                        _contextJoints[jointBase + k] = color.JointSims[k];
                     }
 
                     jointBase += colorJointCount;
@@ -261,8 +251,6 @@ public sealed partial class NewPhysicsSystem
             }
 
             int stageCount = 0;
-            const int Iterations = 1;
-            const int RelaxIterations = 1;
 
             // b2_stagePrepareJoints
             stageCount += 1;
@@ -282,6 +270,18 @@ public sealed partial class NewPhysicsSystem
             stageCount += activeColorCount;
             // b2_stageStoreImpulses
             stageCount += 1;
+
+            _contextStages.Clear();
+            _contextBodyBlocks.Clear();
+            _contextContactBlocks.Clear();
+            _contextJointBlocks.Clear();
+            _contextGraphBlocks.Clear();
+
+            _contextStages.EnsureCapacity(stageCount);
+            _contextBodyBlocks.EnsureCapacity(bodyBlockCount);
+            _contextContactBlocks.EnsureCapacity(contactBlockCount);
+            _contextJointBlocks.EnsureCapacity(jointBlockCount);
+            _contextGraphBlocks.EnsureCapacity(graphBlockCount);
 
             var stages = new ValueList<SolverStage>(stageCount);
             var bodyBlocks = new ValueList<SolverBlock>(bodyBlockCount);
@@ -304,7 +304,7 @@ public sealed partial class NewPhysicsSystem
             // Prepare body work blocks
             for (int i = 0; i < bodyBlockCount; ++i)
             {
-                var block = bodyBlocks[i];
+                ref var block = ref bodyBlocks[i];
                 block.startIndex = i * bodyBlockSize;
                 block.count = (short) bodyBlockSize;
                 block.blockType = (short) b2SolverBlockType.b2_bodyBlock;
@@ -316,7 +316,7 @@ public sealed partial class NewPhysicsSystem
             // Prepare joint work blocks
             for (int i = 0; i < jointBlockCount; ++i)
             {
-                var block = jointBlocks[i];
+                ref var block = ref jointBlocks[i];
                 block.startIndex = i * jointBlockSize;
                 block.count = (short)jointBlockSize;
                 block.blockType = (short) b2SolverBlockType.b2_jointBlock;
@@ -332,7 +332,7 @@ public sealed partial class NewPhysicsSystem
             // Prepare contact work blocks
             for (int i = 0; i < contactBlockCount; ++i)
             {
-                var block = contactBlocks[i];
+                ref var block = ref contactBlocks[i];
                 block.startIndex = i * contactBlockSize;
                 block.count = (short)contactBlockSize;
                 block.blockType = (short) b2SolverBlockType.b2_contactBlock;
@@ -456,12 +456,12 @@ public sealed partial class NewPhysicsSystem
             {
                 for (int i = 0; i < activeColorCount; ++i)
                 {
-                    stage.type = SolverStageType.b2_stageRelax;
-                    stage.blocks = graphColorBlocks[i];
-                    stage.blockCount = colorJointBlockCounts[i] + colorContactBlockCounts[i];
-                    stage.colorIndex = activeColorIndices[i];
-                    b2AtomicStoreInt(&stage.completionCount, 0);
-                    stage += 1;
+                    ref var colorStage = ref stages[stageIdx++];
+                    colorStage.type = SolverStageType.b2_stageRelax;
+                    colorStage.blocks.Add(graphColorBlocks[i]);
+                    colorStage.blockCount = colorJointBlockCounts[i] + colorContactBlockCounts[i];
+                    colorStage.colorIndex = activeColorIndices[i];
+                    colorStage.completionCount = 0;
                 }
             }
 
@@ -469,39 +469,28 @@ public sealed partial class NewPhysicsSystem
             // Note: joint blocks mixed in, could have joint limit restitution
             for (int i = 0; i < activeColorCount; ++i)
             {
-                stage.type = SolverStageType.b2_stageRestitution;
-                stage.blocks = graphColorBlocks[i];
-                stage.blockCount = colorJointBlockCounts[i] + colorContactBlockCounts[i];
-                stage.colorIndex = activeColorIndices[i];
-                b2AtomicStoreInt(&stage.completionCount, 0);
-                stage += 1;
+                ref var colorStage = ref stages[stageIdx++];
+                colorStage.type = SolverStageType.b2_stageRestitution;
+                colorStage.blocks.Add(graphColorBlocks[i]);
+                colorStage.blockCount = colorJointBlockCounts[i] + colorContactBlockCounts[i];
+                colorStage.colorIndex = activeColorIndices[i];
+                colorStage.completionCount = 0;
             }
 
             // Store impulses
-            stage.type = SolverStageType.b2_stageStoreImpulses;
-            stage.blocks = contactBlocks;
-            stage.blockCount = contactBlockCount;
-            stage.colorIndex = -1;
-            b2AtomicStoreInt(&stage.completionCount, 0);
-            stage += 1;
+            ref var impulseStage = ref stages[stageIdx++];
+            impulseStage.type = SolverStageType.b2_stageStoreImpulses;
+            impulseStage.blocks = contactBlocks;
+            impulseStage.blockCount = contactBlockCount;
+            impulseStage.colorIndex = -1;
+            stage.completionCount = 0;
 
-            DebugTools.Assert(stageIdx - stages.Count == stageCount);
+            DebugTools.Assert(stageIdx == stageCount);
 
-            b2WorkerContext workerContext[B2_MAX_WORKERS];
+            _activeColorCount = activeColorCount;
+            _stageCount = stageCount;
 
-            context.graph = graph;
-            context.joints = joints;
-            context.contacts = contacts;
-            context.simdContactConstraints = simdContactConstraints;
-            context.activeColorCount = activeColorCount;
-            context.stageCount = stageCount;
-            context.stages = stages;
-            b2AtomicStoreU32(&stepContext.atomicSyncBits, 0);
-
-            // Must use worker index because thread 0 can be assigned multiple tasks by enkiTS
-            int jointIdCapacity = _jointIdPool.Capacity;
-
-            SolverTask(ref context);
+            SolverTask();
 
             // Finish island split
             _splitHandle.WaitOne();
@@ -510,21 +499,15 @@ public sealed partial class NewPhysicsSystem
 
             // Finish constraint solve
 
-            world.profile.solveConstraints = b2GetMillisecondsAndReset(&constraintTicks);
-            b2TracyCZoneEnd(solve_constraints);
-
-            b2TracyCZoneNC(update_transforms, "Update Transforms", b2_colorMediumSeaGreen, true);
-            uint64_t transformTicks = b2GetTicks();
-
             // Prepare contact, enlarged body, and island bit sets used in body finalization.
-            int awakeIslandCount = awakeSet.islandSims.count;
+            int awakeIslandCount = awakeSet.islandSims.Count;
             for (int i = 0; i < world.workerCount; ++i)
             {
                 b2TaskContext* taskContext = world.taskContexts.data + i;
                 b2SensorHitArray_Clear(&taskContext.sensorHits);
                 b2SetBitCountAndClear(&taskContext.enlargedSimBitSet, awakeBodyCount);
                 b2SetBitCountAndClear(&taskContext.awakeIslandBitSet, awakeIslandCount);
-                taskContext.splitIslandId = B2_NULL_INDEX;
+                taskContext.splitIslandId = PhysicsConstants.NullIndex;
                 taskContext.splitSleepTime = 0.0f;
             }
 
@@ -548,8 +531,7 @@ public sealed partial class NewPhysicsSystem
 
         // Report joint events
         {
-            b2TracyCZoneNC(joint_events, "Joint Events", b2_colorPeru, true);
-            uint64_t jointEventTicks = b2GetTicks();
+            // TODO: Put the jointstatebitset on the context and pass that in
 
             // Gather bits for all joints that have force/torque events
             b2BitSet* jointStateBitSet = &world.taskContexts.data[0].jointStateBitSet;
@@ -563,7 +545,6 @@ public sealed partial class NewPhysicsSystem
                 uint64_t* bits = jointStateBitSet.bits;
 
                 BaseJoint* jointArray = world.joints.data;
-                uint16_t worldIndex0 = world.worldId;
 
                 for (uint32_t k = 0; k < wordCount; ++k)
                 {
@@ -577,7 +558,7 @@ public sealed partial class NewPhysicsSystem
 
                         BaseJoint* joint = jointArray + jointId;
 
-                        DebugTools.Assert(joint.setIndex == b2_awakeSet);
+                        DebugTools.Assert(joint.setIndex == (int) SetType.AwakeSet);
 
                         b2JointEvent event = {
                             .jointId =
@@ -720,7 +701,7 @@ public sealed partial class NewPhysicsSystem
                         if ((bodySim.flags & (b2_isBullet | b2_isFast)) == (b2_isBullet | b2_isFast))
                         {
                             // Fast bullet bodies don't have their final AABB yet
-                            while (shapeId != B2_NULL_INDEX)
+                            while (shapeId != PhysicsConstants.NullIndex)
                             {
                                 b2Shape* shape = shapeArray + shapeId;
 
@@ -734,7 +715,7 @@ public sealed partial class NewPhysicsSystem
                         }
                         else
                         {
-                            while (shapeId != B2_NULL_INDEX)
+                            while (shapeId != PhysicsConstants.NullIndex)
                             {
                                 b2Shape* shape = shapeArray + shapeId;
 
@@ -813,7 +794,7 @@ public sealed partial class NewPhysicsSystem
                 b2Body* bulletBody = bodyArray + bodyId;
 
                 int shapeId = bulletBody.headShapeId;
-                while (shapeId != B2_NULL_INDEX)
+                while (shapeId != PhysicsConstants.NullIndex)
                 {
                     b2Shape* shape = shapeArray + shapeId;
                     if (shape.enlargedAABB == false)
@@ -890,12 +871,12 @@ public sealed partial class NewPhysicsSystem
             uint64_t sleepTicks = b2GetTicks();
 
             // Collect split island candidate for the next time step. No need to split if sleeping is disabled.
-            DebugTools.Assert(world.splitIslandId == B2_NULL_INDEX);
+            DebugTools.Assert(world.splitIslandId == PhysicsConstants.NullIndex);
             float splitSleepTimer = 0.0f;
             for (int i = 0; i < world.workerCount; ++i)
             {
                 b2TaskContext* taskContext = world.taskContexts.data + i;
-                if (taskContext.splitIslandId != B2_NULL_INDEX && taskContext.splitSleepTime >= splitSleepTimer)
+                if (taskContext.splitIslandId != PhysicsConstants.NullIndex && taskContext.splitSleepTime >= splitSleepTimer)
                 {
                     DebugTools.Assert(taskContext.splitSleepTime > 0.0f);
 
@@ -955,79 +936,79 @@ public sealed partial class NewPhysicsSystem
             b2TracyCZoneNC( finalize_transfprms, "Transforms", b2_colorMediumSeaGreen, true );
 
 	        b2StepContext* stepContext = context;
-	        b2World* world = stepContext->world;
+	        b2World* world = stepContext.world;
 
-	        B2_ASSERT( (int)threadIndex < world->workerCount );
+	        DebugTools.Assert( (int)threadIndex < world.workerCount );
 
-	        bool enableSleep = world->enableSleep;
-	        b2BodyState* states = stepContext->states;
-	        b2BodySim* sims = stepContext->sims;
-	        b2Body* bodies = world->bodies.data;
-	        float timeStep = stepContext->dt;
-	        float invTimeStep = stepContext->inv_dt;
+	        bool enableSleep = world.enableSleep;
+	        b2BodyState* states = stepContext.states;
+	        b2BodySim* sims = stepContext.sims;
+	        b2Body* bodies = world.bodies.data;
+	        float timeStep = stepContext.dt;
+	        float invTimeStep = stepContext.inv_dt;
 
-	        uint16_t worldId = world->worldId;
+	        uint16_t worldId = world.worldId;
 
 	        // The body move event array should already have the correct size
-	        B2_ASSERT( endIndex <= world->bodyMoveEvents.count );
-	        b2BodyMoveEvent* moveEvents = world->bodyMoveEvents.data;
+	        DebugTools.Assert( endIndex <= world.bodyMoveEvents.count );
+	        b2BodyMoveEvent* moveEvents = world.bodyMoveEvents.data;
 
-	        b2BitSet* enlargedSimBitSet = &world->taskContexts.data[threadIndex].enlargedSimBitSet;
-	        b2BitSet* awakeIslandBitSet = &world->taskContexts.data[threadIndex].awakeIslandBitSet;
-	        b2TaskContext* taskContext = world->taskContexts.data + threadIndex;
+	        b2BitSet* enlargedSimBitSet = &world.taskContexts.data[threadIndex].enlargedSimBitSet;
+	        b2BitSet* awakeIslandBitSet = &world.taskContexts.data[threadIndex].awakeIslandBitSet;
+	        b2TaskContext* taskContext = world.taskContexts.data + threadIndex;
 
-	        bool enableContinuous = world->enableContinuous;
+	        bool enableContinuous = world.enableContinuous;
 
 	        const float speculativeDistance = B2_SPECULATIVE_DISTANCE;
 	        const float aabbMargin = B2_AABB_MARGIN;
 
-	        B2_ASSERT( startIndex <= endIndex );
+	        DebugTools.Assert( startIndex <= endIndex );
 
             // TODO: Split from above into its own thing
 
 	        b2BodyState* state = states + simIndex;
 		    b2BodySim* sim = sims + simIndex;
 
-		    if ( state->flags & b2_lockLinearX )
+		    if ( state.flags & b2_lockLinearX )
 		    {
-			    state->linearVelocity.x = 0.0f;
+			    state.linearVelocity.x = 0.0f;
 		    }
 
-		    if ( state->flags & b2_lockLinearY )
+		    if ( state.flags & b2_lockLinearY )
 		    {
-			    state->linearVelocity.y = 0.0f;
+			    state.linearVelocity.y = 0.0f;
 		    }
 
-		    if ( state->flags & b2_lockAngularZ )
+		    if ( state.flags & b2_lockAngularZ )
 		    {
-			    state->angularVelocity = 0.0f;
+			    state.angularVelocity = 0.0f;
 		    }
 
-		    b2Vec2 v = state->linearVelocity;
-		    float w = state->angularVelocity;
+		    b2Vec2 v = state.linearVelocity;
+		    float w = state.angularVelocity;
 
-		    B2_ASSERT( b2IsValidVec2( v ) );
-		    B2_ASSERT( b2IsValidFloat( w ) );
+		    DebugTools.Assert( b2IsValidVec2( v ) );
+		    DebugTools.Assert( b2IsValidFloat( w ) );
 
-		    sim->center = b2Add( sim->center, state->deltaPosition );
-		    sim->transform.q = b2NormalizeRot( b2MulRot( state->deltaRotation, sim->transform.q ) );
+		    sim.center = b2Add( sim.center, state.deltaPosition );
+		    sim.transform.q = b2NormalizeRot( b2MulRot( state.deltaRotation, sim.transform.q ) );
 
 		    // Use the velocity of the farthest point on the body to account for rotation.
-		    float maxVelocity = b2Length( v ) + b2AbsFloat( w ) * sim->maxExtent;
+		    float maxVelocity = b2Length( v ) + b2AbsFloat( w ) * sim.maxExtent;
 
 		    // Sleep needs to observe position correction as well as true velocity.
-		    float maxDeltaPosition = b2Length( state->deltaPosition ) + b2AbsFloat( state->deltaRotation.s ) * sim->maxExtent;
+		    float maxDeltaPosition = b2Length( state.deltaPosition ) + b2AbsFloat( state.deltaRotation.s ) * sim.maxExtent;
 
 		    // Position correction is not as important for sleep as true velocity.
 		    float positionSleepFactor = 0.5f;
 
-		    float sleepVelocity = b2MaxFloat( maxVelocity, positionSleepFactor * invTimeStep * maxDeltaPosition );
+		    float sleepVelocity = MathF.Max( maxVelocity, positionSleepFactor * invTimeStep * maxDeltaPosition );
 
 		    // reset state deltas
-		    state->deltaPosition = b2Vec2_zero;
-		    state->deltaRotation = b2Rot_identity;
+		    state.deltaPosition = Vector2.Zero;
+		    state.deltaRotation = b2Rot_identity;
 
-		    sim->transform.p = b2Sub( sim->center, b2RotateVector( sim->transform.q, sim->localCenter ) );
+		    sim.transform.p = b2Sub( sim.center, Quaternion2D.RotateVector( sim->transform.q, sim->localCenter ) );
 
 		    // cache miss here, however I need the shape list below
 		    b2Body* body = bodies + sim->bodyId;
@@ -1038,7 +1019,7 @@ public sealed partial class NewPhysicsSystem
 		    moveEvents[simIndex].fellAsleep = false;
 
 		    // reset applied force and torque
-		    sim->force = b2Vec2_zero;
+		    sim->force = Vector2.Zero;
 		    sim->torque = 0.0f;
 
 		    body->flags &= ~( b2_isFast | b2_isSpeedCapped | b2_hadTimeOfImpact );
@@ -1105,7 +1086,7 @@ public sealed partial class NewPhysicsSystem
 		    b2Transform transform = sim->transform;
 		    bool isFast = ( sim->flags & b2_isFast ) != 0;
 		    int shapeId = body->headShapeId;
-		    while ( shapeId != B2_NULL_INDEX )
+		    while ( shapeId != PhysicsConstants.NullIndex )
 		    {
 			    b2Shape* shape = b2ShapeArray_Get( &world->shapes, shapeId );
 
@@ -1127,7 +1108,7 @@ public sealed partial class NewPhysicsSystem
 				    aabb.upperBound.y += speculativeDistance;
 				    shape->aabb = aabb;
 
-				    B2_ASSERT( shape->enlargedAABB == false );
+				    DebugTools.Assert( shape->enlargedAABB == false );
 
 				    if ( b2AABB_Contains( shape->fatAABB, aabb ) == false )
 				    {

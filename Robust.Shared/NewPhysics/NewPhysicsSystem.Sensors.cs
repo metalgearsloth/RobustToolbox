@@ -13,32 +13,32 @@ public sealed partial class NewPhysicsSystem
 
 	    b2TracyCZoneNC( overlap_sensors, "Sensors", b2_colorMediumPurple, true );
 
-	    for ( int i = 0; i < world->workerCount; ++i )
+	    for ( int i = 0; i < world.workerCount; ++i )
 	    {
-		    b2SetBitCountAndClear( &world->sensorTaskContexts.data[i].eventBits, sensorCount );
+		    b2SetBitCountAndClear( &world.sensorTaskContexts.data[i].eventBits, sensorCount );
 	    }
 
 	    // Parallel-for sensors overlaps
 	    int minRange = 16;
-	    void* userSensorTask = world->enqueueTaskFcn( &b2SensorTask, sensorCount, minRange, world, world->userTaskContext );
-	    world->taskCount += 1;
+	    void* userSensorTask = world.enqueueTaskFcn( &b2SensorTask, sensorCount, minRange, world, world.userTaskContext );
+	    world.taskCount += 1;
 	    if ( userSensorTask != NULL )
 	    {
-		    world->finishTaskFcn( userSensorTask, world->userTaskContext );
+		    world.finishTaskFcn( userSensorTask, world.userTaskContext );
 	    }
 
 	    b2TracyCZoneNC( sensor_state, "Events", b2_colorLightSlateGray, true );
 
-	    b2BitSet* bitSet = &world->sensorTaskContexts.data[0].eventBits;
-	    for ( int i = 1; i < world->workerCount; ++i )
+	    b2BitSet* bitSet = &world.sensorTaskContexts.data[0].eventBits;
+	    for ( int i = 1; i < world.workerCount; ++i )
 	    {
-		    b2InPlaceUnion( bitSet, &world->sensorTaskContexts.data[i].eventBits );
+		    b2InPlaceUnion( bitSet, &world.sensorTaskContexts.data[i].eventBits );
 	    }
 
 	    // Iterate sensors bits and publish events
 	    // Process sensor state changes. Iterate over set bits
-	    uint64_t* bits = bitSet->bits;
-	    uint32_t blockCount = bitSet->blockCount;
+	    uint64_t* bits = bitSet.bits;
+	    uint32_t blockCount = bitSet.blockCount;
 
 	    for ( uint32_t k = 0; k < blockCount; ++k )
 	    {
@@ -48,14 +48,14 @@ public sealed partial class NewPhysicsSystem
 			    uint32_t ctz = b2CTZ64( word );
 			    int sensorIndex = (int)( 64 * k + ctz );
 
-			    b2Sensor* sensor = b2SensorArray_Get( &world->sensors, sensorIndex );
-			    b2Shape* sensorShape = b2ShapeArray_Get( &world->shapes, sensor->shapeId );
-			    b2ShapeId sensorId = { sensor->shapeId + 1, world->worldId, sensorShape->generation };
+			    b2Sensor* sensor = b2SensorArray_Get( &world.sensors, sensorIndex );
+			    b2Shape* sensorShape = b2ShapeArray_Get( &world.shapes, sensor.shapeId );
+			    b2ShapeId sensorId = { sensor.shapeId + 1, world.worldId, sensorShape.generation };
 
-			    int count1 = sensor->overlaps1.count;
-			    int count2 = sensor->overlaps2.count;
-			    const b2Visitor* refs1 = sensor->overlaps1.data;
-			    const b2Visitor* refs2 = sensor->overlaps2.data;
+			    int count1 = sensor.overlaps1.count;
+			    int count2 = sensor.overlaps2.count;
+			    const b2Visitor* refs1 = sensor.overlaps1.data;
+			    const b2Visitor* refs2 = sensor.overlaps2.data;
 
 			    // overlaps1 can have overlaps that end
 			    // overlaps2 can have overlaps that begin
@@ -64,25 +64,25 @@ public sealed partial class NewPhysicsSystem
 			    {
 				    const b2Visitor* r1 = refs1 + index1;
 				    const b2Visitor* r2 = refs2 + index2;
-				    if ( r1->shapeId == r2->shapeId )
+				    if ( r1.shapeId == r2.shapeId )
 				    {
-					    if ( r1->generation < r2->generation )
+					    if ( r1.generation < r2.generation )
 					    {
 						    // end
-						    b2ShapeId visitorId = { r1->shapeId + 1, world->worldId, r1->generation };
+						    b2ShapeId visitorId = { r1.shapeId + 1, world.worldId, r1.generation };
 						    b2SensorEndTouchEvent event = {
 							    .sensorShapeId = sensorId,
 							    .visitorShapeId = visitorId,
 						    };
-						    b2SensorEndTouchEventArray_Push( &world->sensorEndEvents[world->endEventArrayIndex], event );
+						    b2SensorEndTouchEventArray_Push( &world.sensorEndEvents[world.endEventArrayIndex], event );
 						    index1 += 1;
 					    }
-					    else if ( r1->generation > r2->generation )
+					    else if ( r1.generation > r2.generation )
 					    {
 						    // begin
-						    b2ShapeId visitorId = { r2->shapeId + 1, world->worldId, r2->generation };
+						    b2ShapeId visitorId = { r2.shapeId + 1, world.worldId, r2.generation };
 						    b2SensorBeginTouchEvent event = { sensorId, visitorId };
-						    b2SensorBeginTouchEventArray_Push( &world->sensorBeginEvents, event );
+						    b2SensorBeginTouchEventArray_Push( &world.sensorBeginEvents, event );
 						    index2 += 1;
 					    }
 					    else
@@ -92,20 +92,20 @@ public sealed partial class NewPhysicsSystem
 						    index2 += 1;
 					    }
 				    }
-				    else if ( r1->shapeId < r2->shapeId )
+				    else if ( r1.shapeId < r2.shapeId )
 				    {
 					    // end
-					    b2ShapeId visitorId = { r1->shapeId + 1, world->worldId, r1->generation };
+					    b2ShapeId visitorId = { r1.shapeId + 1, world.worldId, r1.generation };
 					    b2SensorEndTouchEvent event = { sensorId, visitorId };
-					    b2SensorEndTouchEventArray_Push( &world->sensorEndEvents[world->endEventArrayIndex], event );
+					    b2SensorEndTouchEventArray_Push( &world.sensorEndEvents[world.endEventArrayIndex], event );
 					    index1 += 1;
 				    }
 				    else
 				    {
 					    // begin
-					    b2ShapeId visitorId = { r2->shapeId + 1, world->worldId, r2->generation };
+					    b2ShapeId visitorId = { r2.shapeId + 1, world.worldId, r2.generation };
 					    b2SensorBeginTouchEvent event = { sensorId, visitorId };
-					    b2SensorBeginTouchEventArray_Push( &world->sensorBeginEvents, event );
+					    b2SensorBeginTouchEventArray_Push( &world.sensorBeginEvents, event );
 					    index2 += 1;
 				    }
 			    }
@@ -114,7 +114,7 @@ public sealed partial class NewPhysicsSystem
 			    {
 				    // end
 				    const b2Visitor* r1 = refs1 + index1;
-				    b2ShapeId visitorId = { r1->shapeId + 1, world->worldId, r1->generation };
+				    b2ShapeId visitorId = { r1.shapeId + 1, world->worldId, r1->generation };
 				    b2SensorEndTouchEvent event = { sensorId, visitorId };
 				    b2SensorEndTouchEventArray_Push( &world->sensorEndEvents[world->endEventArrayIndex], event );
 				    index1 += 1;

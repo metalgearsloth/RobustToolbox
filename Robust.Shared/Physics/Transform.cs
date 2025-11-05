@@ -256,6 +256,17 @@ namespace Robust.Shared.Physics
         }
 
         [Pure]
+        public static Quaternion2D operator *(Quaternion2D rotA, Quaternion2D rotB)
+        {
+            // [qc -qs] * [rc -rs] = [qc*rc-qs*rs -qc*rs-qs*rc]
+            // [qs  qc]   [rs  rc]   [qs*rc+qc*rs -qs*rs+qc*rc]
+            // s(q + r) = qs * rc + qc * rs
+            // c(q + r) = qc * rc - qs * rs
+            var qr = new Quaternion2D(rotA.C * rotB.C - rotA.S * rotB.S, rotA.S * rotB.C + rotA.C * rotB.S);
+            return qr;
+        }
+
+        [Pure]
         public static Quaternion2D InvMulRot(Quaternion2D q, Quaternion2D r)
         {
             // [ qc qs] * [rc -rs] = [qc*rc+qs*rs -qc*rs+qs*rc]

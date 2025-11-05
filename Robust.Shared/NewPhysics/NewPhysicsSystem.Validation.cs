@@ -238,7 +238,7 @@ public sealed partial class NewPhysicsSystem
 				    {
 					    b2ContactSim* contactSim = set.contactSims.data + i;
 					    b2Contact* contact = b2ContactArray_Get( &world.contacts, contactSim.contactId );
-					    if ( setIndex == b2_awakeSet )
+					    if ( setIndex == (int) SetType.AwakeSet )
 					    {
 						    // contact should be non-touching if awake
 						    // or it could be this contact hasn't been transferred yet
@@ -312,7 +312,7 @@ public sealed partial class NewPhysicsSystem
 			    // contact should be touching in the constraint graph or awaiting transfer to non-touching
 			    DebugTools.Assert( contactSim.manifold.pointCount > 0 ||
 					       ( contactSim.simFlags & ( b2_simStoppedTouching | b2_simDisjoint ) ) != 0 );
-			    DebugTools.Assert( contact.setIndex == b2_awakeSet );
+			    DebugTools.Assert( contact.setIndex == (int) SetType.AwakeSet );
 			    DebugTools.Assert( contact.colorIndex == colorIndex );
 			    DebugTools.Assert( contact.localIndex == i );
 
@@ -337,14 +337,14 @@ public sealed partial class NewPhysicsSystem
 		    {
 			    b2JointSim* jointSim = color.jointSims.data + i;
 			    BaseJoint* joint = b2JointArray_Get( &world.joints, jointSim.jointId );
-			    DebugTools.Assert( joint.setIndex == b2_awakeSet );
+			    DebugTools.Assert( joint.setIndex == (int) SetType.AwakeSet );
 			    DebugTools.Assert( joint.colorIndex == colorIndex );
 			    DebugTools.Assert( joint.localIndex == i );
 
 			    int bodyIdA = joint.edges[0].bodyId;
 			    int bodyIdB = joint.edges[1].bodyId;
 
-			    if ( colorIndex < B2_OVERFLOW_INDEX )
+			    if ( colorIndex < PhysicsConstants.OverflowIndex )
 			    {
 				    b2Body* bodyA = b2BodyArray_Get( &world.bodies, bodyIdA );
 				    b2Body* bodyB = b2BodyArray_Get( &world.bodies, bodyIdB );

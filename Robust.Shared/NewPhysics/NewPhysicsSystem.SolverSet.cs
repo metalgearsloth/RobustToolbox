@@ -17,94 +17,94 @@ public sealed partial class NewPhysicsSystem
 	    var awakeSet = _solverSets[(int) SetType.AwakeSet];
 	    var disabledSet = _solverSets[(int) SetType.DisabledSet];
 
-	    var bodies = world->bodies.data;
+	    var bodies = world.bodies.data;
 
 	    int bodyCount = set.bodySims.Count;
 
 	    for ( int i = 0; i < bodyCount; ++i )
 	    {
-		    b2BodySim* simSrc = set->bodySims.data + i;
+		    b2BodySim* simSrc = set.bodySims.data + i;
 
-		    b2Body* body = bodies + simSrc->bodyId;
-		    DebugTools.Assert( body->setIndex == setIndex );
-		    body->setIndex = b2_awakeSet;
-		    body->localIndex = awakeSet->bodySims.count;
+		    b2Body* body = bodies + simSrc.bodyId;
+		    DebugTools.Assert( body.setIndex == setIndex );
+		    body.setIndex = (int) SetType.AwakeSet;
+		    body.localIndex = awakeSet.bodySims.count;
 
 		    // Reset sleep timer
-		    body->sleepTime = 0.0f;
+		    body.sleepTime = 0.0f;
 
-		    b2BodySim* simDst = b2BodySimArray_Add( &awakeSet->bodySims );
+		    b2BodySim* simDst = b2BodySimArray_Add( &awakeSet.bodySims );
 		    memcpy( simDst, simSrc, sizeof( b2BodySim ) );
 
-		    b2BodyState* state = b2BodyStateArray_Add( &awakeSet->bodyStates );
-		    *state = b2_identityBodyState;
-		    state->flags = body->flags;
+		    b2BodyState* state = b2BodyStateArray_Add( &awakeSet.bodyStates );
+		    *state = bodyState.Identity;
+		    state.flags = body.flags;
 
 		    // move non-touching contacts from disabled set to awake set
-		    int contactKey = body->headContactKey;
-		    while ( contactKey != B2_NULL_INDEX )
+		    int contactKey = body.headContactKey;
+		    while ( contactKey != PhysicsConstants.NullIndex )
 		    {
 			    int edgeIndex = contactKey & 1;
 			    int contactId = contactKey >> 1;
 
-			    b2Contact* contact = b2ContactArray_Get( &world->contacts, contactId );
+			    b2Contact* contact = b2ContactArray_Get( &world.contacts, contactId );
 
-			    contactKey = contact->edges[edgeIndex].nextKey;
+			    contactKey = contact.edges[edgeIndex].nextKey;
 
-			    if ( contact->setIndex != b2_disabledSet )
+			    if ( contact.setIndex != b2_disabledSet )
 			    {
-				    DebugTools.Assert( contact->setIndex == b2_awakeSet || contact->setIndex == setIndex );
+				    DebugTools.Assert( contact.setIndex == (int) SetType.AwakeSet || contact.setIndex == setIndex );
 				    continue;
 			    }
 
-			    int localIndex = contact->localIndex;
-			    b2ContactSim* contactSim = b2ContactSimArray_Get( &disabledSet->contactSims, localIndex );
+			    int localIndex = contact.localIndex;
+			    b2ContactSim* contactSim = b2ContactSimArray_Get( &disabledSet.contactSims, localIndex );
 
-			    DebugTools.Assert( ( contact->flags & b2_contactTouchingFlag ) == 0 && contactSim->manifold.pointCount == 0 );
+			    DebugTools.Assert( ( contact.flags & b2_contactTouchingFlag ) == 0 && contactSim.manifold.pointCount == 0 );
 
-			    contact->setIndex = b2_awakeSet;
-			    contact->localIndex = awakeSet->contactSims.count;
-			    b2ContactSim* awakeContactSim = b2ContactSimArray_Add( &awakeSet->contactSims );
+			    contact.setIndex = (int) SetType.AwakeSet;
+			    contact.localIndex = awakeSet.contactSims.count;
+			    b2ContactSim* awakeContactSim = b2ContactSimArray_Add( &awakeSet.contactSims );
 			    memcpy( awakeContactSim, contactSim, sizeof( b2ContactSim ) );
 
-			    int movedLocalIndex = b2ContactSimArray_RemoveSwap( &disabledSet->contactSims, localIndex );
-			    if ( movedLocalIndex != B2_NULL_INDEX )
+			    int movedLocalIndex = b2ContactSimArray_RemoveSwap( &disabledSet.contactSims, localIndex );
+			    if ( movedLocalIndex != PhysicsConstants.NullIndex )
 			    {
 				    // fix moved element
-				    b2ContactSim* movedContactSim = disabledSet->contactSims.data + localIndex;
-				    b2Contact* movedContact = b2ContactArray_Get( &world->contacts, movedContactSim->contactId );
-				    DebugTools.Assert( movedContact->localIndex == movedLocalIndex );
-				    movedContact->localIndex = localIndex;
+				    b2ContactSim* movedContactSim = disabledSet.contactSims.data + localIndex;
+				    b2Contact* movedContact = b2ContactArray_Get( &world.contacts, movedContactSim.contactId );
+				    DebugTools.Assert( movedContact.localIndex == movedLocalIndex );
+				    movedContact.localIndex = localIndex;
 			    }
 		    }
 	    }
 
 	    // transfer touching contacts from sleeping set to contact graph
 	    {
-		    int contactCount = set->contactSims.count;
+		    int contactCount = set.contactSims.count;
 		    for ( int i = 0; i < contactCount; ++i )
 		    {
-			    b2ContactSim* contactSim = set->contactSims.data + i;
-			    b2Contact* contact = b2ContactArray_Get( &world->contacts, contactSim->contactId );
-			    DebugTools.Assert( contact->flags & b2_contactTouchingFlag );
-			    DebugTools.Assert( contactSim->simFlags & b2_simTouchingFlag );
-			    DebugTools.Assert( contactSim->manifold.pointCount > 0 );
-			    DebugTools.Assert( contact->setIndex == setIndex );
+			    b2ContactSim* contactSim = set.contactSims.data + i;
+			    b2Contact* contact = b2ContactArray_Get( &world.contacts, contactSim.contactId );
+			    DebugTools.Assert( contact.flags & b2_contactTouchingFlag );
+			    DebugTools.Assert( contactSim.simFlags & b2_simTouchingFlag );
+			    DebugTools.Assert( contactSim.manifold.pointCount > 0 );
+			    DebugTools.Assert( contact.setIndex == setIndex );
 			    b2AddContactToGraph( world, contactSim, contact );
-			    contact->setIndex = b2_awakeSet;
+			    contact.setIndex = (int) SetType.AwakeSet;
 		    }
 	    }
 
 	    // transfer joints from sleeping set to awake set
 	    {
-		    int jointCount = set->jointSims.count;
+		    int jointCount = set.jointSims.count;
 		    for ( int i = 0; i < jointCount; ++i )
 		    {
-			    b2JointSim* jointSim = set->jointSims.data + i;
-			    b2Joint* joint = b2JointArray_Get( &world->joints, jointSim->jointId );
-			    DebugTools.Assert( joint->setIndex == setIndex );
+			    b2JointSim* jointSim = set.jointSims.data + i;
+			    b2Joint* joint = b2JointArray_Get( &world.joints, jointSim.jointId );
+			    DebugTools.Assert( joint.setIndex == setIndex );
 			    b2AddJointToGraph( world, jointSim, joint );
-			    joint->setIndex = b2_awakeSet;
+			    joint.setIndex = (int) SetType.AwakeSet;
 		    }
 	    }
 
@@ -113,12 +113,12 @@ public sealed partial class NewPhysicsSystem
 	    // that joints are created between sleeping islands and they
 	    // are moved to the same sleeping set.
 	    {
-		    int islandCount = set->islandSims.count;
+		    int islandCount = set.islandSims.count;
 		    for ( int i = 0; i < islandCount; ++i )
 		    {
-			    b2IslandSim* islandSrc = set->islandSims.data + i;
-			    b2Island* island = b2IslandArray_Get( &world->islands, islandSrc->islandId );
-			    island->setIndex = b2_awakeSet;
+			    b2IslandSim* islandSrc = set.islandSims.data + i;
+			    b2Island* island = b2IslandArray_Get( &world.islands, islandSrc.islandId );
+			    island->setIndex = (int) SetType.AwakeSet;
 			    island->localIndex = awakeSet->islandSims.count;
 			    b2IslandSim* islandDst = b2IslandSimArray_Add( &awakeSet->islandSims );
 			    memcpy( islandDst, islandSrc, sizeof( b2IslandSim ) );
