@@ -7,7 +7,7 @@ namespace Robust.Shared.NewPhysics.Joints;
 /// nodes, one for each attached body.
 internal record struct b2JointEdge
 {
-    int bodyId;
-    int prevKey;
-    int nextKey;
+    public  int bodyId;
+    public int prevKey;
+    public int nextKey;
 }

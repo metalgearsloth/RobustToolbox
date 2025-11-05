@@ -814,7 +814,7 @@ public sealed partial class NewPhysicsSystem
 	    {
 		    DebugTools.Assert(bodyA.SetIndex == (int) SetType.AwakeSet);
             var awakeSet = _solverSets[(int)SetType.AwakeSet];
-            var awakeSims = CollectionsMarshal.AsSpan(awakeSet.bodySims);
+            ref var awakeSims = ref awakeSet.bodySims;
 
 		    int localIndex = bodyA.LocalIndex;
 		    newContact.bodySimIndexA = localIndex;
@@ -834,7 +834,7 @@ public sealed partial class NewPhysicsSystem
 	    {
 		    DebugTools.Assert(bodyB.SetIndex == (int) SetType.AwakeSet);
             var awakeSet = _solverSets[(int)SetType.AwakeSet];
-            var awakeSims = CollectionsMarshal.AsSpan(awakeSet.bodySims);
+            ref var awakeSims = ref awakeSet.bodySims;
 
 		    int localIndex = bodyB.LocalIndex;
 		    newContact.bodySimIndexB = localIndex;
@@ -865,7 +865,7 @@ public sealed partial class NewPhysicsSystem
         if (movedIndex <= 0)
             return;
 
-        var sims = CollectionsMarshal.AsSpan(color.ContactSims);
+        var sims = color.ContactSims;
 
         // Fix index on swapped contact
         ref var movedContactSim = ref sims[localIndex];

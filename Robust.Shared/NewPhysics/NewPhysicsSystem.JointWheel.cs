@@ -101,7 +101,7 @@ public sealed partial class NewPhysicsSystem
 	    }
     }
 
-    void b2WarmStartWheelJoint( b2JointSim* base, b2StepContext* context )
+    void WarmStartWheelJoint( b2JointSim* base, b2StepContext* context )
     {
 	    DebugTools.Assert( base->type == b2_wheelJoint );
 
@@ -150,7 +150,7 @@ public sealed partial class NewPhysicsSystem
 	    }
     }
 
-    void b2SolveWheelJoint( b2JointSim* base, b2StepContext* context, bool useBias )
+    void SolveWheelJoint( b2JointSim* base, b2StepContext* context, bool useBias )
     {
 	    DebugTools.Assert( base->type == b2_wheelJoint );
 

@@ -240,6 +240,7 @@ namespace Robust.Shared.Maths
         /// <summary>
         ///     Calculates the congruent positive angle of a negative angle. Does nothing to a positive angle.
         /// </summary>
+        [Pure]
         private static double FlipPositive(double theta)
         {
             if (theta >= 0)
@@ -252,6 +253,7 @@ namespace Robust.Shared.Maths
         ///     Similar to Lerp but, but defaults to making sure that lerping from 1 to 359 degrees doesn't wrap around
         ///     the whole circle.
         /// </summary>
+        [Pure]
         public static Angle Lerp(in Angle a, in Angle b, float factor)
         {
             return a + ShortestDistance(a, b) * factor;
@@ -260,16 +262,32 @@ namespace Robust.Shared.Maths
         /// <summary>
         ///     Returns the shortest distance between two angles.
         /// </summary>
+        [Pure]
         public static Angle ShortestDistance(in Angle a, in Angle b)
         {
             var delta = (b - a) % Math.Tau;
             return 2 * delta % Math.Tau - delta;
         }
 
+        /// Convert any angle into the range [-pi, pi]
+        [Pure]
+        public float UnwindAngle(float radians)
+        {
+            return (float) (radians / Math.Tau);
+        }
+
+        /// Convert any angle into the range [-pi, pi]
+        [Pure]
+        public double UnwindAngle(double radians)
+        {
+            return radians / Math.Tau;
+        }
+
         /// <summary>
         ///     Constructs a new angle, from degrees instead of radians.
         /// </summary>
         /// <param name="degrees">The angle in degrees.</param>
+        [Pure]
         public static Angle FromDegrees(double degrees)
         {
             // Avoid rounding issues with common use cases.

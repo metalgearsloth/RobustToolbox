@@ -22,26 +22,26 @@ public sealed partial class NewPhysicsSystem
                 break;
 
             case b2JointType.b2_motorJoint:
-                PrepareMotorJoint(joint);
+                PrepareMotorJoint(ref joint);
                 break;
 
             case b2JointType.b2_filterJoint:
                 break;
 
             case b2JointType.b2_prismaticJoint:
-                PreparePrismaticJoint(joint);
+                PreparePrismaticJoint(ref joint);
                 break;
 
             case b2JointType.b2_revoluteJoint:
-                PrepareRevoluteJoint(joint);
+                PrepareRevoluteJoint(ref joint);
                 break;
 
             case b2JointType.b2_weldJoint:
-                PrepareWeldJoint(joint);
+                PrepareWeldJoint(ref joint);
                 break;
 
             case b2JointType.b2_wheelJoint:
-                PrepareWheelJoint(joint);
+                PrepareWheelJoint(ref joint);
                 break;
 
             default:
@@ -55,30 +55,30 @@ public sealed partial class NewPhysicsSystem
         switch (joint.type)
         {
             case b2JointType.b2_distanceJoint:
-                WarmStartDistanceJoint(joint);
+                WarmStartDistanceJoint(ref joint);
                 break;
 
             case b2JointType.b2_motorJoint:
-                b2WarmStartMotorJoint(joint);
+                WarmStartMotorJoint(ref joint);
                 break;
 
             case b2JointType.b2_filterJoint:
                 break;
 
             case b2JointType.b2_prismaticJoint:
-                b2WarmStartPrismaticJoint( joint, context );
+                WarmStartPrismaticJoint(ref joint);
                 break;
 
             case b2JointType.b2_revoluteJoint:
-                WarmStartRevoluteJoint( joint, context );
+                WarmStartRevoluteJoint(ref joint);
                 break;
 
             case b2JointType.b2_weldJoint:
-                b2WarmStartWeldJoint( joint, context );
+                WarmStartWeldJoint(ref joint);
                 break;
 
             case b2JointType.b2_wheelJoint:
-                b2WarmStartWheelJoint( joint, context );
+                WarmStartWheelJoint(ref joint);
                 break;
 
             default:
@@ -87,39 +87,40 @@ public sealed partial class NewPhysicsSystem
         }
     }
 
-    private void b2SolveJoint( b2JointSim* joint, bool useBias )
+    private void SolveJoint(ref JointSim joint, bool useBias )
     {
-        switch ( joint.type )
+        switch (joint.type)
         {
-            case b2_distanceJoint:
-                b2SolveDistanceJoint( joint, context, useBias );
+            case b2JointType.b2_distanceJoint:
+                SolveDistanceJoint(ref joint, useBias);
                 break;
 
-            case b2_motorJoint:
-                b2SolveMotorJoint( joint, context );
+            case b2JointType.b2_motorJoint:
+                SolveMotorJoint(ref joint);
                 break;
 
-            case b2_filterJoint:
+            case b2JointType.b2_filterJoint:
                 break;
 
-            case b2_prismaticJoint:
-                b2SolvePrismaticJoint( joint, context, useBias );
+            case b2JointType.b2_prismaticJoint:
+                SolvePrismaticJoint(ref joint, useBias);
                 break;
 
-            case b2_revoluteJoint:
-                b2SolveRevoluteJoint( joint, context, useBias );
+            case b2JointType.b2_revoluteJoint:
+                SolveRevoluteJoint(ref joint, useBias);
                 break;
 
-            case b2_weldJoint:
-                b2SolveWeldJoint( joint, context, useBias );
+            case b2JointType.b2_weldJoint:
+                SolveWeldJoint(ref joint, useBias);
                 break;
 
-            case b2_wheelJoint:
-                b2SolveWheelJoint( joint, context, useBias );
+            case b2JointType.b2_wheelJoint:
+                SolveWheelJoint(ref joint, useBias);
                 break;
 
             default:
                 DebugTools.Assert( false );
+                break;
         }
     }
 
@@ -169,7 +170,7 @@ public sealed partial class NewPhysicsSystem
         for ( int i = startIndex; i < endIndex; ++i )
         {
             b2JointSim* joint = joints + i;
-            b2SolveJoint( joint, context, useBias );
+            SolveJoint( joint, context, useBias );
 
             if ( useBias && ( joint.forceThreshold < FLT_MAX || joint.torqueThreshold < FLT_MAX ) &&
                  b2GetBit( jointStateBitSet, joint.jointId ) == false )
@@ -230,7 +231,7 @@ public sealed partial class NewPhysicsSystem
 	    for ( int i = 0; i < jointCount; ++i )
 	    {
 		    b2JointSim* joint = joints + i;
-		    b2SolveJoint( joint, context, useBias );
+		    SolveJoint( joint, context, useBias );
 	    }
 
 	    b2TracyCZoneEnd( solve_joints );

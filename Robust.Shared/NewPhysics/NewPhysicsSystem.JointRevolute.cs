@@ -1,6 +1,7 @@
 using System;
 using System.Numerics;
 using Robust.Shared.Maths;
+using Robust.Shared.NewPhysics.Bodies;
 using Robust.Shared.NewPhysics.Joints;
 using Robust.Shared.Physics;
 using Robust.Shared.Utility;
@@ -50,20 +51,20 @@ public sealed partial class NewPhysicsSystem
 	    // b2Vec2 pf = (xf.p - c) + rot(xf.q, f.p)
 	    // pf = xf.p - (xf.p + rot(xf.q, lc)) + rot(xf.q, f.p)
 	    // pf = rot(xf.q, f.p - lc)
-	    joint.frameA.q = b2MulRot( bodySimA.transform.q, sim.localFrameA.q );
-	    joint.frameA.p = Quaternion2D.RotateVector( bodySimA.transform.q, b2Sub( sim.localFrameA.p, bodySimA.localCenter ) );
-	    joint.frameB.q = b2MulRot( bodySimB.transform.q, sim.localFrameB.q );
-	    joint.frameB.p = Quaternion2D.RotateVector( bodySimB.transform.q, b2Sub( sim.localFrameB.p, bodySimB.localCenter ) );
+	    joint.frameA.Quaternion2D = bodySimA.transform.Quaternion2D * sim.localFrameA.Quaternion2D;
+	    joint.frameA.Position = Quaternion2D.RotateVector( bodySimA.transform.Quaternion2D, sim.localFrameA.Position - bodySimA.localCenter);
+	    joint.frameB.Quaternion2D = bodySimB.transform.Quaternion2D * sim.localFrameB.Quaternion2D;
+	    joint.frameB.Position = Quaternion2D.RotateVector(bodySimB.transform.Quaternion2D, sim.localFrameB.Position - bodySimB.localCenter);
 
 	    // Compute the initial center delta. Incremental position updates are relative to this.
-	    joint.deltaCenter = b2Sub( bodySimB.center, bodySimA.center );
+	    joint.deltaCenter = bodySimB.center - bodySimA.center;
 
 	    float k = iA + iB;
 	    joint.axialMass = k > 0.0f ? 1.0f / k : 0.0f;
 
-	    joint.springSoftness = b2MakeSoft( joint.hertz, joint.dampingRatio, _h );
+	    joint.springSoftness = MakeSoft(joint.hertz, joint.dampingRatio, _h);
 
-	    if ( context.enableWarmStarting == false )
+	    if (_enableWarmStarting == false)
 	    {
 		    joint.linearImpulse = Vector2.Zero;
 		    joint.springImpulse = 0.0f;
@@ -75,7 +76,7 @@ public sealed partial class NewPhysicsSystem
 
     private void WarmStartRevoluteJoint(ref JointSim sim)
     {
-	    DebugTools.Assert( sim.type == b2_revoluteJoint );
+	    DebugTools.Assert(sim.type == b2JointType.b2_revoluteJoint);
 
 	    float mA = sim.invMassA;
 	    float mB = sim.invMassB;
@@ -83,33 +84,33 @@ public sealed partial class NewPhysicsSystem
 	    float iB = sim.invIB;
 
 	    // dummy state for static bodies
-	    b2BodyState dummyState = bodyState.Identity;
+	    var dummyState = BodyState.Identity;
 
-	    b2RevoluteJoint* joint = &sim.revoluteJoint;
-	    b2BodyState* stateA = joint.indexA == PhysicsConstants.NullIndex ? &dummyState : context.states + joint.indexA;
-	    b2BodyState* stateB = joint.indexB == PhysicsConstants.NullIndex ? &dummyState : context.states + joint.indexB;
+	    var joint = (RevoluteJoint) _joints[sim.jointId];
+	    var stateA = joint.IndexA == PhysicsConstants.NullIndex ? dummyState : _states[joint.IndexA];
+	    var stateB = joint.IndexB == PhysicsConstants.NullIndex ? dummyState : _states[joint.IndexB];
 
-	    b2Vec2 rA = Quaternion2D.RotateVector( stateA.deltaRotation, joint.frameA.p );
-	    b2Vec2 rB = Quaternion2D.RotateVector( stateB.deltaRotation, joint.frameB.p );
+	    var rA = Quaternion2D.RotateVector( stateA.deltaRotation, joint.frameA.Position );
+	    var rB = Quaternion2D.RotateVector( stateB.deltaRotation, joint.frameB.Position );
 
 	    float axialImpulse = joint.springImpulse + joint.motorImpulse + joint.lowerImpulse - joint.upperImpulse;
 
-	    if ( stateA.flags & b2_dynamicFlag )
+	    if ((stateA.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0)
 	    {
 		    stateA.linearVelocity = Vector2Helpers.MulSub( stateA.linearVelocity, mA, joint.linearImpulse );
 		    stateA.angularVelocity -= iA * ( Vector2Helpers.Cross( rA, joint.linearImpulse ) + axialImpulse );
 	    }
 
-	    if ( stateB.flags & b2_dynamicFlag )
+	    if ((stateB.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0)
 	    {
 		    stateB.linearVelocity = Vector2Helpers.MulAdd( stateB.linearVelocity, mB, joint.linearImpulse );
 		    stateB.angularVelocity += iB * ( Vector2Helpers.Cross( rB, joint.linearImpulse ) + axialImpulse );
 	    }
     }
 
-    void b2SolveRevoluteJoint( b2JointSim* base, b2StepContext* context, bool useBias )
+    private void SolveRevoluteJoint(ref JointSim sim, bool useBias )
     {
-	    DebugTools.Assert( sim.type == b2_revoluteJoint );
+	    DebugTools.Assert( sim.type == b2JointType.b2_revoluteJoint );
 
 	    float mA = sim.invMassA;
 	    float mB = sim.invMassB;
@@ -117,29 +118,29 @@ public sealed partial class NewPhysicsSystem
 	    float iB = sim.invIB;
 
 	    // dummy state for static bodies
-	    b2BodyState dummyState = bodyState.Identity;
+	    var dummyState = BodyState.Identity;
 
-	    b2RevoluteJoint* joint = &sim.revoluteJoint;
+	    var joint = (RevoluteJoint) _joints[sim.jointId];
 
-	    b2BodyState* stateA = joint.indexA == PhysicsConstants.NullIndex ? &dummyState : context.states + joint.indexA;
-	    b2BodyState* stateB = joint.indexB == PhysicsConstants.NullIndex ? &dummyState : context.states + joint.indexB;
+	    var stateA = joint.IndexA == PhysicsConstants.NullIndex ? dummyState : _states[joint.IndexA];
+        var stateB = joint.IndexB == PhysicsConstants.NullIndex ? dummyState : _states[joint.IndexB];
 
-	    b2Vec2 vA = stateA.linearVelocity;
+	    var vA = stateA.linearVelocity;
 	    float wA = stateA.angularVelocity;
-	    b2Vec2 vB = stateB.linearVelocity;
+	    var vB = stateB.linearVelocity;
 	    float wB = stateB.angularVelocity;
 
-	    b2Rot qA = b2MulRot( stateA.deltaRotation, joint.frameA.q );
-	    b2Rot qB = b2MulRot( stateB.deltaRotation, joint.frameB.q );
-	    b2Rot relQ = b2InvMulRot( qA, qB );
+	    var qA = stateA.deltaRotation * joint.frameA.Quaternion2D;
+	    var qB = stateB.deltaRotation * joint.frameB.Quaternion2D;
+	    var relQ = Quaternion2D.InvMulRot(qA, qB);
 
 	    bool fixedRotation = ( iA + iB == 0.0f );
 
 	    // Solve spring.
 	    if ( joint.enableSpring && fixedRotation == false )
 	    {
-		    float jointAngle = b2Rot_GetAngle( relQ );
-		    float jointAngleDelta = b2UnwindAngle( jointAngle - joint.targetAngle );
+		    float jointAngle = relQ.Angle;
+		    float jointAngleDelta = ( jointAngle - joint.targetAngle );
 
 		    float C = jointAngleDelta;
 		    float bias = joint.springSoftness.biasRate * C;
@@ -160,7 +161,7 @@ public sealed partial class NewPhysicsSystem
 		    float Cdot = wB - wA - joint.motorSpeed;
 		    float impulse = -joint.axialMass * Cdot;
 		    float oldImpulse = joint.motorImpulse;
-		    float maxImpulse = context.h * joint.maxMotorTorque;
+		    float maxImpulse = _h * joint.maxMotorTorque;
 		    joint.motorImpulse = Math.Clamp( joint.motorImpulse + impulse, -maxImpulse, maxImpulse );
 		    impulse = joint.motorImpulse - oldImpulse;
 
@@ -170,7 +171,7 @@ public sealed partial class NewPhysicsSystem
 
 	    if ( joint.enableLimit && fixedRotation == false )
 	    {
-		    float jointAngle = b2Rot_GetAngle( relQ );
+		    float jointAngle = relQ.Angle;
 
 		    // Lower limit
 		    {
@@ -181,7 +182,7 @@ public sealed partial class NewPhysicsSystem
 			    if ( C > 0.0f )
 			    {
 				    // speculation
-				    bias = C * context.inv_h;
+				    bias = C * _invH;
 			    }
 			    else if ( useBias )
 			    {
@@ -211,7 +212,7 @@ public sealed partial class NewPhysicsSystem
 			    if ( C > 0.0f )
 			    {
 				    // speculation
-				    bias = C * context.inv_h;
+				    bias = C * _invH;
 			    }
 			    else if ( useBias )
 			    {
@@ -241,37 +242,37 @@ public sealed partial class NewPhysicsSystem
 		    //     [  -r1y*iA*r1x-r2y*iB*r2x, mA+r1x^2*iA+mB+r2x^2*iB]
 
 		    // current anchors
-		    b2Vec2 rA = Quaternion2D.RotateVector( stateA.deltaRotation, joint.frameA.p );
-		    b2Vec2 rB = Quaternion2D.RotateVector( stateB.deltaRotation, joint.frameB.p );
+		    var rA = Quaternion2D.RotateVector( stateA.deltaRotation, joint.frameA.Position );
+		    var rB = Quaternion2D.RotateVector( stateB.deltaRotation, joint.frameB.Position );
 
-		    b2Vec2 Cdot = b2Sub( b2Add( vB, Vector2Helpers.Cross( wB, rB ) ), b2Add( vA, Vector2Helpers.Cross( wA, rA ) ) );
+		    var Cdot = vB + Vector2Helpers.Cross(wB, rB) - vA + Vector2Helpers.Cross(wA, rA);
 
-		    b2Vec2 bias = Vector2.Zero;
+		    var bias = Vector2.Zero;
 		    float massScale = 1.0f;
 		    float impulseScale = 0.0f;
-		    if ( useBias )
+		    if (useBias)
 		    {
-			    b2Vec2 dcA = stateA.deltaPosition;
-			    b2Vec2 dcB = stateB.deltaPosition;
+			    var dcA = stateA.deltaPosition;
+                var dcB = stateB.deltaPosition;
 
-			    b2Vec2 separation = b2Add( b2Add( b2Sub( dcB, dcA ), b2Sub( rB, rA ) ), joint.deltaCenter );
-			    bias = b2MulSV( sim.constraintSoftness.biasRate, separation );
+                var separation = dcB - dcA + rB - rA + joint.deltaCenter;
+			    bias = sim.constraintSoftness.biasRate * separation;
 			    massScale = sim.constraintSoftness.massScale;
 			    impulseScale = sim.constraintSoftness.impulseScale;
 		    }
 
-		    b2Mat22 K;
-		    K.cx.x = mA + mB + rA.y * rA.y * iA + rB.y * rB.y * iB;
-		    K.cy.x = -rA.y * rA.x * iA - rB.y * rB.x * iB;
-		    K.cx.y = K.cy.x;
-		    K.cy.y = mA + mB + rA.x * rA.x * iA + rB.x * rB.x * iB;
-		    b2Vec2 b = b2Solve22( K, b2Add( Cdot, bias ) );
+		    Matrix22 K;
+		    K.EX.X = mA + mB + rA.Y * rA.Y * iA + rB.Y * rB.Y * iB;
+		    K.EY.X = -rA.Y * rA.X * iA - rB.Y * rB.X * iB;
+		    K.EX.Y = K.EY.X;
+		    K.EY.Y = mA + mB + rA.X * rA.X * iA + rB.X * rB.X * iB;
+		    var b = K.Solve(Cdot + bias);
 
-		    b2Vec2 impulse;
-		    impulse.x = -massScale * b.x - impulseScale * joint.linearImpulse.x;
-		    impulse.y = -massScale * b.y - impulseScale * joint.linearImpulse.y;
-		    joint.linearImpulse.x += impulse.x;
-		    joint.linearImpulse.y += impulse.y;
+		    Vector2 impulse;
+		    impulse.X = -massScale * b.X - impulseScale * joint.linearImpulse.X;
+		    impulse.Y = -massScale * b.Y - impulseScale * joint.linearImpulse.Y;
+		    joint.linearImpulse.X += impulse.X;
+		    joint.linearImpulse.Y += impulse.Y;
 
 		    vA = Vector2Helpers.MulSub( vA, mA, impulse );
 		    wA -= iA * Vector2Helpers.Cross( rA, impulse );
@@ -279,13 +280,13 @@ public sealed partial class NewPhysicsSystem
 		    wB += iB * Vector2Helpers.Cross( rB, impulse );
 	    }
 
-	    if ( stateA.flags & b2_dynamicFlag )
+	    if ((stateA.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0)
 	    {
 		    stateA.linearVelocity = vA;
 		    stateA.angularVelocity = wA;
 	    }
 
-	    if ( stateB.flags & b2_dynamicFlag )
+	    if ((stateB.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0)
 	    {
 		    stateB.linearVelocity = vB;
 		    stateB.angularVelocity = wB;

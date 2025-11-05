@@ -98,7 +98,7 @@ public sealed partial class NewPhysicsSystem
 	    }
     }
 
-    void b2WarmStartWeldJoint( b2JointSim* base, b2StepContext* context )
+    void WarmStartWeldJoint( b2JointSim* base, b2StepContext* context )
     {
 	    float mA = base->invMassA;
 	    float mB = base->invMassB;
@@ -129,7 +129,7 @@ public sealed partial class NewPhysicsSystem
 	    }
     }
 
-    void b2SolveWeldJoint( b2JointSim* base, b2StepContext* context, bool useBias )
+    void SolveWeldJoint( b2JointSim* base, b2StepContext* context, bool useBias )
     {
 	    DebugTools.Assert( base->type == b2_weldJoint );
 

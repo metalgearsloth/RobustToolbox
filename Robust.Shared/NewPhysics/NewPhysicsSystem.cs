@@ -26,8 +26,8 @@ public sealed partial class NewPhysicsSystem : EntitySystem
      * - Worlds don't exist as we use EntityManager to handle the same concept.
      */
 
+    // TODO: Access valuelists by ref
     // TODO: Check generations on contacts + bodies + ids.
-    // TODO: Implement pairset for the broadphase checking rather than dictionary lookups.
 
     [Dependency] private readonly IParallelManager _parallel = default!;
 
