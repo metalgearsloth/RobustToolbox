@@ -4,12 +4,13 @@ namespace Robust.Shared.NewPhysics.Joints;
 
 public record struct ContactConstraintPoint
 {
-    Vector2 anchorA, anchorB;
-    float baseSeparation;
-    float relativeVelocity;
-    float normalImpulse;
-    float tangentImpulse;
-    float totalNormalImpulse;
-    float normalMass;
-    float tangentMass;
+    internal Vector2 anchorA;
+    internal Vector2 anchorB;
+    internal float baseSeparation;
+    internal float relativeVelocity;
+    internal float normalImpulse;
+    internal float tangentImpulse;
+    internal float totalNormalImpulse;
+    internal float normalMass;
+    internal float tangentMass;
 }

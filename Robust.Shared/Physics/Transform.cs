@@ -220,6 +220,20 @@ namespace Robust.Shared.Physics
             return new Quaternion2D(MathF.Cos(angle), MathF.Sin(angle));
         }
 
+        [Pure]
+        public static Quaternion2D IntegrateRotation(Quaternion2D q1, float deltaAngle)
+        {
+            // dc/dt = -omega * sin(t)
+            // ds/dt = omega * cos(t)
+            // c2 = c1 - omega * h * s1
+            // s2 = s1 + omega * h * c1
+            var q2 = new Quaternion2D(q1.C - deltaAngle * q1.S, q1.S + deltaAngle * q1.C);
+            float mag = MathF.Sqrt( q2.S * q2.S + q2.C * q2.C );
+            float invMag = mag > 0.0f ? 1.0f / mag : 0.0f;
+            var qn = new Quaternion2D(q2.C * invMag, q2.S * invMag);
+            return qn;
+        }
+
         /// Rotate a vector
         [Pure]
         public static Vector2 RotateVector(Quaternion2D q, Vector2 v )

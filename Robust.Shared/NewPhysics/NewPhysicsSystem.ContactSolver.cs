@@ -43,7 +43,7 @@ public sealed partial class NewPhysicsSystem
             ref var state1 = ref states[indices[1]];
             ref var floatRef1 = ref Unsafe.As<BodyState, float>(ref state1);
 
-            ref var state2= ref states[indices[2]];
+            ref var state2 = ref states[indices[2]];
             ref var floatRef2 = ref Unsafe.As<BodyState, float>(ref state2);
 
             ref var state3 = ref states[indices[3]];
@@ -106,14 +106,34 @@ public sealed partial class NewPhysicsSystem
                 var dqC = Avx.Permute2x128(tt2, tt6, 0x31);
                 var dqS = Avx.Permute2x128(tt3, tt7, 0x31);
 
-                simdBody.vX = Unsafe.As<Vector256<float>, FixedArray8<float>>(ref x);
-                simdBody.vY = Unsafe.As<Vector256<float>, FixedArray8<float>>(ref y);
-                simdBody.w = Unsafe.As<Vector256<float>, FixedArray8<float>>(ref w);
-                simdBody.flags = Unsafe.As<Vector256<float>, FixedArray8<float>>(ref flags);
-                simdBody.dpX = Unsafe.As<Vector256<float>, FixedArray8<float>>(ref dpX);
-                simdBody.dpY = Unsafe.As<Vector256<float>, FixedArray8<float>>(ref dpY);
-                simdBody.dqC = Unsafe.As<Vector256<float>, FixedArray8<float>>(ref dqC);
-                simdBody.dqS = Unsafe.As<Vector256<float>, FixedArray8<float>>(ref dqS);
+                ref var bvX = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.vX);
+                ref var bvY = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.vY);
+                ref var bW = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.w);
+                ref var bFlags = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.flags);
+                ref var bDpX = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.dpX);
+                ref var bDpY = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.dpY);
+                ref var bDqC = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.dqC);
+                ref var bDqS = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.dqS);
+
+                fixed (float* avX = &bvX)
+                fixed (float* avY = &bvY)
+                fixed (float* aW = &bW)
+                fixed (float* aFlags = &bFlags)
+                fixed (float* aDpX = &bDpX)
+                fixed (float* aDpY = &bDpY)
+                fixed (float* aDqC = &bDqC)
+                fixed (float* aDqS = &bDqS)
+                {
+                    Avx.Store(avX, x);
+                    Avx.Store(avY, y);
+                    Avx.Store(aW, w);
+                    Avx.Store(aFlags, flags);
+                    Avx.Store(aDpX, dpX);
+                    Avx.Store(aDpY, dpY);
+                    Avx.Store(aDqC, dqC);
+                    Avx.Store(aDqS, dqS);
+                }
+
                 return simdBody;
             }
         }
@@ -713,6 +733,7 @@ public sealed partial class NewPhysicsSystem
 	    var inv_h = SimdSplat( _invH );
 	    var contactSpeed = SimdSplat( -_contactSpeed );
 	    var oneW = SimdSplat( 1.0f );
+        var zero = new FixedArray8<float>();
 
 	    for ( int i = startIndex; i < endIndex; ++i )
 	    {
@@ -750,29 +771,29 @@ public sealed partial class NewPhysicsSystem
                 var rB = c.anchorB1;
 
 			    // Moving anchors for current separation
-                var rsA = Quaternion2D.RotateVectorW( bA.dq, rA );
-                var rsB = Quaternion2D.RotateVectorW( bB.dq, rB );
+                var rsA = SimdRotateVector( bA.dqC.AsSpan, bA.dqS.AsSpan, rA.X.AsSpan, rA.Y.AsSpan );
+                var rsB = SimdRotateVector( bB.dqC.AsSpan, bB.dqS.AsSpan, rB.X.AsSpan, rB.Y.AsSpan );
 
 			    // compute current separation
 			    // this is subject to round-off error if the anchor is far from the body center of mass
-			    b2Vec2W ds = { SimdAdd( dp.X.AsSpan, SimdSub( rsB.X, rsA.X ) ), SimdAdd( dp.Y.AsSpan, SimdSub( rsB.Y, rsA.Y ) ) };
-			    b2FloatW s = SimdAdd( Vector2.DotW( c.normal, ds ), c.baseSeparation1 );
+			    var ds = new Vector2Wide(){ X = SimdAdd( dp.X.AsSpan, SimdSub( rsB.X.AsSpan, rsA.X.AsSpan ).AsSpan ), Y = SimdAdd( dp.Y.AsSpan, SimdSub( rsB.Y.AsSpan, rsA.Y.AsSpan ).AsSpan ) };
+			    var s = SimdAdd( SimdDot( c.normal, ds ).AsSpan, c.baseSeparation1.AsSpan );
 
 			    // Apply speculative bias if separation is greater than zero, otherwise apply soft constraint bias
 			    // The contactSpeed is meant to limit stiffness, not increase it.
-			    b2FloatW mask = b2GreaterThanW( s, b2ZeroW() );
+			    b2FloatW mask = SimdGreaterThan( s, zero );
 			    b2FloatW specBias = SimdMul( s, inv_h );
-			    b2FloatW softBias = b2MaxW( SimdMul( biasRate, s ), contactSpeed );
+			    b2FloatW softBias = SimdMax( SimdMul( biasRate, s ), contactSpeed );
 
 			    // todo try b2MaxW(softBias, specBias);
-			    b2FloatW bias = b2BlendW( softBias, specBias, mask );
+			    b2FloatW bias = SimdBlend( softBias, specBias, mask );
 
-			    b2FloatW pointMassScale = b2BlendW( massScale, oneW, mask );
-			    b2FloatW pointImpulseScale = b2BlendW( impulseScale, b2ZeroW(), mask );
+			    b2FloatW pointMassScale = SimdBlend( massScale, oneW, mask );
+			    b2FloatW pointImpulseScale = SimdBlend( impulseScale, zero, mask );
 
 			    // Relative velocity at contact
-			    b2FloatW dvx = SimdSub( SimdSub( bB.v.X, SimdMul( bB.w, rB.Y ) ), SimdSub( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
-			    b2FloatW dvy = SimdSub( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
+			    b2FloatW dvx = SimdSub( SimdSub( bB.vX, SimdMul( bB.w, rB.Y ) ), SimdSub( bA.vX, SimdMul( bA.w, rA.Y ) ) );
+			    b2FloatW dvy = SimdSub( SimdAdd( bB.vY, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.vY, SimdMul( bA.w, rA.X ) ) );
 			    b2FloatW vn = SimdAdd( SimdMul( dvx, c.normal.X ), SimdMul( dvy, c.normal.Y ) );
 
 			    // Compute normal impulse
@@ -780,7 +801,7 @@ public sealed partial class NewPhysicsSystem
 										      SimdMul( pointImpulseScale, c.normalImpulse1 ) );
 
 			    // Clamp the accumulated impulse
-			    b2FloatW newImpulse = b2MaxW( SimdSub( c.normalImpulse1, negImpulse ), b2ZeroW() );
+			    b2FloatW newImpulse = SimdMax( SimdSub( c.normalImpulse1, negImpulse ), zero );
 			    b2FloatW impulse = SimdSub( newImpulse, c.normalImpulse1 );
 			    c.normalImpulse1 = newImpulse;
 			    c.totalNormalImpulse1 = SimdAdd( c.totalNormalImpulse1, newImpulse );
@@ -791,40 +812,40 @@ public sealed partial class NewPhysicsSystem
 			    b2FloatW Px = SimdMul( impulse, c.normal.X );
 			    b2FloatW Py = SimdMul( impulse, c.normal.Y );
 
-			    bA.v.X = SimdMulSub( bA.v.X, c.invMassA, Px );
-			    bA.v.Y = SimdMulSub( bA.v.Y, c.invMassA, Py );
+			    bA.vX = SimdMulSub( bA.vX, c.invMassA, Px );
+			    bA.vY = SimdMulSub( bA.vY, c.invMassA, Py );
 			    bA.w = SimdMulSub( bA.w, c.invIA, SimdSub( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
 
-			    bB.v.X = SimdMulAdd( bB.v.X, c.invMassB, Px );
-			    bB.v.Y = SimdMulAdd( bB.v.Y, c.invMassB, Py );
+			    bB.vX = SimdMulAdd( bB.vX, c.invMassB, Px );
+			    bB.vY = SimdMulAdd( bB.vY, c.invMassB, Py );
 			    bB.w = SimdMulAdd( bB.w, c.invIB, SimdSub( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
 		    }
 
 		    // second point non-penetration constraint
 		    {
 			    // moving anchors for current separation
-			    b2Vec2W rsA = Quaternion2D.RotateVectorW( bA.dq, c.anchorA2 );
-			    b2Vec2W rsB = Quaternion2D.RotateVectorW( bB.dq, c.anchorB2 );
+			    b2Vec2W rsA = SimdRotateVector( bA.dqC, bA.dqS, c.anchorA2 );
+			    b2Vec2W rsB = SimdRotateVector( bB.dqC, bB.dqS, c.anchorB2 );
 
 			    // compute current separation
 			    b2Vec2W ds = { SimdAdd( dp.X, SimdSub( rsB.X, rsA.X ) ), SimdAdd( dp.Y, SimdSub( rsB.Y, rsA.Y ) ) };
-			    b2FloatW s = SimdAdd( Vector2.DotW( c.normal, ds ), c.baseSeparation2 );
+			    b2FloatW s = SimdAdd( SimdDot( c.normal, ds ), c.baseSeparation2 );
 
-			    b2FloatW mask = b2GreaterThanW( s, b2ZeroW() );
+			    b2FloatW mask = SimdGreaterThan( s, zero.AsSpan );
 			    b2FloatW specBias = SimdMul( s, inv_h );
-			    b2FloatW softBias = b2MaxW( SimdMul( biasRate, s ), contactSpeed );
-			    b2FloatW bias = b2BlendW( softBias, specBias, mask );
+			    b2FloatW softBias = SimdMax( SimdMul( biasRate, s ), contactSpeed );
+			    b2FloatW bias = SimdBlend( softBias, specBias, mask );
 
-			    b2FloatW pointMassScale = b2BlendW( massScale, oneW, mask );
-			    b2FloatW pointImpulseScale = b2BlendW( impulseScale, b2ZeroW(), mask );
+			    b2FloatW pointMassScale = SimdBlend( massScale, oneW, mask );
+			    b2FloatW pointImpulseScale = SimdBlend( impulseScale, b2ZeroW(), mask );
 
 			    // fixed anchors for Jacobians
 			    b2Vec2W rA = c.anchorA2;
 			    b2Vec2W rB = c.anchorB2;
 
 			    // Relative velocity at contact
-			    b2FloatW dvx = SimdSub( SimdSub( bB.v.X, SimdMul( bB.w, rB.Y ) ), SimdSub( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
-			    b2FloatW dvy = SimdSub( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
+			    b2FloatW dvx = SimdSub( SimdSub( bB.vX, SimdMul( bB.w, rB.Y ) ), SimdSub( bA.vX, SimdMul( bA.w, rA.Y ) ) );
+			    b2FloatW dvy = SimdSub( SimdAdd( bB.vY, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.vY, SimdMul( bA.w, rA.X ) ) );
 			    b2FloatW vn = SimdAdd( SimdMul( dvx, c.normal.X ), SimdMul( dvy, c.normal.Y ) );
 
 			    // Compute normal impulse
@@ -883,12 +904,12 @@ public sealed partial class NewPhysicsSystem
 			    b2FloatW Px = SimdMul( impulse, tangentX );
 			    b2FloatW Py = SimdMul( impulse, tangentY );
 
-			    bA.vX = SimdMulSub( bA.v.X, c.invMassA, Px );
-			    bA.vY = SimdMulSub( bA.v.Y, c.invMassA, Py );
+			    bA.vX = SimdMulSub( bA.vX, c.invMassA, Px );
+			    bA.vY = SimdMulSub( bA.vY, c.invMassA, Py );
 			    bA.w = SimdMulSub( bA.w, c.invIA, SimdSub( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
 
-			    bB.vX = SimdMulAdd( bB.v.X, c.invMassB, Px );
-			    bB.vY = SimdMulAdd( bB.v.Y, c.invMassB, Py );
+			    bB.vX = SimdMulAdd( bB.vX, c.invMassB, Px );
+			    bB.vY = SimdMulAdd( bB.vY, c.invMassB, Py );
 			    bB.w = SimdMulAdd( bB.w, c.invIB, SimdSub( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
 		    }
 
@@ -950,8 +971,10 @@ public sealed partial class NewPhysicsSystem
 
     private void ApplyRestitutionTask( int startIndex, int endIndex, int colorIndex )
     {
-	    ref var states = ref _states;
-        var constraints = _contextSimdContactConstraints.Span.Slice(_constraintGraph.colors[colorIndex].SimdConstraintIndex, _constraintGraph.colors[colorIndex].SimdConstraintCount)
+	    ref var states = ref _contextBodyStates;
+        var constraints = _contextSimdContactConstraints.Span.Slice(
+            _constraintGraph.colors[colorIndex].SimdConstraintIndex,
+            _constraintGraph.colors[colorIndex].SimdConstraintCount);
 	    var threshold = SimdSplat(_restitutionThreshold);
 	    var zero = new FixedArray8<float>();
 
@@ -978,7 +1001,7 @@ public sealed partial class NewPhysicsSystem
 			    b2FloatW mask1 = b2GreaterThanW( SimdAdd( c.relativeVelocity1, threshold ), zero );
 			    b2FloatW mask2 = b2EqualsW( c.totalNormalImpulse1, zero );
 			    b2FloatW mask = b2OrW( b2OrW( mask1, mask2 ), restitutionMask );
-			    b2FloatW mass = b2BlendW( c.normalMass1, zero, mask );
+			    b2FloatW mass = SimdBlend( c.normalMass1, zero, mask );
 
 			    // fixed anchors for Jacobians
 			    b2Vec2W rA = c.anchorA1;
@@ -1016,34 +1039,34 @@ public sealed partial class NewPhysicsSystem
 		    // second point non-penetration constraint
 		    {
 			    // Set effective mass to zero if restitution should not be applied
-			    b2FloatW mask1 = b2GreaterThanW( SimdAdd( c.relativeVelocity2, threshold ), zero );
-			    b2FloatW mask2 = b2EqualsW( c.totalNormalImpulse2, zero );
-			    b2FloatW mask = b2OrW( b2OrW( mask1, mask2 ), restitutionMask );
-			    b2FloatW mass = b2BlendW( c.normalMass2, zero, mask );
+                var mask1 = SimdGreaterThan( SimdAdd( c.relativeVelocity2, threshold ), zero );
+                var mask2 = SimdEquals( c.totalNormalImpulse2, zero );
+                var mask = SimdOr( SimdOr( mask1, mask2 ), restitutionMask );
+			    var mass = SimdBlend( c.normalMass2, zero, mask );
 
 			    // fixed anchors for Jacobians
 			    b2Vec2W rA = c.anchorA2;
 			    b2Vec2W rB = c.anchorB2;
 
 			    // Relative velocity at contact
-			    b2FloatW dvx = SimdSub( SimdSub( bB.v.X, SimdMul( bB.w, rB.Y ) ), SimdSub( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
-			    b2FloatW dvy = SimdSub( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
-			    b2FloatW vn = SimdAdd( SimdMul( dvx, c.normal.X ), SimdMul( dvy, c.normal.Y ) );
+                var dvx = SimdSub( SimdSub( bB.v.X, SimdMul( bB.w, rB.Y ) ), SimdSub( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
+                var dvy = SimdSub( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
+                var vn = SimdAdd( SimdMul( dvx, c.normal.X ), SimdMul( dvy, c.normal.Y ) );
 
 			    // Compute normal impulse
-			    b2FloatW negImpulse = SimdMul( mass, SimdAdd( vn, SimdMul( c.restitution, c.relativeVelocity2 ) ) );
+                var negImpulse = SimdMul( mass, SimdAdd( vn, SimdMul( c.restitution, c.relativeVelocity2 ) ) );
 
 			    // Clamp the accumulated impulse
-			    b2FloatW newImpulse = b2MaxW( SimdSub( c.normalImpulse2, negImpulse ), b2ZeroW() );
-			    b2FloatW deltaImpulse = SimdSub( newImpulse, c.normalImpulse2 );
+			    var newImpulse = SimdMax( SimdSub( c.normalImpulse2, negImpulse ), zero.AsSpan );
+                var deltaImpulse = SimdSub( newImpulse, c.normalImpulse2 );
 			    c.normalImpulse2 = newImpulse;
 
 			    // Add the incremental impulse rather than the full impulse because this is not a sub-step
 			    c.totalNormalImpulse2 = SimdAdd( c.totalNormalImpulse2, deltaImpulse );
 
 			    // Apply contact impulse
-			    b2FloatW Px = SimdMul( deltaImpulse, c.normal.X );
-			    b2FloatW Py = SimdMul( deltaImpulse, c.normal.Y );
+                var Px = SimdMul( deltaImpulse, c.normal.X );
+                var Py = SimdMul( deltaImpulse, c.normal.Y );
 
 			    bA.v.X = SimdMulSub( bA.v.X, c.invMassA, Px );
 			    bA.v.Y = SimdMulSub( bA.v.Y, c.invMassA, Py );
@@ -1054,51 +1077,45 @@ public sealed partial class NewPhysicsSystem
 			    bB.w = SimdMulAdd( bB.w, c.invIB, SimdSub( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
 		    }
 
-		    b2ScatterBodies( states, c.indexA, &bA );
-		    b2ScatterBodies( states, c.indexB, &bB );
+		    ScatterBodies( states.Span, c.indexA.AsSpan, bA );
+		    ScatterBodies( states.Span, c.indexB.AsSpan, bB );
 	    }
-
-	    b2TracyCZoneEnd( restitution );
     }
 
     private void IntegratePositionsTask( int startIndex, int endIndex)
     {
-        b2TracyCZoneNC( integrate_positions, "IntPos", b2_colorDarkSeaGreen, true );
-
-        b2BodyState* states = context.states;
-        float h = context.h;
+        ref var states = ref _contextBodyStates;
+        float h = _h;
 
         DebugTools.Assert( startIndex <= endIndex );
 
         for ( int i = startIndex; i < endIndex; ++i )
         {
-            b2BodyState* state = states + i;
+            ref var state = ref states[i];
 
-            if ( state.flags & b2_lockLinearX )
+            if ((state.flags & (ushort) BodyFlags.b2_lockLinearX) != 0x0)
             {
-                state.linearVelocity.x = 0.0f;
+                state.linearVelocity.X = 0.0f;
             }
 
-            if ( state.flags & b2_lockLinearY )
+            if ((state.flags & (ushort) BodyFlags.b2_lockLinearY) != 0x0)
             {
-                state.linearVelocity.y = 0.0f;
+                state.linearVelocity.Y = 0.0f;
             }
 
-            if ( state.flags & b2_lockAngularZ )
+            if ((state.flags & (ushort) BodyFlags.b2_lockAngularZ) != 0x0)
             {
                 state.angularVelocity = 0.0f;
             }
 
             state.deltaPosition = Vector2Helpers.MulAdd( state.deltaPosition, h, state.linearVelocity );
-            state.deltaRotation = b2IntegrateRotation( state.deltaRotation, h * state.angularVelocity );
+            state.deltaRotation = Quaternion2D.IntegrateRotation( state.deltaRotation, h * state.angularVelocity );
         }
-
-        b2TracyCZoneEnd( integrate_positions );
     }
 
     private void StoreImpulsesTask( int startIndex, int endIndex )
     {
-	    var contacts = _contacts;
+	    ref var contacts = ref _contextContacts;
 	    ref var constraints = ref _contextSimdContactConstraints;
 
         b2Manifold dummy = new();
@@ -1106,36 +1123,36 @@ public sealed partial class NewPhysicsSystem
 	    for ( int constraintIndex = startIndex; constraintIndex < endIndex; ++constraintIndex )
 	    {
 		    ref var c = ref constraints[constraintIndex];
-		    const float* rollingImpulse = (float*)&c.rollingImpulse;
-		    const float* normalImpulse1 = (float*)&c.normalImpulse1;
-		    const float* normalImpulse2 = (float*)&c.normalImpulse2;
-		    const float* tangentImpulse1 = (float*)&c.tangentImpulse1;
-		    const float* tangentImpulse2 = (float*)&c.tangentImpulse2;
-		    const float* totalNormalImpulse1 = (float*)&c.totalNormalImpulse1;
-		    const float* totalNormalImpulse2 = (float*)&c.totalNormalImpulse2;
-		    const float* normalVelocity1 = (float*)&c.relativeVelocity1;
-		    const float* normalVelocity2 = (float*)&c.relativeVelocity2;
+
+		    var rollingImpulse = c.rollingImpulse.AsSpan;
+		    var normalImpulse1 = c.normalImpulse1.AsSpan;
+		    var normalImpulse2 = c.normalImpulse2.AsSpan;
+		    var tangentImpulse1 = c.tangentImpulse1.AsSpan;
+		    var tangentImpulse2 = c.tangentImpulse2.AsSpan;
+		    var totalNormalImpulse1 = c.totalNormalImpulse1.AsSpan;
+		    var totalNormalImpulse2 = c.totalNormalImpulse2.AsSpan;
+		    var normalVelocity1 = c.relativeVelocity1.AsSpan;
+		    var normalVelocity2 = c.relativeVelocity2.AsSpan;
 
 		    int baseIndex = _simdWidth * constraintIndex;
 
 		    for ( int laneIndex = 0; laneIndex < _simdWidth; ++laneIndex )
 		    {
-			    ref var m = contacts[baseIndex + laneIndex] == null ? dummy : contacts[baseIndex + laneIndex].manifold;
+			    var m = contacts[baseIndex + laneIndex] == null ? dummy : contacts[baseIndex + laneIndex]!.manifold;
 			    m.rollingImpulse = rollingImpulse[laneIndex];
 
-			    m.points[0].normalImpulse = normalImpulse1[laneIndex];
-			    m.points[0].tangentImpulse = tangentImpulse1[laneIndex];
-			    m.points[0].totalNormalImpulse = totalNormalImpulse1[laneIndex];
-			    m.points[0].normalVelocity = normalVelocity1[laneIndex];
+			    m.points._00.normalImpulse = normalImpulse1[laneIndex];
+			    m.points._00.tangentImpulse = tangentImpulse1[laneIndex];
+			    m.points._00.totalNormalImpulse = totalNormalImpulse1[laneIndex];
+			    m.points._00.normalVelocity = normalVelocity1[laneIndex];
 
-			    m.points[1].normalImpulse = normalImpulse2[laneIndex];
-			    m.points[1].tangentImpulse = tangentImpulse2[laneIndex];
-			    m.points[1].totalNormalImpulse = totalNormalImpulse2[laneIndex];
-			    m.points[1].normalVelocity = normalVelocity2[laneIndex];
-		    }
+			    m.points._01.normalImpulse = normalImpulse2[laneIndex];
+			    m.points._01.tangentImpulse = tangentImpulse2[laneIndex];
+			    m.points._01.totalNormalImpulse = totalNormalImpulse2[laneIndex];
+			    m.points._01.normalVelocity = normalVelocity2[laneIndex];
+                contacts[baseIndex + laneIndex]!.manifold = m;
+            }
 	    }
-
-	    b2TracyCZoneEnd( store_impulses );
     }
 
     #region Overflow
@@ -1151,28 +1168,28 @@ public sealed partial class NewPhysicsSystem
 
     private void PrepareOverflowContacts()
     {
-	    b2ConstraintGraph* graph = context.graph;
-	    b2GraphColor* color = graph.colors + PhysicsConstants.OverflowIndex;
-	    b2ContactConstraint* constraints = color.overflowConstraints;
-	    int contactCount = color.contactSims.count;
-	    b2ContactSim* contacts = color.contactSims.data;
-	    b2BodyState* awakeStates = context.states;
+	    var graph = _constraintGraph;
+	    var color = graph.colors[PhysicsConstants.OverflowIndex];
+	    ref var constraints = ref color.OverflowConstraints;
+	    int contactCount = color.ContactSims.Count;
+	    ref var contacts = ref color.ContactSims;
+	    ref var awakeStates = ref _contextBodyStates;
 
     #if B2_VALIDATE
 	    b2Body* bodies = world.bodies.data;
     #endif
 
 	    // Stiffer for static contacts to avoid bodies getting pushed through the ground
-	    b2Softness contactSoftness = context.contactSoftness;
-	    b2Softness staticSoftness = context.staticSoftness;
+	    var contactSoftness = _contactSoftness;
+	    var staticSoftness = _staticSoftness;
 
-	    float warmStartScale = world.enableWarmStarting ? 1.0f : 0.0f;
+	    float warmStartScale = _enableWarmStarting ? 1.0f : 0.0f;
 
 	    for ( int i = 0; i < contactCount; ++i )
 	    {
-		    b2ContactSim* contactSim = contacts + i;
+		    ref var contactSim = ref contacts[i];
 
-		    const b2Manifold* manifold = &contactSim.manifold;
+		    ref var manifold = ref contactSim.manifold;
 		    int pointCount = manifold.pointCount;
 
 		    DebugTools.Assert( 0 < pointCount && pointCount <= 2 );
@@ -1190,7 +1207,7 @@ public sealed partial class NewPhysicsSystem
 		    DebugTools.Assert( indexB == validIndexB );
     #endif
 
-		    b2ContactConstraint* constraint = constraints + i;
+		    ref var constraint = ref constraints[i];
 		    constraint.indexA = indexA;
 		    constraint.indexB = indexB;
 		    constraint.normal = manifold.normal;
@@ -1201,24 +1218,24 @@ public sealed partial class NewPhysicsSystem
 		    constraint.tangentSpeed = contactSim.tangentSpeed;
 		    constraint.pointCount = pointCount;
 
-		    b2Vec2 vA = Vector2.Zero;
+		    var vA = Vector2.Zero;
 		    float wA = 0.0f;
 		    float mA = contactSim.invMassA;
 		    float iA = contactSim.invIA;
 		    if ( indexA != PhysicsConstants.NullIndex )
 		    {
-			    b2BodyState* stateA = awakeStates + indexA;
+			    ref var stateA = ref awakeStates[indexA];
 			    vA = stateA.linearVelocity;
 			    wA = stateA.angularVelocity;
 		    }
 
-		    b2Vec2 vB = Vector2.Zero;
+            var vB = Vector2.Zero;
 		    float wB = 0.0f;
 		    float mB = contactSim.invMassB;
 		    float iB = contactSim.invIB;
 		    if ( indexB != PhysicsConstants.NullIndex )
 		    {
-			    b2BodyState* stateB = awakeStates + indexB;
+			    ref var stateB = ref awakeStates[indexB];
 			    vB = stateB.linearVelocity;
 			    wB = stateB.angularVelocity;
 		    }
@@ -1243,24 +1260,24 @@ public sealed partial class NewPhysicsSystem
 			    constraint.rollingMass = k > 0.0f ? 1.0f / k : 0.0f;
 		    }
 
-		    b2Vec2 normal = constraint.normal;
-		    b2Vec2 tangent = b2RightPerp( constraint.normal );
+            var normal = constraint.normal;
+            var tangent = constraint.normal.RightPerp();
 
 		    for ( int j = 0; j < pointCount; ++j )
 		    {
-			    const b2ManifoldPoint* mp = manifold.points + j;
-			    b2ContactConstraintPoint* cp = constraint.points + j;
+			    ref var mp = ref manifold.points.AsSpan[j];
+			    ref var cp = ref constraint.points.AsSpan[j];
 
 			    cp.normalImpulse = warmStartScale * mp.normalImpulse;
 			    cp.tangentImpulse = warmStartScale * mp.tangentImpulse;
 			    cp.totalNormalImpulse = 0.0f;
 
-			    b2Vec2 rA = mp.anchorA;
-			    b2Vec2 rB = mp.anchorB;
+                var rA = mp.anchorA;
+                var rB = mp.anchorB;
 
 			    cp.anchorA = rA;
 			    cp.anchorB = rB;
-			    cp.baseSeparation = mp.separation - Vector2.Dot( b2Sub( rB, rA ), normal );
+			    cp.baseSeparation = mp.separation - Vector2.Dot( rB - rA, normal );
 
 			    float rnA = Vector2Helpers.Cross( rA, normal );
 			    float rnB = Vector2Helpers.Cross( rB, normal );
@@ -1273,43 +1290,38 @@ public sealed partial class NewPhysicsSystem
 			    cp.tangentMass = kTangent > 0.0f ? 1.0f / kTangent : 0.0f;
 
 			    // Save relative velocity for restitution
-			    b2Vec2 vrA = b2Add( vA, Vector2Helpers.Cross( wA, rA ) );
-			    b2Vec2 vrB = b2Add( vB, Vector2Helpers.Cross( wB, rB ) );
-			    cp.relativeVelocity = Vector2.Dot( normal, b2Sub( vrB, vrA ) );
+                var vrA = vA + Vector2Helpers.Cross( wA, rA );
+                var vrB = vB + Vector2Helpers.Cross( wB, rB );
+			    cp.relativeVelocity = Vector2.Dot(normal, vrB - vrA);
 		    }
 	    }
-
-	    b2TracyCZoneEnd( prepare_overflow_contact );
     }
 
     private void WarmStartOverflowContacts()
     {
-	    b2TracyCZoneNC( warmstart_overflow_contact, "WarmStart Overflow Contact", b2_colorDarkOrange, true );
-
-	    b2ConstraintGraph* graph = context.graph;
-	    b2GraphColor* color = graph.colors + PhysicsConstants.OverflowIndex;
-	    b2ContactConstraint* constraints = color.overflowConstraints;
-	    int contactCount = color.contactSims.count;
-	    b2World* world = context.world;
-	    b2SolverSet* awakeSet = b2SolverSetArray_Get( &world.solverSets, (int) SetType.AwakeSet );
-	    b2BodyState* states = awakeSet.bodyStates.data;
+	    ref var graph = ref _constraintGraph;
+	    ref var color = ref graph.colors[PhysicsConstants.OverflowIndex];
+	    ref var constraints = ref color.OverflowConstraints;
+	    int contactCount = color.ContactSims.Count;
+	    ref var awakeSet = ref _solverSets[(int) SetType.AwakeSet];
+	    ref var states = ref awakeSet.bodyStates;
 
 	    // This is a dummy state to represent a static body because static bodies don't have a solver body.
-	    b2BodyState dummyState = bodyState.Identity;
+	    var dummyState = BodyState.Identity;
 
 	    for ( int i = 0; i < contactCount; ++i )
 	    {
-		    const b2ContactConstraint* constraint = constraints + i;
+		    ref var constraint = ref constraints[i];
 
 		    int indexA = constraint.indexA;
 		    int indexB = constraint.indexB;
 
-		    b2BodyState* stateA = indexA == PhysicsConstants.NullIndex ? &dummyState : states + indexA;
-		    b2BodyState* stateB = indexB == PhysicsConstants.NullIndex ? &dummyState : states + indexB;
+		    var stateA = indexA == PhysicsConstants.NullIndex ? dummyState : states[indexA];
+            var stateB = indexB == PhysicsConstants.NullIndex ? dummyState : states[indexB];
 
-		    b2Vec2 vA = stateA.linearVelocity;
+            var vA = stateA.linearVelocity;
 		    float wA = stateA.angularVelocity;
-		    b2Vec2 vB = stateB.linearVelocity;
+            var vB = stateB.linearVelocity;
 		    float wB = stateB.angularVelocity;
 
 		    float mA = constraint.invMassA;
@@ -1318,19 +1330,19 @@ public sealed partial class NewPhysicsSystem
 		    float iB = constraint.invIB;
 
 		    // Stiffer for static contacts to avoid bodies getting pushed through the ground
-		    b2Vec2 normal = constraint.normal;
-		    b2Vec2 tangent = b2RightPerp( constraint.normal );
+            var normal = constraint.normal;
+            var tangent = constraint.normal.RightPerp();
 		    int pointCount = constraint.pointCount;
 
 		    for ( int j = 0; j < pointCount; ++j )
 		    {
-			    const b2ContactConstraintPoint* cp = constraint.points + j;
+			    ref var cp = ref constraint.points.AsSpan[j];
 
 			    // fixed anchors
-			    b2Vec2 rA = cp.anchorA;
-			    b2Vec2 rB = cp.anchorB;
+			    var rA = cp.anchorA;
+                var rB = cp.anchorB;
 
-			    b2Vec2 P = b2Add( b2MulSV( cp.normalImpulse, normal ), b2MulSV( cp.tangentImpulse, tangent ) );
+                var P = cp.normalImpulse * normal + cp.tangentImpulse * tangent;
 			    wA -= iA * Vector2Helpers.Cross( rA, P );
 			    vA = Vector2Helpers.MulAdd( vA, -mA, P );
 			    wB += iB * Vector2Helpers.Cross( rB, P );
@@ -1340,62 +1352,61 @@ public sealed partial class NewPhysicsSystem
 		    wA -= iA * constraint.rollingImpulse;
 		    wB += iB * constraint.rollingImpulse;
 
-		    if ( stateA.flags & b2_dynamicFlag )
+		    if ( (stateA.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0 )
 		    {
 			    stateA.linearVelocity = vA;
 			    stateA.angularVelocity = wA;
+                states[indexA] = stateA;
 		    }
 
-		    if ( stateB.flags & b2_dynamicFlag )
+		    if ( (stateB.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0 )
 		    {
 			    stateB.linearVelocity = vB;
 			    stateB.angularVelocity = wB;
+                states[indexB] = stateB;
 		    }
 	    }
-
-	    b2TracyCZoneEnd( warmstart_overflow_contact );
     }
 
     private void SolveOverflowContacts( bool useBias )
     {
-	    b2ConstraintGraph* graph = context.graph;
-	    b2GraphColor* color = graph.colors + PhysicsConstants.OverflowIndex;
-	    b2ContactConstraint* constraints = color.overflowConstraints;
-	    int contactCount = color.contactSims.count;
-	    b2World* world = context.world;
-	    b2SolverSet* awakeSet = b2SolverSetArray_Get( &world.solverSets, (int) SetType.AwakeSet );
-	    b2BodyState* states = awakeSet.bodyStates.data;
+	    ref var graph = ref _constraintGraph;
+	    ref var color = ref graph.colors[PhysicsConstants.OverflowIndex];
+	    ref var constraints = ref color.OverflowConstraints;
+	    int contactCount = color.ContactSims.Count;
+	    ref var awakeSet = ref _solverSets[(int) SetType.AwakeSet];
+	    ref var states = ref awakeSet.bodyStates;
 
 	    float inv_h = _invH;
-	    const float contactSpeed = context.world.contactSpeed;
+	    var contactSpeed = _contactSpeed;
 
 	    // This is a dummy body to represent a static body since static bodies don't have a solver body.
-	    b2BodyState dummyState = bodyState.Identity;
+	    var dummyState = BodyState.Identity;
 
 	    for ( int i = 0; i < contactCount; ++i )
 	    {
-		    b2ContactConstraint* constraint = constraints + i;
+		    ref var constraint = ref constraints[i];
 		    float mA = constraint.invMassA;
 		    float iA = constraint.invIA;
 		    float mB = constraint.invMassB;
 		    float iB = constraint.invIB;
 
-		    b2BodyState* stateA = constraint.indexA == PhysicsConstants.NullIndex ? &dummyState : states + constraint.indexA;
-		    b2Vec2 vA = stateA.linearVelocity;
+		    var stateA = constraint.indexA == PhysicsConstants.NullIndex ? dummyState : states[constraint.indexA];
+            var vA = stateA.linearVelocity;
 		    float wA = stateA.angularVelocity;
-		    b2Rot dqA = stateA.deltaRotation;
+            var dqA = stateA.deltaRotation;
 
-		    b2BodyState* stateB = constraint.indexB == PhysicsConstants.NullIndex ? &dummyState : states + constraint.indexB;
-		    b2Vec2 vB = stateB.linearVelocity;
+		    var stateB = constraint.indexB == PhysicsConstants.NullIndex ? dummyState : states[constraint.indexB];
+            var vB = stateB.linearVelocity;
 		    float wB = stateB.angularVelocity;
-		    b2Rot dqB = stateB.deltaRotation;
+            var dqB = stateB.deltaRotation;
 
-		    b2Vec2 dp = b2Sub( stateB.deltaPosition, stateA.deltaPosition );
+            var dp = stateB.deltaPosition - stateA.deltaPosition;
 
-		    b2Vec2 normal = constraint.normal;
-		    b2Vec2 tangent = b2RightPerp( normal );
+            var normal = constraint.normal;
+            var tangent = normal.RightPerp();
 		    float friction = constraint.friction;
-		    b2Softness softness = constraint.softness;
+            var softness = constraint.softness;
 
 		    int pointCount = constraint.pointCount;
 		    float totalNormalImpulse = 0.0f;
@@ -1403,15 +1414,15 @@ public sealed partial class NewPhysicsSystem
 		    // Non-penetration
 		    for ( int j = 0; j < pointCount; ++j )
 		    {
-			    b2ContactConstraintPoint* cp = constraint.points + j;
+			    ref var cp = ref constraint.points.AsSpan[j];
 
 			    // fixed anchor points
-			    b2Vec2 rA = cp.anchorA;
-			    b2Vec2 rB = cp.anchorB;
+			    var rA = cp.anchorA;
+			    var rB = cp.anchorB;
 
 			    // compute current separation
 			    // this is subject to round-off error if the anchor is far from the body center of mass
-			    b2Vec2 ds = b2Add( dp, b2Sub( Quaternion2D.RotateVector( dqB, rB ), Quaternion2D.RotateVector( dqA, rA ) ) );
+                var ds =  dp + Quaternion2D.RotateVector( dqB, rB ) - Quaternion2D.RotateVector( dqA, rA );
 			    float s = cp.baseSeparation + Vector2.Dot( ds, normal );
 
 			    float velocityBias = 0.0f;
@@ -1430,9 +1441,9 @@ public sealed partial class NewPhysicsSystem
 			    }
 
 			    // relative normal velocity at contact
-			    b2Vec2 vrA = b2Add( vA, Vector2Helpers.Cross( wA, rA ) );
-			    b2Vec2 vrB = b2Add( vB, Vector2Helpers.Cross( wB, rB ) );
-			    float vn = Vector2.Dot( b2Sub( vrB, vrA ), normal );
+                var vrA = vA + Vector2Helpers.Cross( wA, rA );
+                var vrB = vB + Vector2Helpers.Cross( wB, rB );
+			    float vn = Vector2.Dot( vrB - vrA, normal );
 
 			    // incremental normal impulse
 			    float impulse = -cp.normalMass * ( massScale * vn + velocityBias ) - impulseScale * cp.normalImpulse;
@@ -1446,7 +1457,7 @@ public sealed partial class NewPhysicsSystem
 			    totalNormalImpulse += newImpulse;
 
 			    // apply normal impulse
-			    b2Vec2 P = b2MulSV( impulse, normal );
+			    var P = impulse * normal;
 			    vA = Vector2Helpers.MulSub( vA, mA, P );
 			    wA -= iA * Vector2Helpers.Cross( rA, P );
 
@@ -1457,20 +1468,20 @@ public sealed partial class NewPhysicsSystem
 		    // Friction
 		    for ( int j = 0; j < pointCount; ++j )
 		    {
-			    b2ContactConstraintPoint* cp = constraint.points + j;
+			    ref var cp = ref constraint.points.AsSpan[j];
 
 			    // fixed anchor points
-			    b2Vec2 rA = cp.anchorA;
-			    b2Vec2 rB = cp.anchorB;
+                var rA = cp.anchorA;
+                var rB = cp.anchorB;
 
 			    // relative tangent velocity at contact
-			    b2Vec2 vrB = b2Add( vB, Vector2Helpers.Cross( wB, rB ) );
-			    b2Vec2 vrA = b2Add( vA, Vector2Helpers.Cross( wA, rA ) );
+			    var vrB = vB + Vector2Helpers.Cross( wB, rB );
+                var vrA = vA + Vector2Helpers.Cross( wA, rA );
 
 			    // vt = dot(vrB - sB * tangent - (vrA + sA * tangent), tangent)
 			    //    = dot(vrB - vrA, tangent) - (sA + sB)
 
-			    float vt = Vector2.Dot( b2Sub( vrB, vrA ), tangent ) - constraint.tangentSpeed;
+			    float vt = Vector2.Dot( vrB - vrA, tangent ) - constraint.tangentSpeed;
 
 			    // incremental tangent impulse
 			    float impulse = cp.tangentMass * ( -vt );
@@ -1482,7 +1493,7 @@ public sealed partial class NewPhysicsSystem
 			    cp.tangentImpulse = newImpulse;
 
 			    // apply tangent impulse
-			    b2Vec2 P = b2MulSV( impulse, tangent );
+                var P = impulse * tangent;
 			    vA = Vector2Helpers.MulSub( vA, mA, P );
 			    wA -= iA * Vector2Helpers.Cross( rA, P );
 			    vB = Vector2Helpers.MulAdd( vB, mB, P );
@@ -1501,42 +1512,39 @@ public sealed partial class NewPhysicsSystem
 			    wB += iB * deltaLambda;
 		    }
 
-		    if ( stateA.flags & b2_dynamicFlag )
+		    if ( (stateA.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0 )
 		    {
 			    stateA.linearVelocity = vA;
 			    stateA.angularVelocity = wA;
-		    }
+                states[constraint.indexA] = stateA;
+            }
 
-		    if ( stateB.flags & b2_dynamicFlag )
+		    if ( (stateB.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0 )
 		    {
 			    stateB.linearVelocity = vB;
 			    stateB.angularVelocity = wB;
-		    }
+                states[constraint.indexB] = stateB;
+            }
 	    }
-
-	    b2TracyCZoneEnd( solve_contact );
     }
 
     private void ApplyOverflowRestitution()
     {
-	    b2TracyCZoneNC( overflow_resitution, "Overflow Restitution", b2_colorViolet, true );
+	    var graph = _constraintGraph;
+	    ref var color = ref graph.colors[PhysicsConstants.OverflowIndex];
+	    ref var constraints = ref color.OverflowConstraints;
+	    int contactCount = color.ContactSims.Count;
+	    ref var awakeSet = ref _solverSets[(int) SetType.AwakeSet];
+	    ref var states = ref awakeSet.bodyStates;
 
-	    b2ConstraintGraph* graph = context.graph;
-	    b2GraphColor* color = graph.colors + PhysicsConstants.OverflowIndex;
-	    b2ContactConstraint* constraints = color.overflowConstraints;
-	    int contactCount = color.contactSims.count;
-	    b2World* world = context.world;
-	    b2SolverSet* awakeSet = b2SolverSetArray_Get( &world.solverSets, (int) SetType.AwakeSet );
-	    b2BodyState* states = awakeSet.bodyStates.data;
-
-	    float threshold = context.world.restitutionThreshold;
+	    float threshold = _restitutionThreshold;
 
 	    // dummy state to represent a static body
-	    b2BodyState dummyState = bodyState.Identity;
+	    var dummyState = BodyState.Identity;
 
 	    for ( int i = 0; i < contactCount; ++i )
 	    {
-		    b2ContactConstraint* constraint = constraints + i;
+		    ref var constraint = ref constraints[i];
 
 		    float restitution = constraint.restitution;
 		    if ( restitution == 0.0f )
@@ -1549,15 +1557,15 @@ public sealed partial class NewPhysicsSystem
 		    float mB = constraint.invMassB;
 		    float iB = constraint.invIB;
 
-		    b2BodyState* stateA = constraint.indexA == PhysicsConstants.NullIndex ? &dummyState : states + constraint.indexA;
-		    b2Vec2 vA = stateA.linearVelocity;
+		    var stateA = constraint.indexA == PhysicsConstants.NullIndex ? dummyState : states[constraint.indexA];
+            var vA = stateA.linearVelocity;
 		    float wA = stateA.angularVelocity;
 
-		    b2BodyState* stateB = constraint.indexB == PhysicsConstants.NullIndex ? &dummyState : states + constraint.indexB;
-		    b2Vec2 vB = stateB.linearVelocity;
+		    var stateB = constraint.indexB == PhysicsConstants.NullIndex ? dummyState : states[constraint.indexB];
+		    var vB = stateB.linearVelocity;
 		    float wB = stateB.angularVelocity;
 
-		    b2Vec2 normal = constraint.normal;
+            var normal = constraint.normal;
 		    int pointCount = constraint.pointCount;
 
 		    // it is possible to get more accurate restitution by iterating
@@ -1566,7 +1574,7 @@ public sealed partial class NewPhysicsSystem
 		    {
 			    for ( int j = 0; j < pointCount; ++j )
 			    {
-				    b2ContactConstraintPoint* cp = constraint.points + j;
+				    ref var cp = ref constraint.points.AsSpan[j];
 
 				    // if the normal impulse is zero then there was no collision
 				    // this skips speculative contact points that didn't generate an impulse
@@ -1577,13 +1585,13 @@ public sealed partial class NewPhysicsSystem
 				    }
 
 				    // fixed anchor points
-				    b2Vec2 rA = cp.anchorA;
-				    b2Vec2 rB = cp.anchorB;
+                    var rA = cp.anchorA;
+                    var rB = cp.anchorB;
 
 				    // relative normal velocity at contact
-				    b2Vec2 vrB = b2Add( vB, Vector2Helpers.Cross( wB, rB ) );
-				    b2Vec2 vrA = b2Add( vA, Vector2Helpers.Cross( wA, rA ) );
-				    float vn = Vector2.Dot( b2Sub( vrB, vrA ), normal );
+                    var vrB = vB + Vector2Helpers.Cross( wB, rB );
+                    var vrA = vA + Vector2Helpers.Cross( wA, rA );
+				    float vn = Vector2.Dot( vrB - vrA, normal );
 
 				    // compute normal impulse
 				    float impulse = -cp.normalMass * ( vn + restitution * cp.relativeVelocity );
@@ -1598,7 +1606,7 @@ public sealed partial class NewPhysicsSystem
 				    cp.totalNormalImpulse += impulse;
 
 				    // apply contact impulse
-				    b2Vec2 P = b2MulSV( impulse, normal );
+				    var P = impulse * normal;
 				    vA = Vector2Helpers.MulSub( vA, mA, P );
 				    wA -= iA * Vector2Helpers.Cross( rA, P );
 				    vB = Vector2Helpers.MulAdd( vB, mB, P );
@@ -1606,51 +1614,47 @@ public sealed partial class NewPhysicsSystem
 			    }
 		    }
 
-		    if ( stateA.flags & b2_dynamicFlag )
+		    if ( (stateA.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0 )
 		    {
 			    stateA.linearVelocity = vA;
 			    stateA.angularVelocity = wA;
+                states[constraint.indexA] = stateA;
 		    }
 
-		    if ( stateB.flags & b2_dynamicFlag )
+		    if ( (stateB.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0 )
 		    {
 			    stateB.linearVelocity = vB;
 			    stateB.angularVelocity = wB;
+                states[constraint.indexB] = stateB;
 		    }
 	    }
-
-	    b2TracyCZoneEnd( overflow_resitution );
     }
 
     private void StoreOverflowImpulses()
     {
-	    b2TracyCZoneNC( store_impulses, "Store", b2_colorFireBrick, true );
-
-	    b2ConstraintGraph* graph = context.graph;
-	    b2GraphColor* color = graph.colors + PhysicsConstants.OverflowIndex;
-	    b2ContactConstraint* constraints = color.overflowConstraints;
-	    b2ContactSim* contacts = color.contactSims.data;
-	    int contactCount = color.contactSims.count;
+	    var graph = _constraintGraph;
+	    ref var color = ref graph.colors[PhysicsConstants.OverflowIndex];
+	    ref var constraints = ref color.OverflowConstraints;
+	    ref var contacts = ref color.ContactSims;
+	    int contactCount = color.ContactSims.Count;
 
 	    for ( int i = 0; i < contactCount; ++i )
 	    {
-		    const b2ContactConstraint* constraint = constraints + i;
-		    b2ContactSim* contact = contacts + i;
-		    b2Manifold* manifold = &contact.manifold;
+		    ref var constraint = ref constraints[i];
+		    ref var contact = ref contacts[i];
+		    ref var manifold = ref contact.manifold;
 		    int pointCount = manifold.pointCount;
 
 		    for ( int j = 0; j < pointCount; ++j )
 		    {
-			    manifold.points[j].normalImpulse = constraint.points[j].normalImpulse;
-			    manifold.points[j].tangentImpulse = constraint.points[j].tangentImpulse;
-			    manifold.points[j].totalNormalImpulse = constraint.points[j].totalNormalImpulse;
-			    manifold.points[j].normalVelocity = constraint.points[j].relativeVelocity;
+			    manifold.points.AsSpan[j].normalImpulse = constraint.points.AsSpan[j].normalImpulse;
+			    manifold.points.AsSpan[j].tangentImpulse = constraint.points.AsSpan[j].tangentImpulse;
+			    manifold.points.AsSpan[j].totalNormalImpulse = constraint.points.AsSpan[j].totalNormalImpulse;
+			    manifold.points.AsSpan[j].normalVelocity = constraint.points.AsSpan[j].relativeVelocity;
 		    }
 
 		    manifold.rollingImpulse = constraint.rollingImpulse;
 	    }
-
-	    b2TracyCZoneEnd( store_impulses );
     }
 
     #endregion
@@ -1848,9 +1852,23 @@ public sealed partial class NewPhysicsSystem
         return returned;
     }
 
+    private FixedArray8<float> SimdDot(Vector2Wide a, Vector2Wide b)
+    {
+        return SimdAdd( SimdMul( a.X.AsSpan, b.X.AsSpan ).AsSpan, SimdMul( a.Y.AsSpan, b.Y.AsSpan ).AsSpan );
+    }
+
     private FixedArray8<float> SimdCross(Vector2Wide a, Vector2Wide b)
     {
         return SimdSub(SimdMul(a.X.AsSpan, b.Y.AsSpan).AsSpan, SimdMul(a.Y.AsSpan, b.X.AsSpan).AsSpan);
+    }
+
+    private Vector2Wide SimdRotateVector(ReadOnlySpan<float> qC, ReadOnlySpan<float> qS, ReadOnlySpan<float> vX, ReadOnlySpan<float> vY)
+    {
+        return new Vector2Wide()
+        {
+            X = SimdSub( SimdMul( qC, vX ).AsSpan, SimdMul( qS, vY ).AsSpan ),
+            Y = SimdAdd( SimdMul( qS, vX ).AsSpan, SimdMul( qC, vY ).AsSpan ),
+        };
     }
 
     #endregion

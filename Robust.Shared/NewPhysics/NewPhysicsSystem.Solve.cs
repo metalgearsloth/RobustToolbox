@@ -971,7 +971,7 @@ public sealed partial class NewPhysicsSystem
 
 	        bool enableContinuous = world.enableContinuous;
 
-	        const float speculativeDistance = B2_SPECULATIVE_DISTANCE;
+	        const float speculativeDistance = PhysicsConstants.SpeculativeDistance;
 	        const float aabbMargin = B2_AABB_MARGIN;
 
 	        DebugTools.Assert( startIndex <= endIndex );

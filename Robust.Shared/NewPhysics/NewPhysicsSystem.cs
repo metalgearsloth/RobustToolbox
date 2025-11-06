@@ -27,6 +27,10 @@ public sealed partial class NewPhysicsSystem : EntitySystem
      */
 
     // TODO: Access valuelists by ref
+    // TODO: Joints especially on valuelists by ref
+    // TODO: body / contact / joint creation and destruction
+    // TODO: Dirtying
+    // TODO: Writing bodystates back to the bodies.
     // TODO: Check generations on contacts + bodies + ids.
 
     [Dependency] private readonly IParallelManager _parallel = default!;
