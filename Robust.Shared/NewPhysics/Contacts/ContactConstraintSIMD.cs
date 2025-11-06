@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.Intrinsics;
 using Robust.Shared.Maths;
+using Robust.Shared.NewPhysics.Math;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.NewPhysics.Contacts;
@@ -13,36 +14,34 @@ namespace Robust.Shared.NewPhysics.Contacts;
 internal record struct b2ContactConstraintSIMD
 {
     // Even if no AVX we'll just use 8 lane.
-    // TODO: Use Vector256?
-
     public FixedArray8<int> indexA;
     public FixedArray8<int> indexB;
 
     // You'll float too
 
-    public FixedArray8<float> invMassA, invMassB;
-    public FixedArray8<float> invIA, invIB;
-    public FixedArray8<Vector2> normal;
-    public FixedArray8<float> friction;
-    public FixedArray8<float> tangentSpeed;
-    public FixedArray8<float> rollingResistance;
-    public FixedArray8<float> rollingMass;
-    public FixedArray8<float> rollingImpulse;
-    public FixedArray8<float> biasRate;
-    public FixedArray8<float> massScale;
-    public FixedArray8<float> impulseScale;
-    public FixedArray8<Vector2> anchorA1, anchorB1;
-    public FixedArray8<float> normalMass1, tangentMass1;
-    public FixedArray8<float> baseSeparation1;
-    public FixedArray8<float> normalImpulse1;
-    public FixedArray8<float> totalNormalImpulse1;
-    public FixedArray8<float> tangentImpulse1;
-    public FixedArray8<Vector2> anchorA2, anchorB2;
-    public FixedArray8<float> baseSeparation2;
-    public FixedArray8<float> normalImpulse2;
-    public FixedArray8<float> totalNormalImpulse2;
-    public FixedArray8<float> tangentImpulse2;
-    public FixedArray8<float> normalMass2, tangentMass2;
-    public FixedArray8<float> restitution;
-    public FixedArray8<float> relativeVelocity1, relativeVelocity2;
+    public FloatWide invMassA, invMassB;
+    public FloatWide invIA, invIB;
+    public Vector2Wide normal;
+    public FloatWide friction;
+    public FloatWide tangentSpeed;
+    public FloatWide rollingResistance;
+    public FloatWide rollingMass;
+    public FloatWide rollingImpulse;
+    public FloatWide biasRate;
+    public FloatWide massScale;
+    public FloatWide impulseScale;
+    public Vector2Wide anchorA1, anchorB1;
+    public FloatWide normalMass1, tangentMass1;
+    public FloatWide baseSeparation1;
+    public FloatWide normalImpulse1;
+    public FloatWide totalNormalImpulse1;
+    public FloatWide tangentImpulse1;
+    public Vector2Wide anchorA2, anchorB2;
+    public FloatWide baseSeparation2;
+    public FloatWide normalImpulse2;
+    public FloatWide totalNormalImpulse2;
+    public FloatWide tangentImpulse2;
+    public FloatWide normalMass2, tangentMass2;
+    public FloatWide restitution;
+    public FloatWide relativeVelocity1, relativeVelocity2;
 }

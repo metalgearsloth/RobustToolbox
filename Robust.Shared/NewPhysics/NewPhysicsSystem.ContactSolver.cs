@@ -1,7 +1,11 @@
 using System;
 using System.Numerics;
+using System.Runtime.Intrinsics;
+using Robust.Shared.Collections;
 using Robust.Shared.Maths;
+using Robust.Shared.NewPhysics.Bodies;
 using Robust.Shared.NewPhysics.Contacts;
+using Robust.Shared.NewPhysics.Math;
 using Robust.Shared.Physics;
 using Robust.Shared.Threading;
 using Robust.Shared.Utility;
@@ -10,6 +14,58 @@ namespace Robust.Shared.NewPhysics;
 
 public sealed partial class NewPhysicsSystem
 {
+    // This is a load and transpose
+    private unsafe BodyStateWide GatherBodies(ref ValueList<BodyState> states, ReadOnlySpan<int> indices)
+    {
+        var identity = new FloatWide();
+        identity.Values._06 = 1f;
+
+        fixed (float* src = states)
+        {
+
+        }
+
+	    var b0 = indices[0] == PhysicsConstants.NullIndex ? identity : Vector256.Load( (float*)( states[indices[0]] ) );
+	    b2FloatW b1 = indices[1] == PhysicsConstants.NullIndex ? identity : _mm256_load_ps( (float*)( states + indices[1] ) );
+	    b2FloatW b2 = indices[2] == PhysicsConstants.NullIndex ? identity : _mm256_load_ps( (float*)( states + indices[2] ) );
+	    b2FloatW b3 = indices[3] == PhysicsConstants.NullIndex ? identity : _mm256_load_ps( (float*)( states + indices[3] ) );
+	    b2FloatW b4 = indices[4] == PhysicsConstants.NullIndex ? identity : _mm256_load_ps( (float*)( states + indices[4] ) );
+	    b2FloatW b5 = indices[5] == PhysicsConstants.NullIndex ? identity : _mm256_load_ps( (float*)( states + indices[5] ) );
+	    b2FloatW b6 = indices[6] == PhysicsConstants.NullIndex ? identity : _mm256_load_ps( (float*)( states + indices[6] ) );
+	    b2FloatW b7 = indices[7] == PhysicsConstants.NullIndex ? identity : _mm256_load_ps( (float*)( states + indices[7] ) );
+
+        NumericsHelpers.Add();
+        var bbb0 = Vector256.Load(states[indices[0]]);
+
+	    b2FloatW t0 = _mm256_unpacklo_ps( b0, b1 );
+	    b2FloatW t1 = _mm256_unpackhi_ps( b0, b1 );
+	    b2FloatW t2 = _mm256_unpacklo_ps( b2, b3 );
+	    b2FloatW t3 = _mm256_unpackhi_ps( b2, b3 );
+	    b2FloatW t4 = _mm256_unpacklo_ps( b4, b5 );
+	    b2FloatW t5 = _mm256_unpackhi_ps( b4, b5 );
+	    b2FloatW t6 = _mm256_unpacklo_ps( b6, b7 );
+	    b2FloatW t7 = _mm256_unpackhi_ps( b6, b7 );
+	    b2FloatW tt0 = _mm256_shuffle_ps( t0, t2, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+	    b2FloatW tt1 = _mm256_shuffle_ps( t0, t2, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+	    b2FloatW tt2 = _mm256_shuffle_ps( t1, t3, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+	    b2FloatW tt3 = _mm256_shuffle_ps( t1, t3, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+	    b2FloatW tt4 = _mm256_shuffle_ps( t4, t6, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+	    b2FloatW tt5 = _mm256_shuffle_ps( t4, t6, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+	    b2FloatW tt6 = _mm256_shuffle_ps( t5, t7, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+	    b2FloatW tt7 = _mm256_shuffle_ps( t5, t7, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+
+	    b2BodyStateW simdBody;
+	    simdBody.v.X = _mm256_permute2f128_ps( tt0, tt4, 0x20 );
+	    simdBody.v.Y = _mm256_permute2f128_ps( tt1, tt5, 0x20 );
+	    simdBody.w = _mm256_permute2f128_ps( tt2, tt6, 0x20 );
+	    simdBody.flags = _mm256_permute2f128_ps( tt3, tt7, 0x20 );
+	    simdBody.dp.X = _mm256_permute2f128_ps( tt0, tt4, 0x31 );
+	    simdBody.dp.Y = _mm256_permute2f128_ps( tt1, tt5, 0x31 );
+	    simdBody.dq.C = _mm256_permute2f128_ps( tt2, tt6, 0x31 );
+	    simdBody.dq.S = _mm256_permute2f128_ps( tt3, tt7, 0x31 );
+	    return simdBody;
+    }
+
     private void PrepareContactsTask(int startIndex, int endIndex)
     {
 	    ref var contacts = ref _contextContacts;
@@ -867,6 +923,9 @@ public sealed partial class NewPhysicsSystem
 
     private void WarmStartContactsTask( int startIndex, int endIndex, int colorIndex )
     {
+        // TODO: Add in the wide data-structures to Math and just do that for simplicity
+
+
 	    ref var states = ref _contextBodyStates;
         var color = _constraintGraph.colors[colorIndex];
         var constraints = _contextSimdContactConstraints.Span.Slice(color.SimdConstraintIndex, color.SimdConstraintCount);
@@ -874,8 +933,8 @@ public sealed partial class NewPhysicsSystem
 	    for ( int i = startIndex; i < endIndex; ++i )
 	    {
 		    ref var c = ref constraints[i];
-		    var bA = GatherBodies(ref states, c.indexA);
-		    var bB = GatherBodies(ref states, c.indexB);
+		    var bA = GatherBodies(ref states, c.indexA.AsSpan);
+		    var bB = GatherBodies(ref states, c.indexB.AsSpan);
 
 		    b2FloatW tangentX = c.normal.Y;
 		    b2FloatW tangentY = b2SubW( b2ZeroW(), c.normal.X );
@@ -886,6 +945,8 @@ public sealed partial class NewPhysicsSystem
 			    b2Vec2W rB = c.anchorB1;
 
 			    b2Vec2W P;
+                NumericsHelpers.Multiply(c.normalImpulse1, c.normal.X);
+
 			    P.X = b2AddW( b2MulW( c.normalImpulse1, c.normal.X ), b2MulW( c.tangentImpulse1, tangentX ) );
 			    P.Y = b2AddW( b2MulW( c.normalImpulse1, c.normal.Y ), b2MulW( c.tangentImpulse1, tangentY ) );
 			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2CrossW( rA, P ) );
@@ -1312,7 +1373,7 @@ public sealed partial class NewPhysicsSystem
     {
 	    b2TracyCZoneNC( store_impulses, "Store", b2_colorFireBrick, true );
 
-	    b2ContactSim** contacts = context.contacts;
+	    var contacts = _contacts;
 	    const b2ContactConstraintSIMD* constraints = context.simdContactConstraints;
 
 	    b2Manifold dummy = { 0 };
@@ -1334,7 +1395,7 @@ public sealed partial class NewPhysicsSystem
 
 		    for ( int laneIndex = 0; laneIndex < B2_SIMD_WIDTH; ++laneIndex )
 		    {
-			    b2Manifold* m = contacts[baseIndex + laneIndex] == NULL ? &dummy : &contacts[baseIndex + laneIndex].manifold;
+			    ref var m = contacts[baseIndex + laneIndex] == null ? &dummy : &contacts[baseIndex + laneIndex].manifold;
 			    m.rollingImpulse = rollingImpulse[laneIndex];
 
 			    m.points[0].normalImpulse = normalImpulse1[laneIndex];
