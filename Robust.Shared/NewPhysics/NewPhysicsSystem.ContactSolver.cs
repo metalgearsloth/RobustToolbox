@@ -147,75 +147,165 @@ public sealed partial class NewPhysicsSystem
         {
             ref var vxRef = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.vX);
             ref var vyRef = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.vX);
-            ref var floatRef2 = ref Unsafe.As<FixedArray8<float>, float>(ref state2);
-            ref var floatRef3 = ref Unsafe.As<FixedArray8<float>, float>(ref state3);
-            ref var floatRef4 = ref Unsafe.As<FixedArray8<float>, float>(ref state4);
-            ref var floatRef5 = ref Unsafe.As<FixedArray8<float>, float>(ref state5);
-            ref var floatRef6 = ref Unsafe.As<FixedArray8<float>, float>(ref state6);
-            ref var floatRef7 = ref Unsafe.As<FixedArray8<float>, float>(ref state7);
+            ref var wRef = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.w);
+            ref var flagsRef = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.flags);
+            ref var dpXRef = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.dpX);
+            ref var dpYRef = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.dpY);
+            ref var dqCRef = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.dqC);
+            ref var dqSRef = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.dqS);
 
             fixed (float* ptr0 = &vxRef)
             fixed (float* ptr1 = &vyRef)
-            fixed (float* ptr2 = &floatRef2)
-            fixed (float* ptr3 = &floatRef3)
-            fixed (float* ptr4 = &floatRef4)
-            fixed (float* ptr5 = &floatRef5)
-            fixed (float* ptr6 = &floatRef6)
-            fixed (float* ptr7 = &floatRef7)
+            fixed (float* ptr2 = &wRef)
+            fixed (float* ptr3 = &flagsRef)
+            fixed (float* ptr4 = &dpXRef)
+            fixed (float* ptr5 = &dpYRef)
+            fixed (float* ptr6 = &dqCRef)
+            fixed (float* ptr7 = &dqSRef)
             {
                 var bvX = Avx.LoadAlignedVector256(ptr0);
                 var bvY = Avx.LoadAlignedVector256(ptr1);
-                var b2 = Avx.LoadAlignedVector256(ptr2);
-                var b3 = Avx.LoadAlignedVector256(ptr3);
-                var b4 = Avx.LoadAlignedVector256(ptr4);
-                var b5 = Avx.LoadAlignedVector256(ptr5);
-                var b6 = Avx.LoadAlignedVector256(ptr6);
-                var b7 = Avx.LoadAlignedVector256(ptr7);
+                var bW = Avx.LoadAlignedVector256(ptr2);
+                var bFlags = Avx.LoadAlignedVector256(ptr3);
+                var bDpX = Avx.LoadAlignedVector256(ptr4);
+                var bDpY = Avx.LoadAlignedVector256(ptr5);
+                var bDqC = Avx.LoadAlignedVector256(ptr6);
+                var bDqS = Avx.LoadAlignedVector256(ptr7);
 
                 var t0 = Avx.UnpackLow(bvX, bvY);
 	            var t1 = Avx.UnpackHigh( bvX, bvY );
-	            var t2 = Avx.UnpackLow( simdBody->w, simdBody->flags );
-                var t3 = Avx.UnpackHigh( simdBody->w, simdBody->flags );
-                var t4 = Avx.UnpackLow( simdBody->dp.X, simdBody->dp.Y );
-                var t5 = Avx.UnpackHigh( simdBody->dp.X, simdBody->dp.Y );
-                var t6 = Avx.UnpackLow( simdBody->dq.C, simdBody->dq.S );
-                var t7 = Avx.UnpackHigh( simdBody->dq.C, simdBody->dq.S );
+	            var t2 = Avx.UnpackLow( bW, bFlags );
+                var t3 = Avx.UnpackHigh( bW, bFlags );
+                var t4 = Avx.UnpackLow( bDpX, bDpY );
+                var t5 = Avx.UnpackHigh( bDpX, bDpY );
+                var t6 = Avx.UnpackLow( bDqC, bDqS );
+                var t7 = Avx.UnpackHigh( bDqC, bDqS );
 
-                var tt0 = _mm256_shuffle_ps( t0, t2, _MM_SHUFFLE( 1, 0, 1, 0 ) );
-                var tt1 = _mm256_shuffle_ps( t0, t2, _MM_SHUFFLE( 3, 2, 3, 2 ) );
-                var tt2 = _mm256_shuffle_ps( t1, t3, _MM_SHUFFLE( 1, 0, 1, 0 ) );
-                var tt3 = _mm256_shuffle_ps( t1, t3, _MM_SHUFFLE( 3, 2, 3, 2 ) );
-                var tt4 = _mm256_shuffle_ps( t4, t6, _MM_SHUFFLE( 1, 0, 1, 0 ) );
-                var tt5 = _mm256_shuffle_ps( t4, t6, _MM_SHUFFLE( 3, 2, 3, 2 ) );
-                var tt6 = _mm256_shuffle_ps( t5, t7, _MM_SHUFFLE( 1, 0, 1, 0 ) );
-                var tt7 = _mm256_shuffle_ps( t5, t7, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+                var tt0 = Avx.Shuffle( t0, t2, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+                var tt1 = Avx.Shuffle( t0, t2, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+                var tt2 = Avx.Shuffle( t1, t3, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+                var tt3 = Avx.Shuffle( t1, t3, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+                var tt4 = Avx.Shuffle( t4, t6, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+                var tt5 = Avx.Shuffle( t4, t6, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+                var tt6 = Avx.Shuffle( t5, t7, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+                var tt7 = Avx.Shuffle( t5, t7, _MM_SHUFFLE( 3, 2, 3, 2 ) );
 
 	            // I don't use any dummy body in the body array because this will lead to multithreaded sharing and the
 	            // associated cache flushing.
 	            // todo_erin could add a check for kinematic bodies here
 
-	            if ( indices[0] != PhysicsConstants.NullIndex && ( states[indices[0]].flags & (uint) BodyFlags.b2_dynamicFlag ) != 0 )
-		            _mm256_store_ps( (float*)( states + indices[0] ), _mm256_permute2f128_ps( tt0, tt4, 0x20 ) );
-	            if ( indices[1] != PhysicsConstants.NullIndex && ( states[indices[1]].flags & (uint) BodyFlags.b2_dynamicFlag ) != 0 )
-		            _mm256_store_ps( (float*)( states + indices[1] ), _mm256_permute2f128_ps( tt1, tt5, 0x20 ) );
-	            if ( indices[2] != PhysicsConstants.NullIndex && ( states[indices[2]].flags & (uint) BodyFlags.b2_dynamicFlag ) != 0 )
-		            _mm256_store_ps( (float*)( states + indices[2] ), _mm256_permute2f128_ps( tt2, tt6, 0x20 ) );
-	            if ( indices[3] != PhysicsConstants.NullIndex && ( states[indices[3]].flags & (uint) BodyFlags.b2_dynamicFlag ) != 0 )
-		            _mm256_store_ps( (float*)( states + indices[3] ), _mm256_permute2f128_ps( tt3, tt7, 0x20 ) );
-	            if ( indices[4] != PhysicsConstants.NullIndex && ( states[indices[4]].flags & (uint) BodyFlags.b2_dynamicFlag ) != 0 )
-		            _mm256_store_ps( (float*)( states + indices[4] ), _mm256_permute2f128_ps( tt0, tt4, 0x31 ) );
-	            if ( indices[5] != PhysicsConstants.NullIndex && ( states[indices[5]].flags & (uint) BodyFlags.b2_dynamicFlag ) != 0 )
-		            _mm256_store_ps( (float*)( states + indices[5] ), _mm256_permute2f128_ps( tt1, tt5, 0x31 ) );
-	            if ( indices[6] != PhysicsConstants.NullIndex && ( states[indices[6]].flags & (uint) BodyFlags.b2_dynamicFlag ) != 0 )
-		            _mm256_store_ps( (float*)( states + indices[6] ), _mm256_permute2f128_ps( tt2, tt6, 0x31 ) );
-	            if ( indices[7] != PhysicsConstants.NullIndex && ( states[indices[7]].flags & (uint) BodyFlags.b2_dynamicFlag ) != 0 )
-		            _mm256_store_ps( (float*)( states + indices[7] ), _mm256_permute2f128_ps( tt3, tt7, 0x31 ) );
+                if (indices[0] != PhysicsConstants.NullIndex &&
+                    (states[indices[0]].flags & (uint)BodyFlags.b2_dynamicFlag) != 0)
+                {
+                    ref var state = ref states[indices[0]];
+                    ref var floatRef = ref Unsafe.As<BodyState, float>(ref state);
+
+                    fixed (float* statePtr = &floatRef)
+                    {
+                        Avx.Store(statePtr, Avx.Permute2x128(tt0, tt4, 0x20));
+                    }
+                }
+
+                if (indices[1] != PhysicsConstants.NullIndex &&
+                    (states[indices[1]].flags & (uint)BodyFlags.b2_dynamicFlag) != 0)
+                {
+                    ref var state = ref states[indices[1]];
+                    ref var floatRef = ref Unsafe.As<BodyState, float>(ref state);
+
+                    fixed (float* statePtr = &floatRef)
+                    {
+                        Avx.Store(statePtr, Avx.Permute2x128(tt1, tt5, 0x20));
+                    }
+                }
+
+                if (indices[2] != PhysicsConstants.NullIndex &&
+                    (states[indices[2]].flags & (uint)BodyFlags.b2_dynamicFlag) != 0)
+                {
+                    ref var state = ref states[indices[2]];
+                    ref var floatRef = ref Unsafe.As<BodyState, float>(ref state);
+
+                    fixed (float* statePtr = &floatRef)
+                    {
+                        Avx.Store(statePtr, Avx.Permute2x128(tt2, tt6, 0x20));
+                    }
+                }
+
+                if (indices[3] != PhysicsConstants.NullIndex &&
+                    (states[indices[3]].flags & (uint)BodyFlags.b2_dynamicFlag) != 0)
+                {
+                    ref var state = ref states[indices[3]];
+                    ref var floatRef = ref Unsafe.As<BodyState, float>(ref state);
+
+                    fixed (float* statePtr = &floatRef)
+                    {
+                        Avx.Store(statePtr, Avx.Permute2x128(tt3, tt7, 0x20));
+                    }
+                }
+
+                if (indices[4] != PhysicsConstants.NullIndex &&
+                    (states[indices[4]].flags & (uint)BodyFlags.b2_dynamicFlag) != 0)
+                {
+                    ref var state = ref states[indices[4]];
+                    ref var floatRef = ref Unsafe.As<BodyState, float>(ref state);
+
+                    fixed (float* statePtr = &floatRef)
+                    {
+                        Avx.Store(statePtr, Avx.Permute2x128(tt0, tt4, 0x31));
+                    }
+                }
+
+                if (indices[5] != PhysicsConstants.NullIndex &&
+                    (states[indices[5]].flags & (uint)BodyFlags.b2_dynamicFlag) != 0)
+                {
+                    ref var state = ref states[indices[5]];
+                    ref var floatRef = ref Unsafe.As<BodyState, float>(ref state);
+
+                    fixed (float* statePtr = &floatRef)
+                    {
+                        Avx.Store(statePtr, Avx.Permute2x128(tt1, tt5, 0x31));
+                    }
+                }
+
+                if (indices[6] != PhysicsConstants.NullIndex &&
+                    (states[indices[6]].flags & (uint)BodyFlags.b2_dynamicFlag) != 0)
+                {
+                    ref var state = ref states[indices[6]];
+                    ref var floatRef = ref Unsafe.As<BodyState, float>(ref state);
+
+                    fixed (float* statePtr = &floatRef)
+                    {
+                        Avx.Store(statePtr, Avx.Permute2x128(tt2, tt6, 0x31));
+                    }
+                }
+
+                if (indices[7] != PhysicsConstants.NullIndex &&
+                    (states[indices[7]].flags & (uint)BodyFlags.b2_dynamicFlag) != 0)
+                {
+                    ref var state = ref states[indices[7]];
+                    ref var floatRef = ref Unsafe.As<BodyState, float>(ref state);
+
+                    fixed (float* statePtr = &floatRef)
+                    {
+                        Avx.Store(statePtr, Avx.Permute2x128(tt3, tt7, 0x31));
+                    }
+                }
             }
         }
+        // TODO: SSE
         else
         {
-            // Lol
-            throw new NotImplementedException();
+            for (var i = 0; i < indices.Length; i++)
+            {
+                ref var state = ref states[indices[i]];
+                state.linearVelocity.X = simdBody.vX.AsSpan[i];
+                state.linearVelocity.Y = simdBody.vY.AsSpan[i];
+                state.angularVelocity = simdBody.w.AsSpan[i];
+                state.flags = (uint) simdBody.flags.AsSpan[i];
+                state.deltaPosition.X = simdBody.dpX.AsSpan[i];
+                state.deltaPosition.Y = simdBody.dpY.AsSpan[i];
+                state.deltaRotation.C = simdBody.dqC.AsSpan[i];
+                state.deltaRotation.S = simdBody.dqS.AsSpan[i];
+            }
         }
     }
 
@@ -610,8 +700,8 @@ public sealed partial class NewPhysicsSystem
 		    bA.w = SimdMulSub( bA.w.AsSpan, c.invIA.AsSpan, c.rollingImpulse.AsSpan );
 		    bB.w = SimdMulAdd( bB.w.AsSpan, c.invIB.AsSpan, c.rollingImpulse.AsSpan );
 
-		    ScatterBodies( _contextBodyStates, c.indexA, bA );
-		    ScatterBodies( _contextBodyStates, c.indexB, bB );
+		    ScatterBodies( _contextBodyStates.Span, c.indexA.AsSpan, ref bA );
+		    ScatterBodies( _contextBodyStates.Span, c.indexB.AsSpan, ref bB );
 	    }
     }
 
@@ -634,34 +724,38 @@ public sealed partial class NewPhysicsSystem
 		    FixedArray8<float> biasRate, massScale, impulseScale;
 		    if ( useBias )
 		    {
-			    biasRate = SimdMul( c.massScale, c.biasRate );
+			    biasRate = SimdMul( c.massScale.AsSpan, c.biasRate.AsSpan );
 			    massScale = c.massScale;
 			    impulseScale = c.impulseScale;
 		    }
 		    else
 		    {
-			    biasRate = b2ZeroW();
+			    biasRate = new FixedArray8<float>();
 			    massScale = oneW;
-			    impulseScale = b2ZeroW();
+			    impulseScale = new FixedArray8<float>();
 		    }
 
-		    b2FloatW totalNormalImpulse = b2ZeroW();
+		    var totalNormalImpulse = new FixedArray8<float>();
 
-		    b2Vec2W dp = { SimdSub( bB.dp.X, bA.dp.X ), SimdSub( bB.dp.Y, bA.dp.Y ) };
+		    var dp = new Vector2Wide()
+            {
+                X = SimdSub( bB.dpX.AsSpan, bA.dpX.AsSpan ),
+                Y = SimdSub( bB.dpY.AsSpan, bA.dpY.AsSpan ),
+            };
 
 		    // point1 non-penetration constraint
 		    {
 			    // Fixed anchors for impulses
-			    b2Vec2W rA = c.anchorA1;
-			    b2Vec2W rB = c.anchorB1;
+			    var rA = c.anchorA1;
+                var rB = c.anchorB1;
 
 			    // Moving anchors for current separation
-			    b2Vec2W rsA = Quaternion2D.RotateVectorW( bA.dq, rA );
-			    b2Vec2W rsB = Quaternion2D.RotateVectorW( bB.dq, rB );
+                var rsA = Quaternion2D.RotateVectorW( bA.dq, rA );
+                var rsB = Quaternion2D.RotateVectorW( bB.dq, rB );
 
 			    // compute current separation
 			    // this is subject to round-off error if the anchor is far from the body center of mass
-			    b2Vec2W ds = { SimdAdd( dp.X, SimdSub( rsB.X, rsA.X ) ), SimdAdd( dp.Y, SimdSub( rsB.Y, rsA.Y ) ) };
+			    b2Vec2W ds = { SimdAdd( dp.X.AsSpan, SimdSub( rsB.X, rsA.X ) ), SimdAdd( dp.Y.AsSpan, SimdSub( rsB.Y, rsA.Y ) ) };
 			    b2FloatW s = SimdAdd( Vector2.DotW( c.normal, ds ), c.baseSeparation1 );
 
 			    // Apply speculative bias if separation is greater than zero, otherwise apply soft constraint bias
@@ -826,12 +920,12 @@ public sealed partial class NewPhysicsSystem
 			    var Px = SimdMul( impulse, tangentX );
                 var Py = SimdMul( impulse, tangentY );
 
-			    bA.v.X = SimdMulSub( bA.v.X, c.invMassA, Px );
-			    bA.v.Y = SimdMulSub( bA.v.Y, c.invMassA, Py );
+			    bA.vX = SimdMulSub( bA.vX, c.invMassA, Px );
+			    bA.vY = SimdMulSub( bA.vY, c.invMassA, Py );
 			    bA.w = SimdMulSub( bA.w, c.invIA, SimdSub( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
 
-			    bB.v.X = SimdMulAdd( bB.v.X, c.invMassB, Px );
-			    bB.v.Y = SimdMulAdd( bB.v.Y, c.invMassB, Py );
+			    bB.vX = SimdMulAdd( bB.vX, c.invMassB, Px );
+			    bB.vY = SimdMulAdd( bB.vY, c.invMassB, Py );
 			    bB.w = SimdMulAdd( bB.w, c.invIB, SimdSub( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
 		    }
 
@@ -847,8 +941,8 @@ public sealed partial class NewPhysicsSystem
 			    bB.w = SimdMulAdd( bB.w, c.invIB, deltaLambda );
 		    }
 
-		    b2ScatterBodies( states, c.indexA, &bA );
-		    b2ScatterBodies( states, c.indexB, &bB );
+		    ScatterBodies(states.Span, c.indexA.AsSpan, ref bA );
+		    ScatterBodies(states.Span, c.indexB.AsSpan, ref bB );
 	    }
 
 	    b2TracyCZoneEnd( solve_contact );
@@ -856,12 +950,10 @@ public sealed partial class NewPhysicsSystem
 
     private void ApplyRestitutionTask( int startIndex, int endIndex, int colorIndex )
     {
-	    b2TracyCZoneNC( restitution, "Restitution", b2_colorDodgerBlue, true );
-
-	    b2BodyState* states = context.states;
+	    ref var states = ref _states;
         var constraints = _contextSimdContactConstraints.Span.Slice(_constraintGraph.colors[colorIndex].SimdConstraintIndex, _constraintGraph.colors[colorIndex].SimdConstraintCount)
-	    b2FloatW threshold = SimdSplat( context.world.restitutionThreshold );
-	    b2FloatW zero = b2ZeroW();
+	    var threshold = SimdSplat(_restitutionThreshold);
+	    var zero = new FixedArray8<float>();
 
 	    for ( int i = startIndex; i < endIndex; ++i )
 	    {
