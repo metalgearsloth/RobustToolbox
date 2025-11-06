@@ -1,6 +1,10 @@
+using System;
 using System.Numerics;
+using Robust.Shared.Maths;
 using Robust.Shared.NewPhysics.Contacts;
+using Robust.Shared.Physics;
 using Robust.Shared.Threading;
+using Robust.Shared.Utility;
 
 namespace Robust.Shared.NewPhysics;
 
@@ -8,65 +12,68 @@ public sealed partial class NewPhysicsSystem
 {
     private void PrepareContactsTask(int startIndex, int endIndex)
     {
-	    var contacts = context.contacts;
-	    var constraints = context.simdContactConstraints;
-	    var awakeStates = context.states;
+	    ref var contacts = ref _contextContacts;
+	    ref var constraints = ref _contextSimdContactConstraints;
+	    ref var awakeStates = ref _contextBodyStates;
     #if DEBUG
 	    var bodies = _bodies;
     #endif
 
 	    // Stiffer for static contacts to avoid bodies getting pushed through the ground
-	    var contactSoftness = context.contactSoftness;
-	    var staticSoftness = context.staticSoftness;
+	    var contactSoftness = _contactSoftness;
+	    var staticSoftness = _staticSoftness;
 	    bool enableSoftening = _enableContactSoftening;
 
 	    float warmStartScale = _enableWarmStarting ? 1.0f : 0.0f;
 
 	    for ( int i = startIndex; i < endIndex; ++i )
 	    {
-		    var constraint = constraints[i];
+		    ref var constraint = ref constraints[i];
+            var constraintIndicesA = constraint.indexA.AsSpan;
+            var constraintIndicesB = constraint.indexB.AsSpan;
+            var constraintNormals = constraint.normal.AsSpan;
 
-		    for ( int j = 0; j < B2_SIMD_WIDTH; ++j )
+		    for ( int j = 0; j < _simdWidth; ++j )
 		    {
-			    b2ContactSim* contactSim = contacts[B2_SIMD_WIDTH * i + j];
+			    ref var contactSim = ref contacts[_simdWidth * i + j];
 
-			    if ( contactSim != NULL )
+			    if ( contactSim != null )
 			    {
-				    const b2Manifold* manifold = &contactSim.manifold;
+				    ref var manifold = ref contactSim.manifold;
 
 				    int indexA = contactSim.bodySimIndexA;
 				    int indexB = contactSim.bodySimIndexB;
 
     #if DEBUG
-				    b2Body* bodyA = bodies + contactSim.bodyIdA;
-				    int validIndexA = bodyA.setIndex == (int) SetType.AwakeSet ? bodyA.localIndex : PhysicsConstants.NullIndex;
-				    b2Body* bodyB = bodies + contactSim.bodyIdB;
-				    int validIndexB = bodyB.setIndex == (int) SetType.AwakeSet ? bodyB.localIndex : PhysicsConstants.NullIndex;
+				    var bodyA = bodies[contactSim.bodyIdA].Comp;
+				    int validIndexA = bodyA.SetIndex == (int) SetType.AwakeSet ? bodyA.LocalIndex : PhysicsConstants.NullIndex;
+				    var bodyB = bodies[contactSim.bodyIdB].Comp;
+				    int validIndexB = bodyB.SetIndex == (int) SetType.AwakeSet ? bodyB.LocalIndex : PhysicsConstants.NullIndex;
 
 				    DebugTools.Assert( indexA == validIndexA );
 				    DebugTools.Assert( indexB == validIndexB );
     #endif
-				    constraint.indexA[j] = indexA;
-				    constraint.indexB[j] = indexB;
+				    constraintIndicesA[j] = indexA;
+				    constraintIndicesB[j] = indexB;
 
-				    b2Vec2 vA = Vector2.Zero;
+				    var vA = Vector2.Zero;
 				    float wA = 0.0f;
 				    float mA = contactSim.invMassA;
 				    float iA = contactSim.invIA;
 				    if ( indexA != PhysicsConstants.NullIndex )
 				    {
-					    b2BodyState* stateA = awakeStates + indexA;
+					    ref var stateA = ref awakeStates[indexA];
 					    vA = stateA.linearVelocity;
 					    wA = stateA.angularVelocity;
 				    }
 
-				    b2Vec2 vB = Vector2.Zero;
+				    var vB = Vector2.Zero;
 				    float wB = 0.0f;
 				    float mB = contactSim.invMassB;
 				    float iB = contactSim.invIB;
 				    if ( indexB != PhysicsConstants.NullIndex )
 				    {
-					    b2BodyState* stateB = awakeStates + indexB;
+					    ref var stateB = ref awakeStates[indexB];
 					    vB = stateB.linearVelocity;
 					    wB = stateB.angularVelocity;
 				    }
@@ -81,7 +88,7 @@ public sealed partial class NewPhysicsSystem
 					    ( (float*)&constraint.rollingMass )[j] = k > 0.0f ? 1.0f / k : 0.0f;
 				    }
 
-				    b2Softness soft = contactSoftness;
+				    var soft = contactSoftness;
 				    if (indexA == PhysicsConstants.NullIndex || indexB == PhysicsConstants.NullIndex)
 				    {
 					    soft = staticSoftness;
@@ -89,7 +96,7 @@ public sealed partial class NewPhysicsSystem
 				    else if (enableSoftening)
 				    {
 					    // todo experimental feature
-					    float contactHertz = b2MinFloat( world.contactHertz, 0.125f * context.inv_h );
+					    float contactHertz = MathF.Min(_contactHertz, 0.125f * _invH);
 					    float ratio = 1.0f;
 					    if ( mA < mB )
 					    {
@@ -99,12 +106,13 @@ public sealed partial class NewPhysicsSystem
 					    {
 						    ratio = MathF.Max( 0.5f, mB / mA );
 					    }
-					    soft = b2MakeSoft( ratio * contactHertz, ratio * world.contactDampingRatio, _h );
+					    soft = MakeSoft( ratio * contactHertz, ratio * _contactDampingRatio, _h );
 				    }
 
 				    var normal = manifold.normal;
-				    ( (float*)&constraint.normal.X )[j] = normal.x;
-				    ( (float*)&constraint.normal.Y )[j] = normal.y;
+
+                    constraintNormals[j].X = normal.X;
+                    constraintNormals[j].Y = normal.Y;
 
 				    ( (float*)&constraint.friction )[j] = contactSim.friction;
 				    ( (float*)&constraint.tangentSpeed )[j] = contactSim.tangentSpeed;
@@ -119,10 +127,10 @@ public sealed partial class NewPhysicsSystem
 				    var tangent = normal.RightPerp();
 
 				    {
-					    const b2ManifoldPoint* mp = manifold.points + 0;
+					    ref var mp = ref manifold.points._00;
 
-					    b2Vec2 rA = mp.anchorA;
-					    b2Vec2 rB = mp.anchorB;
+					    var rA = mp.anchorA;
+                        var rB = mp.anchorB;
 
 					    ( (float*)&constraint.anchorA1.X )[j] = rA.x;
 					    ( (float*)&constraint.anchorA1.Y )[j] = rA.y;
@@ -146,8 +154,8 @@ public sealed partial class NewPhysicsSystem
 					    ( (float*)&constraint->tangentMass1 )[j] = kTangent > 0.0f ? 1.0f / kTangent : 0.0f;
 
 					    // relative velocity for restitution
-					    b2Vec2 vrA = b2Add( vA, Vector2Helpers.Cross( wA, rA ) );
-					    b2Vec2 vrB = b2Add( vB, Vector2Helpers.Cross( wB, rB ) );
+					    var vrA = vA + Vector2Helpers.Cross( wA, rA );
+                        var vrB = vB + Vector2Helpers.Cross( wB, rB );
 					    ( (float*)&constraint->relativeVelocity1 )[j] = Vector2.Dot( normal, b2Sub( vrB, vrA ) );
 				    }
 

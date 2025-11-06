@@ -123,7 +123,8 @@ public sealed partial class NewPhysicsSystem
     private ref BodySim GetBodySim(PhysicsComponent body)
     {
         var set = _solverSets[body.SetIndex];
-        return ref CollectionsMarshal.AsSpan(set.bodySims)[body.LocalIndex];
+        ref var sims = ref set.bodySims;
+        return ref sims[body.LocalIndex];
     }
 
     internal sealed class ConstraintGraph
@@ -149,8 +150,15 @@ public sealed partial class NewPhysicsSystem
         public ValueList<JointSim> JointSims = new();
 
         // transient
+        // Box2D uses a pointer here that references the context constraint but we won't mess with that.
+        /// <summary>
+        /// Stores the index of the SIMD constraints for this graph color in the step context.
+        /// </summary>
+        public int SimdConstraintIndex;
+
+        public int SimdConstraintCount;
+
         // box2d uses a union for this but we don't have that luxury unless we start being unsafe with it.
-        public ValueList<b2ContactConstraintSIMD> SimdConstraints = new();
         public ValueList<ContactConstraint> OverflowConstraints = new();
     }
 
@@ -166,14 +174,14 @@ public sealed partial class NewPhysicsSystem
             // contact lives in constraint graph
             DebugTools.Assert(0 <= contact.colorIndex && contact.colorIndex < PhysicsConstants.GraphColorCount);
             var color = _constraintGraph.colors[contact.colorIndex];
-            var sims = CollectionsMarshal.AsSpan(color.ContactSims);
+            ref var sims = ref color.ContactSims;
 
             ref var sim = ref sims[contact.localIndex];
             return ref sim;
         }
 
         var set = _solverSets[contact.setIndex];
-        var setSims = CollectionsMarshal.AsSpan(set.contactSims);
+        ref var setSims = ref set.contactSims;
         ref var setSim = ref setSims[contact.localIndex];
 
         return ref setSim;

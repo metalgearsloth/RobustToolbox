@@ -46,8 +46,8 @@ public sealed partial class NewPhysicsSystem
         _jointEvents.Clear();
 
         // Just because Box2D allocates these per tick we'll put them here.
-        _sims = null;
-        _states = null;
+        _contextBodyStates.Clear();
+        _contextSimdContactConstraints.Clear();
 
         if (NumericsHelpers.Vector256Enabled)
         {

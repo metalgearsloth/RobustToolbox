@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Robust.Shared.NewPhysics.Joints;
 using Robust.Shared.NewPhysics.Solver;
 using Robust.Shared.Threading;
@@ -15,7 +16,7 @@ public sealed partial class NewPhysicsSystem
         public NewPhysicsSystem System = default!;
         public SolverStage Stage;
 
-        public List<BitArray> JointStateBitSet = new();
+        public readonly List<BitArray> JointStateBitSet = new();
 
         public void Execute(int index)
         {
@@ -26,6 +27,7 @@ public sealed partial class NewPhysicsSystem
             var blockType = (b2SolverBlockType)block.blockType;
             int startIndex = block.startIndex;
             int endIndex = startIndex + block.count;
+            var bitset = JointStateBitSet[index];
 
             switch (stageType)
             {
@@ -60,7 +62,7 @@ public sealed partial class NewPhysicsSystem
                     }
                     else if (blockType == b2SolverBlockType.b2_graphJointBlock)
                     {
-                        System.SolveJointsTask(startIndex, endIndex, Stage.colorIndex, true, index);
+                        System.SolveJointsTask(startIndex, endIndex, Stage.colorIndex, true, bitset);
                     }
 
                     break;
@@ -76,7 +78,7 @@ public sealed partial class NewPhysicsSystem
                     }
                     else if (blockType == b2SolverBlockType.b2_graphJointBlock)
                     {
-                        System.SolveJointsTask(startIndex, endIndex, Stage.colorIndex, false, index);
+                        System.SolveJointsTask(startIndex, endIndex, Stage.colorIndex, false, bitset);
                     }
 
                     break;
@@ -99,6 +101,37 @@ public sealed partial class NewPhysicsSystem
     private void ExecuteMainStage(in SolverStage stage)
     {
         _solveJob.Stage = stage;
+
+        // Box2D does this when spinning up each worker but we'll just do it when directly execiting the stage
+        // as we don't spin the entire b2SolverTask
+        if (stage.type is SolverStageType.b2_stageSolve or SolverStageType.b2_stageRelax)
+        {
+            // Update jointstatebitset
+            var capacity = _jointIdPool.Capacity;
+            var bitsetSpan = CollectionsMarshal.AsSpan(_solveJob.JointStateBitSet);
+
+            for (var i = 0; i < Math.Min(_solveJob.JointStateBitSet.Count, stage.blockCount); i++)
+            {
+                ref var bitset = ref bitsetSpan[i];
+
+                // If we need more space or we have way too much then re-allocate it.
+                if (bitset.Length < capacity || bitset.Length < (capacity / 2))
+                {
+                    bitset = new BitArray(capacity);
+                }
+                else
+                {
+                    bitset.SetAll(false);
+                }
+            }
+
+            // Add new bitsets if we need it.
+            for (var i = _solveJob.JointStateBitSet.Count; i < stage.blockCount; i++)
+            {
+                _solveJob.JointStateBitSet.Add(new BitArray(capacity));
+            }
+        }
+
         _parallel.ProcessNow(_solveJob, stage.blockCount);
     }
 
@@ -145,8 +178,8 @@ public sealed partial class NewPhysicsSystem
 			int iterStageIndex = stageIndex;
 
 			// integrate velocities
-			DebugTools.Assert( _contextStages[iterStageIndex].type == SolverStageType.b2_stageIntegrateVelocities );
-			ExecuteMainStage( _contextStages[iterStageIndex]);
+			DebugTools.Assert(_contextStages[iterStageIndex].type == SolverStageType.b2_stageIntegrateVelocities);
+			ExecuteMainStage(_contextStages[iterStageIndex]);
 			iterStageIndex += 1;
 
 			// warm start constraints

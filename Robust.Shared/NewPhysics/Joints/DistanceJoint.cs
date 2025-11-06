@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using Robust.Shared.Physics;
 using Robust.Shared.Serialization.Manager.Attributes;
 
 namespace Robust.Shared.NewPhysics.Joints;
@@ -18,7 +19,7 @@ public sealed partial class DistanceJoint : BaseJoint
 
     /// The rest length of this joint. Clamped to a stable minimum value.
     [DataField]
-    public float length { get; internal set; }
+    public float length { get; internal set; } = 1f;
 
     /// Enable the distance constraint to behave like a spring. If false
     /// then the distance joint will be rigid, overriding the limit and motor.
@@ -27,11 +28,12 @@ public sealed partial class DistanceJoint : BaseJoint
 
     /// The lower spring force controls how much tension it can sustain
     [DataField]
-    public float lowerSpringForce { get; internal set; }
+    public float lowerSpringForce { get; internal set; } = float.MinValue;
 
     /// The upper spring force controls how much compression it an sustain
     [DataField]
-    public float upperSpringForce { get; internal set; }
+
+    public float upperSpringForce { get; internal set; } = float.MaxValue;
 
     /// The spring linear stiffness Hertz, cycles per second
     [DataField]
@@ -51,7 +53,7 @@ public sealed partial class DistanceJoint : BaseJoint
 
     /// Maximum length. Must be greater than or equal to the minimum length.
     [DataField]
-    public float maxLength { get; internal set; }
+    public float maxLength { get; internal set; } = PhysicsConstants.Huge;
 
     /// Enable/disable the joint motor
     [DataField]

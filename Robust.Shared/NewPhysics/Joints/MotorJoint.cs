@@ -60,7 +60,7 @@ public sealed partial class MotorJoint : BaseJoint
 
     internal int IndexA;
     internal int IndexB;
-    internal Transform frameA;
+    internal Transform frameA = Transform.Empty;
     internal Transform frameB;
     internal Vector2 deltaCenter;
     internal Matrix22 linearMass;

@@ -1,4 +1,7 @@
 using System;
+using System.Collections;
+using System.Numerics;
+using System.Runtime.InteropServices;
 using Robust.Shared.Collections;
 using Robust.Shared.Maths;
 using Robust.Shared.NewPhysics.Contacts;
@@ -29,6 +32,11 @@ public sealed partial class NewPhysicsSystem
             return;
         }
 
+        // TODO: Update awakebodyset bodysims
+        {
+            throw new NotImplementedException();
+        }
+
         // Solve constraints using graph coloring
         {
             // Prepare buffers for bullets
@@ -39,8 +47,8 @@ public sealed partial class NewPhysicsSystem
             var graph = _constraintGraph;
             var colors = graph.colors;
 
-            _sims = awakeSet.bodySims;
-            _states = awakeSet.bodyStates;
+            _contextSims = awakeSet.bodySims;
+            _contextBodyStates = awakeSet.bodyStates;
 
             // count contacts, joints, and colors
             int awakeJointCount = 0;
@@ -172,11 +180,13 @@ public sealed partial class NewPhysicsSystem
             activeColorCount = c;
 
             _contextContacts.Clear();
-            _contextContacts.EnsureCapacity(_simdWidth + simdContactCount);
+            _contextContacts.EnsureCapacity(_simdWidth * simdContactCount);
 
-            // Gather joint pointers for easy parallel-for traversal.
             _contextJoints.Clear();
             _contextJoints.EnsureCapacity(awakeJointCount);
+
+            _contextSimdContactConstraints.Clear();
+            _contextSimdContactConstraints.EnsureLength(simdContactCount);
 
             int overflowContactCount = colors[PhysicsConstants.OverflowIndex].ContactSims.Count;
             var overflowContactConstraints = graph.colors[PhysicsConstants.OverflowIndex].OverflowConstraints;
@@ -194,11 +204,12 @@ public sealed partial class NewPhysicsSystem
                     var color = colors[j];
 
                     int colorContactCount = color.ContactSims.Count;
-                    color.SimdConstraints.Clear();
 
                     // Differs from box2d a bit as we don't allocate into a flat structure.
                     if (colorContactCount > 0)
                     {
+                        color.SimdConstraintIndex = contactBase;
+
                         for (int k = 0; k < colorContactCount; ++k)
                         {
                             // Box2D allocates into the array here but we already have the list and can just add so.
@@ -213,6 +224,7 @@ public sealed partial class NewPhysicsSystem
                         }
 
                         contactBase += colorContactCountSIMD;
+                        color.SimdConstraintCount = contactBase - color.SimdConstraintIndex;
                     }
 
                     int colorJointCount = color.JointSims.Count;

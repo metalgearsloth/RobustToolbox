@@ -109,18 +109,22 @@ public sealed partial class NewPhysicsSystem : EntitySystem
 
     private Softness _contactSoftness;
     private Softness _staticSoftness;
+    private bool _enableContactSoftening;
 
     private float _restitutionThreshold;
     private float _maxLinearSpeed;
     private bool _enableWarmStarting;
 
-    private readonly ValueList<SolverStage> _contextStages = new();
-    private readonly ValueList<SolverBlock> _contextBodyBlocks = new();
-    private readonly ValueList<SolverBlock> _contextContactBlocks = new();
-    private readonly ValueList<SolverBlock> _contextJointBlocks = new();
-    private readonly ValueList<SolverBlock> _contextGraphBlocks = new();
+    private ValueList<SolverStage> _contextStages = new();
+    private ValueList<SolverBlock> _contextBodyBlocks = new();
+    private ValueList<SolverBlock> _contextContactBlocks = new();
+    private ValueList<SolverBlock> _contextJointBlocks = new();
+    private ValueList<SolverBlock> _contextGraphBlocks = new();
 
-    private ValueList<ContactSim> _contextContacts = new();
+    private ValueList<BodySim> _contextSims;
+    private ValueList<BodyState> _contextBodyStates = new();
+    private ValueList<b2ContactConstraintSIMD> _contextSimdContactConstraints = new();
+    private ValueList<ContactSim?> _contextContacts = new();
     private ValueList<JointSim> _contextJoints = new();
 
     private int _activeColorCount;
@@ -133,8 +137,6 @@ public sealed partial class NewPhysicsSystem : EntitySystem
 
     private int _bulletBodyCount;
     private List<int> _bulletBodies = new();
-    private List<BodySim> _sims = default!;
-    private List<BodyState> _states = default!;
 
     /*
      * CVars

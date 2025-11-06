@@ -361,20 +361,24 @@ public sealed partial class NewPhysicsSystem
 		    float s1 = Vector2Helpers.Cross(d + rA, perpA );
 		    float s2 = Vector2Helpers.Cross( rB, perpA );
 
-		    Vector2 Cdot;
-		    Cdot.x = Vector2.Dot( perpA, vB - vA) + s2 * wB - s1 * wA;
-		    Cdot.y = wB - wA;
+		    Vector2 Cdot = new()
+            {
+                X = Vector2.Dot( perpA, vB - vA) + s2 * wB - s1 * wA,
+                Y = wB - wA
+            };
 
-		    b2Vec2 bias = b2Vec2_zero;
+            var bias = Vector2.Zero;
 		    float massScale = 1.0f;
 		    float impulseScale = 0.0f;
 		    if ( useBias )
 		    {
-			    b2Vec2 C;
-			    C.x = b2Dot( perpA, d );
-			    C.y = b2Rot_GetAngle( relQ );
+			    Vector2 C = new()
+                {
+                    X = Vector2.Dot( perpA, d ),
+                    Y = relQ.Angle
+                };
 
-			    bias = b2MulSV( softness.biasRate, C );
+                bias = softness.biasRate * C;
 			    massScale = softness.massScale;
 			    impulseScale = softness.impulseScale;
 		    }
@@ -388,19 +392,21 @@ public sealed partial class NewPhysicsSystem
 			    k22 = 1.0f;
 		    }
 
-		    Matrix22 K = { { k11, k12 }, { k12, k22 } };
+		    Matrix22 K = new(k11, k12, k12, k22);
 
-		    b2Vec2 b = b2Solve22( K, b2Add( Cdot, bias ) );
-		    b2Vec2 deltaImpulse;
-		    deltaImpulse.x = -massScale * b.x - impulseScale * joint.impulse.x;
-		    deltaImpulse.y = -massScale * b.y - impulseScale * joint.impulse.y;
+		    var b = K.Solve(Cdot + bias);
+		    Vector2 deltaImpulse = new()
+            {
+                X = -massScale * b.X - impulseScale * joint.impulse.X,
+                Y = -massScale * b.Y - impulseScale * joint.impulse.Y
+            };
 
-		    joint.impulse.x += deltaImpulse.x;
-		    joint.impulse.y += deltaImpulse.y;
+            joint.impulse.X += deltaImpulse.X;
+		    joint.impulse.Y += deltaImpulse.Y;
 
-		    b2Vec2 P = b2MulSV( deltaImpulse.x, perpA );
-		    float LA = deltaImpulse.x * s1 + deltaImpulse.y;
-		    float LB = deltaImpulse.x * s2 + deltaImpulse.y;
+            var P = deltaImpulse.X * perpA;
+		    float LA = deltaImpulse.X * s1 + deltaImpulse.Y;
+		    float LB = deltaImpulse.X * s2 + deltaImpulse.Y;
 
 		    vA = Vector2Helpers.MulSub( vA, mA, P );
 		    wA -= iA * LA;
