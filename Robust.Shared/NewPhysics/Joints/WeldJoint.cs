@@ -1,3 +1,5 @@
+using System.Numerics;
+using Robust.Shared.Physics;
 using Robust.Shared.Serialization.Manager.Attributes;
 
 namespace Robust.Shared.NewPhysics.Joints;
@@ -11,17 +13,30 @@ public sealed partial class WeldJoint : BaseJoint
 {
     /// Linear stiffness expressed as Hertz (cycles per second). Use zero for maximum stiffness.
     [DataField]
-    public float linearHertz;
+    public float linearHertz { get; internal set; }
 
     /// Angular stiffness as Hertz (cycles per second). Use zero for maximum stiffness.
     [DataField]
-    public float angularHertz;
+    public float angularHertz { get; internal set; }
 
     /// Linear damping ratio, non-dimensional. Use 1 for critical damping.
     [DataField]
-    public float linearDampingRatio;
+    public float linearDampingRatio { get; internal set; }
 
     /// Linear damping ratio, non-dimensional. Use 1 for critical damping.
     [DataField]
-    public float angularDampingRatio;
+    public float angularDampingRatio { get; internal set; }
+
+    internal Softness linearSpring;
+    internal Softness angularSpring;
+    internal Vector2 linearImpulse;
+    internal float angularImpulse;
+
+    internal int IndexA;
+    internal int IndexB;
+    internal Transform frameA;
+    internal Transform frameB;
+    internal Vector2 deltaCenter;
+    internal float axialMass;
 }
+

@@ -1,3 +1,5 @@
+using System.Numerics;
+using Robust.Shared.Physics;
 using Robust.Shared.Serialization.Manager.Attributes;
 
 namespace Robust.Shared.NewPhysics.Joints;
@@ -10,37 +12,53 @@ public sealed partial class WheelJoint : BaseJoint
 {
     /// Enable a linear spring along the local axis
     [DataField]
-    public bool enableSpring;
+    public bool enableSpring { get; internal set; }
 
     /// Spring stiffness in Hertz
     [DataField]
-    public float hertz;
+    public float hertz { get; internal set; }
 
     /// Spring damping ratio, non-dimensional
     [DataField]
-    public float dampingRatio;
+    public float dampingRatio { get; internal set; }
 
     /// Enable/disable the joint linear limit
     [DataField]
-    public bool enableLimit;
+    public bool enableLimit { get; internal set; }
 
     /// The lower translation limit
     [DataField]
-    public float lowerTranslation;
+    public float lowerTranslation { get; internal set; }
 
     /// The upper translation limit
     [DataField]
-    public float upperTranslation;
+    public float upperTranslation { get; internal set; }
 
     /// Enable/disable the joint rotational motor
     [DataField]
-    public bool enableMotor;
+    public bool enableMotor { get; internal set; }
 
     /// The maximum motor torque, typically in newton-meters
     [DataField]
-    public float maxMotorTorque;
+    public float maxMotorTorque { get; internal set; }
 
     /// The desired motor speed in radians per second
     [DataField]
-    public float motorSpeed;
+    public float motorSpeed { get; internal set; }
+
+    internal float perpImpulse;
+    internal float motorImpulse;
+    internal float springImpulse;
+    internal float lowerImpulse;
+    internal float upperImpulse;
+
+    internal int IndexA;
+    internal int IndexB;
+    internal Transform frameA;
+    internal Transform frameB;
+    internal Vector2 deltaCenter;
+    internal float perpMass;
+    internal float motorMass;
+    internal float axialMass;
+    internal Softness springSoftness;
 }
