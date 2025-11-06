@@ -57,5 +57,6 @@ namespace Robust.Shared.Physics
         public const float SpeculativeDistance = 4.0f * LinearSlop;
 
         public const int NullIndex = -1;
+        public const float MaxRotation = (float) (0.25 * Math.PI);
     }
 }

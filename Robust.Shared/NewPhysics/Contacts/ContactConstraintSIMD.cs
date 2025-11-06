@@ -1,4 +1,3 @@
-using Robust.Shared.NewPhysics.Math;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.NewPhysics.Contacts;

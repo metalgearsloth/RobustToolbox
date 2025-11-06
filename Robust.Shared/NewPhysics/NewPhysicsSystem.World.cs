@@ -59,7 +59,7 @@ public sealed partial class NewPhysicsSystem
             _simdWidth = 4;
         }
 
-        _simdShift = (int)Math.Log2(_simdWidth);
+        _simdShift = (int)MathF.Log2(_simdWidth);
 
         // TODO: Clear profile
 

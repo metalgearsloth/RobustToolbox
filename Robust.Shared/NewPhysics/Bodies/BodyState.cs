@@ -4,7 +4,7 @@ using Robust.Shared.Physics;
 
 namespace Robust.Shared.NewPhysics.Bodies;
 
-[StructLayout(LayoutKind.Explicit)]
+[StructLayout(LayoutKind.Explicit, Size = sizeof(float) * 8)]
 internal record struct BodyState
 {
     public static readonly BodyState Identity = new()

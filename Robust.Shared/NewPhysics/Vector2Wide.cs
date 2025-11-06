@@ -1,6 +1,6 @@
 using Robust.Shared.Utility;
 
-namespace Robust.Shared.NewPhysics.Math;
+namespace Robust.Shared.NewPhysics;
 
 internal record struct Vector2Wide
 {

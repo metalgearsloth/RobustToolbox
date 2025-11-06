@@ -7,7 +7,6 @@ using Robust.Shared.Collections;
 using Robust.Shared.Maths;
 using Robust.Shared.NewPhysics.Bodies;
 using Robust.Shared.NewPhysics.Contacts;
-using Robust.Shared.NewPhysics.Math;
 using Robust.Shared.Physics;
 using Robust.Shared.Threading;
 using Robust.Shared.Utility;
@@ -138,6 +137,85 @@ public sealed partial class NewPhysicsSystem
             }
 
             return sim;
+        }
+    }
+
+    // Writes everything back to the solver bodies but only the velocities change
+    private unsafe void ScatterBodies(Span<BodyState> states, ReadOnlySpan<int> indices, ref BodyStateWide simdBody)
+    {
+        if (Avx.IsSupported)
+        {
+            ref var vxRef = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.vX);
+            ref var vyRef = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.vX);
+            ref var floatRef2 = ref Unsafe.As<FixedArray8<float>, float>(ref state2);
+            ref var floatRef3 = ref Unsafe.As<FixedArray8<float>, float>(ref state3);
+            ref var floatRef4 = ref Unsafe.As<FixedArray8<float>, float>(ref state4);
+            ref var floatRef5 = ref Unsafe.As<FixedArray8<float>, float>(ref state5);
+            ref var floatRef6 = ref Unsafe.As<FixedArray8<float>, float>(ref state6);
+            ref var floatRef7 = ref Unsafe.As<FixedArray8<float>, float>(ref state7);
+
+            fixed (float* ptr0 = &vxRef)
+            fixed (float* ptr1 = &vyRef)
+            fixed (float* ptr2 = &floatRef2)
+            fixed (float* ptr3 = &floatRef3)
+            fixed (float* ptr4 = &floatRef4)
+            fixed (float* ptr5 = &floatRef5)
+            fixed (float* ptr6 = &floatRef6)
+            fixed (float* ptr7 = &floatRef7)
+            {
+                var bvX = Avx.LoadAlignedVector256(ptr0);
+                var bvY = Avx.LoadAlignedVector256(ptr1);
+                var b2 = Avx.LoadAlignedVector256(ptr2);
+                var b3 = Avx.LoadAlignedVector256(ptr3);
+                var b4 = Avx.LoadAlignedVector256(ptr4);
+                var b5 = Avx.LoadAlignedVector256(ptr5);
+                var b6 = Avx.LoadAlignedVector256(ptr6);
+                var b7 = Avx.LoadAlignedVector256(ptr7);
+
+                var t0 = Avx.UnpackLow(bvX, bvY);
+	            var t1 = Avx.UnpackHigh( bvX, bvY );
+	            var t2 = Avx.UnpackLow( simdBody->w, simdBody->flags );
+                var t3 = Avx.UnpackHigh( simdBody->w, simdBody->flags );
+                var t4 = Avx.UnpackLow( simdBody->dp.X, simdBody->dp.Y );
+                var t5 = Avx.UnpackHigh( simdBody->dp.X, simdBody->dp.Y );
+                var t6 = Avx.UnpackLow( simdBody->dq.C, simdBody->dq.S );
+                var t7 = Avx.UnpackHigh( simdBody->dq.C, simdBody->dq.S );
+
+                var tt0 = _mm256_shuffle_ps( t0, t2, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+                var tt1 = _mm256_shuffle_ps( t0, t2, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+                var tt2 = _mm256_shuffle_ps( t1, t3, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+                var tt3 = _mm256_shuffle_ps( t1, t3, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+                var tt4 = _mm256_shuffle_ps( t4, t6, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+                var tt5 = _mm256_shuffle_ps( t4, t6, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+                var tt6 = _mm256_shuffle_ps( t5, t7, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+                var tt7 = _mm256_shuffle_ps( t5, t7, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+
+	            // I don't use any dummy body in the body array because this will lead to multithreaded sharing and the
+	            // associated cache flushing.
+	            // todo_erin could add a check for kinematic bodies here
+
+	            if ( indices[0] != PhysicsConstants.NullIndex && ( states[indices[0]].flags & (uint) BodyFlags.b2_dynamicFlag ) != 0 )
+		            _mm256_store_ps( (float*)( states + indices[0] ), _mm256_permute2f128_ps( tt0, tt4, 0x20 ) );
+	            if ( indices[1] != PhysicsConstants.NullIndex && ( states[indices[1]].flags & (uint) BodyFlags.b2_dynamicFlag ) != 0 )
+		            _mm256_store_ps( (float*)( states + indices[1] ), _mm256_permute2f128_ps( tt1, tt5, 0x20 ) );
+	            if ( indices[2] != PhysicsConstants.NullIndex && ( states[indices[2]].flags & (uint) BodyFlags.b2_dynamicFlag ) != 0 )
+		            _mm256_store_ps( (float*)( states + indices[2] ), _mm256_permute2f128_ps( tt2, tt6, 0x20 ) );
+	            if ( indices[3] != PhysicsConstants.NullIndex && ( states[indices[3]].flags & (uint) BodyFlags.b2_dynamicFlag ) != 0 )
+		            _mm256_store_ps( (float*)( states + indices[3] ), _mm256_permute2f128_ps( tt3, tt7, 0x20 ) );
+	            if ( indices[4] != PhysicsConstants.NullIndex && ( states[indices[4]].flags & (uint) BodyFlags.b2_dynamicFlag ) != 0 )
+		            _mm256_store_ps( (float*)( states + indices[4] ), _mm256_permute2f128_ps( tt0, tt4, 0x31 ) );
+	            if ( indices[5] != PhysicsConstants.NullIndex && ( states[indices[5]].flags & (uint) BodyFlags.b2_dynamicFlag ) != 0 )
+		            _mm256_store_ps( (float*)( states + indices[5] ), _mm256_permute2f128_ps( tt1, tt5, 0x31 ) );
+	            if ( indices[6] != PhysicsConstants.NullIndex && ( states[indices[6]].flags & (uint) BodyFlags.b2_dynamicFlag ) != 0 )
+		            _mm256_store_ps( (float*)( states + indices[6] ), _mm256_permute2f128_ps( tt2, tt6, 0x31 ) );
+	            if ( indices[7] != PhysicsConstants.NullIndex && ( states[indices[7]].flags & (uint) BodyFlags.b2_dynamicFlag ) != 0 )
+		            _mm256_store_ps( (float*)( states + indices[7] ), _mm256_permute2f128_ps( tt3, tt7, 0x31 ) );
+            }
+        }
+        else
+        {
+            // Lol
+            throw new NotImplementedException();
         }
     }
 
@@ -505,12 +583,12 @@ public sealed partial class NewPhysicsSystem
 
 			    P.X = SimdAdd( SimdMul( c.normalImpulse1.AsSpan, c.normal.X.AsSpan ).AsSpan, SimdMul( c.tangentImpulse1.AsSpan, tangentX.AsSpan ).AsSpan );
 			    P.Y = SimdAdd( SimdMul( c.normalImpulse1.AsSpan, c.normal.Y.AsSpan ).AsSpan, SimdMul( c.tangentImpulse1.AsSpan, tangentY.AsSpan ).AsSpan );
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2CrossW( rA, P ) );
-			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, P.X );
-			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, P.Y );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2CrossW( rB, P ) );
-			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, P.X );
-			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, P.Y );
+			    bA.w = SimdMulSub( bA.w.AsSpan, c.invIA.AsSpan, SimdCross( rA, P ).AsSpan );
+			    bA.vX = SimdMulSub( bA.vX.AsSpan, c.invMassA.AsSpan, P.X.AsSpan );
+			    bA.vY = SimdMulSub( bA.vY.AsSpan, c.invMassA.AsSpan, P.Y.AsSpan );
+			    bB.w = SimdMulAdd( bB.w.AsSpan, c.invIB.AsSpan, SimdCross( rB, P ).AsSpan );
+			    bB.vX = SimdMulAdd( bB.vX.AsSpan, c.invMassB.AsSpan, P.X.AsSpan );
+			    bB.vY = SimdMulAdd( bB.vY.AsSpan, c.invMassB.AsSpan, P.Y.AsSpan );
 		    }
 
 		    {
@@ -518,22 +596,22 @@ public sealed partial class NewPhysicsSystem
 			    var rA = c.anchorA2;
                 var rB = c.anchorB2;
 
-			    b2Vec2W P;
-			    P.X = SimdAdd( SimdMul( c.normalImpulse2, c.normal.X ), SimdMul( c.tangentImpulse2, tangentX ) );
-			    P.Y = SimdAdd( SimdMul( c.normalImpulse2, c.normal.Y ), SimdMul( c.tangentImpulse2, tangentY ) );
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2CrossW( rA, P ) );
-			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, P.X );
-			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, P.Y );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2CrossW( rB, P ) );
-			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, P.X );
-			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, P.Y );
+			    Vector2Wide P;
+			    P.X = SimdAdd( SimdMul( c.normalImpulse2.AsSpan, c.normal.X.AsSpan ).AsSpan, SimdMul( c.tangentImpulse2.AsSpan, tangentX.AsSpan ).AsSpan );
+			    P.Y = SimdAdd( SimdMul( c.normalImpulse2.AsSpan, c.normal.Y.AsSpan ).AsSpan, SimdMul( c.tangentImpulse2.AsSpan, tangentY.AsSpan ).AsSpan );
+			    bA.w = SimdMulSub( bA.w.AsSpan, c.invIA.AsSpan, SimdCross( rA, P ).AsSpan );
+			    bA.vX = SimdMulSub( bA.vX.AsSpan, c.invMassA.AsSpan, P.X.AsSpan );
+			    bA.vY = SimdMulSub( bA.vY.AsSpan, c.invMassA.AsSpan, P.Y.AsSpan );
+			    bB.w = SimdMulAdd( bB.w.AsSpan, c.invIB.AsSpan, SimdCross( rB, P ).AsSpan );
+			    bB.vX = SimdMulAdd( bB.vX.AsSpan, c.invMassB.AsSpan, P.X.AsSpan );
+			    bB.vY = SimdMulAdd( bB.vY.AsSpan, c.invMassB.AsSpan, P.Y.AsSpan );
 		    }
 
-		    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, c.rollingImpulse );
-		    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, c.rollingImpulse );
+		    bA.w = SimdMulSub( bA.w.AsSpan, c.invIA.AsSpan, c.rollingImpulse.AsSpan );
+		    bB.w = SimdMulAdd( bB.w.AsSpan, c.invIB.AsSpan, c.rollingImpulse.AsSpan );
 
-		    ScatterBodies( _contextBodyStates, c.indexA, &bA );
-		    ScatterBodies( _contextBodyStates, c.indexB, &bB );
+		    ScatterBodies( _contextBodyStates, c.indexA, bA );
+		    ScatterBodies( _contextBodyStates, c.indexB, bB );
 	    }
     }
 
@@ -569,7 +647,7 @@ public sealed partial class NewPhysicsSystem
 
 		    b2FloatW totalNormalImpulse = b2ZeroW();
 
-		    b2Vec2W dp = { b2SubW( bB.dp.X, bA.dp.X ), b2SubW( bB.dp.Y, bA.dp.Y ) };
+		    b2Vec2W dp = { SimdSub( bB.dp.X, bA.dp.X ), SimdSub( bB.dp.Y, bA.dp.Y ) };
 
 		    // point1 non-penetration constraint
 		    {
@@ -583,7 +661,7 @@ public sealed partial class NewPhysicsSystem
 
 			    // compute current separation
 			    // this is subject to round-off error if the anchor is far from the body center of mass
-			    b2Vec2W ds = { SimdAdd( dp.X, b2SubW( rsB.X, rsA.X ) ), SimdAdd( dp.Y, b2SubW( rsB.Y, rsA.Y ) ) };
+			    b2Vec2W ds = { SimdAdd( dp.X, SimdSub( rsB.X, rsA.X ) ), SimdAdd( dp.Y, SimdSub( rsB.Y, rsA.Y ) ) };
 			    b2FloatW s = SimdAdd( Vector2.DotW( c.normal, ds ), c.baseSeparation1 );
 
 			    // Apply speculative bias if separation is greater than zero, otherwise apply soft constraint bias
@@ -599,8 +677,8 @@ public sealed partial class NewPhysicsSystem
 			    b2FloatW pointImpulseScale = b2BlendW( impulseScale, b2ZeroW(), mask );
 
 			    // Relative velocity at contact
-			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, SimdMul( bB.w, rB.Y ) ), b2SubW( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
-			    b2FloatW dvy = b2SubW( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
+			    b2FloatW dvx = SimdSub( SimdSub( bB.v.X, SimdMul( bB.w, rB.Y ) ), SimdSub( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
+			    b2FloatW dvy = SimdSub( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
 			    b2FloatW vn = SimdAdd( SimdMul( dvx, c.normal.X ), SimdMul( dvy, c.normal.Y ) );
 
 			    // Compute normal impulse
@@ -608,8 +686,8 @@ public sealed partial class NewPhysicsSystem
 										      SimdMul( pointImpulseScale, c.normalImpulse1 ) );
 
 			    // Clamp the accumulated impulse
-			    b2FloatW newImpulse = b2MaxW( b2SubW( c.normalImpulse1, negImpulse ), b2ZeroW() );
-			    b2FloatW impulse = b2SubW( newImpulse, c.normalImpulse1 );
+			    b2FloatW newImpulse = b2MaxW( SimdSub( c.normalImpulse1, negImpulse ), b2ZeroW() );
+			    b2FloatW impulse = SimdSub( newImpulse, c.normalImpulse1 );
 			    c.normalImpulse1 = newImpulse;
 			    c.totalNormalImpulse1 = SimdAdd( c.totalNormalImpulse1, newImpulse );
 
@@ -619,13 +697,13 @@ public sealed partial class NewPhysicsSystem
 			    b2FloatW Px = SimdMul( impulse, c.normal.X );
 			    b2FloatW Py = SimdMul( impulse, c.normal.Y );
 
-			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
-			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
+			    bA.v.X = SimdMulSub( bA.v.X, c.invMassA, Px );
+			    bA.v.Y = SimdMulSub( bA.v.Y, c.invMassA, Py );
+			    bA.w = SimdMulSub( bA.w, c.invIA, SimdSub( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
 
-			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
-			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
+			    bB.v.X = SimdMulAdd( bB.v.X, c.invMassB, Px );
+			    bB.v.Y = SimdMulAdd( bB.v.Y, c.invMassB, Py );
+			    bB.w = SimdMulAdd( bB.w, c.invIB, SimdSub( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
 		    }
 
 		    // second point non-penetration constraint
@@ -635,7 +713,7 @@ public sealed partial class NewPhysicsSystem
 			    b2Vec2W rsB = Quaternion2D.RotateVectorW( bB.dq, c.anchorB2 );
 
 			    // compute current separation
-			    b2Vec2W ds = { SimdAdd( dp.X, b2SubW( rsB.X, rsA.X ) ), SimdAdd( dp.Y, b2SubW( rsB.Y, rsA.Y ) ) };
+			    b2Vec2W ds = { SimdAdd( dp.X, SimdSub( rsB.X, rsA.X ) ), SimdAdd( dp.Y, SimdSub( rsB.Y, rsA.Y ) ) };
 			    b2FloatW s = SimdAdd( Vector2.DotW( c.normal, ds ), c.baseSeparation2 );
 
 			    b2FloatW mask = b2GreaterThanW( s, b2ZeroW() );
@@ -651,8 +729,8 @@ public sealed partial class NewPhysicsSystem
 			    b2Vec2W rB = c.anchorB2;
 
 			    // Relative velocity at contact
-			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, SimdMul( bB.w, rB.Y ) ), b2SubW( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
-			    b2FloatW dvy = b2SubW( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
+			    b2FloatW dvx = SimdSub( SimdSub( bB.v.X, SimdMul( bB.w, rB.Y ) ), SimdSub( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
+			    b2FloatW dvy = SimdSub( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
 			    b2FloatW vn = SimdAdd( SimdMul( dvx, c.normal.X ), SimdMul( dvy, c.normal.Y ) );
 
 			    // Compute normal impulse
@@ -660,8 +738,8 @@ public sealed partial class NewPhysicsSystem
 										      SimdMul( pointImpulseScale, c.normalImpulse2 ) );
 
 			    // Clamp the accumulated impulse
-			    b2FloatW newImpulse = b2MaxW( b2SubW( c.normalImpulse2, negImpulse ), b2ZeroW() );
-			    b2FloatW impulse = b2SubW( newImpulse, c.normalImpulse2 );
+			    b2FloatW newImpulse = b2MaxW( SimdSub( c.normalImpulse2, negImpulse ), b2ZeroW() );
+			    b2FloatW impulse = SimdSub( newImpulse, c.normalImpulse2 );
 			    c.normalImpulse2 = newImpulse;
 			    c.totalNormalImpulse2 = SimdAdd( c.totalNormalImpulse2, newImpulse );
 
@@ -671,17 +749,17 @@ public sealed partial class NewPhysicsSystem
 			    b2FloatW Px = SimdMul( impulse, c.normal.X );
 			    b2FloatW Py = SimdMul( impulse, c.normal.Y );
 
-			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
-			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
+			    bA.v.X = SimdMulSub( bA.v.X, c.invMassA, Px );
+			    bA.v.Y = SimdMulSub( bA.v.Y, c.invMassA, Py );
+			    bA.w = SimdMulSub( bA.w, c.invIA, SimdSub( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
 
-			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
-			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
+			    bB.v.X = SimdMulAdd( bB.v.X, c.invMassB, Px );
+			    bB.v.Y = SimdMulAdd( bB.v.Y, c.invMassB, Py );
+			    bB.w = SimdMulAdd( bB.w, c.invIB, SimdSub( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
 		    }
 
 		    b2FloatW tangentX = c.normal.Y;
-		    b2FloatW tangentY = b2SubW( b2ZeroW(), c.normal.X );
+		    b2FloatW tangentY = SimdSub( b2ZeroW(), c.normal.X );
 
 		    // point 1 friction constraint
 		    {
@@ -690,34 +768,34 @@ public sealed partial class NewPhysicsSystem
 			    b2Vec2W rB = c.anchorB1;
 
 			    // Relative velocity at contact
-			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, SimdMul( bB.w, rB.Y ) ), b2SubW( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
-			    b2FloatW dvy = b2SubW( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
+			    b2FloatW dvx = SimdSub( SimdSub( bB.v.X, SimdMul( bB.w, rB.Y ) ), SimdSub( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
+			    b2FloatW dvy = SimdSub( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
 			    b2FloatW vt = SimdAdd( SimdMul( dvx, tangentX ), SimdMul( dvy, tangentY ) );
 
 			    // Tangent speed (conveyor belt)
-			    vt = b2SubW( vt, c.tangentSpeed );
+			    vt = SimdSub( vt, c.tangentSpeed );
 
 			    // Compute tangent force
 			    b2FloatW negImpulse = SimdMul( c.tangentMass1, vt );
 
 			    // Clamp the accumulated force
 			    b2FloatW maxFriction = SimdMul( c.friction, c.normalImpulse1 );
-			    b2FloatW newImpulse = b2SubW( c.tangentImpulse1, negImpulse );
-			    newImpulse = b2MaxW( b2SubW( b2ZeroW(), maxFriction ), b2MinW( newImpulse, maxFriction ) );
-			    b2FloatW impulse = b2SubW( newImpulse, c.tangentImpulse1 );
+			    b2FloatW newImpulse = SimdSub( c.tangentImpulse1, negImpulse );
+			    newImpulse = b2MaxW( SimdSub( b2ZeroW(), maxFriction ), b2MinW( newImpulse, maxFriction ) );
+			    b2FloatW impulse = SimdSub( newImpulse, c.tangentImpulse1 );
 			    c.tangentImpulse1 = newImpulse;
 
 			    // Apply contact impulse
 			    b2FloatW Px = SimdMul( impulse, tangentX );
 			    b2FloatW Py = SimdMul( impulse, tangentY );
 
-			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
-			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
+			    bA.vX = SimdMulSub( bA.v.X, c.invMassA, Px );
+			    bA.vY = SimdMulSub( bA.v.Y, c.invMassA, Py );
+			    bA.w = SimdMulSub( bA.w, c.invIA, SimdSub( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
 
-			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
-			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
+			    bB.vX = SimdMulAdd( bB.v.X, c.invMassB, Px );
+			    bB.vY = SimdMulAdd( bB.v.Y, c.invMassB, Py );
+			    bB.w = SimdMulAdd( bB.w, c.invIB, SimdSub( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
 		    }
 
 		    // second point friction constraint
@@ -727,46 +805,46 @@ public sealed partial class NewPhysicsSystem
 			    b2Vec2W rB = c.anchorB2;
 
 			    // Relative velocity at contact
-			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, SimdMul( bB.w, rB.Y ) ), b2SubW( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
-			    b2FloatW dvy = b2SubW( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
+			    b2FloatW dvx = SimdSub( SimdSub( bB.v.X, SimdMul( bB.w, rB.Y ) ), SimdSub( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
+			    b2FloatW dvy = SimdSub( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
 			    b2FloatW vt = SimdAdd( SimdMul( dvx, tangentX ), SimdMul( dvy, tangentY ) );
 
 			    // Tangent speed (conveyor belt)
-			    vt = b2SubW( vt, c.tangentSpeed );
+			    vt = SimdSub( vt, c.tangentSpeed );
 
 			    // Compute tangent force
 			    b2FloatW negImpulse = SimdMul( c.tangentMass2, vt );
 
 			    // Clamp the accumulated force
 			    b2FloatW maxFriction = SimdMul( c.friction, c.normalImpulse2 );
-			    b2FloatW newImpulse = b2SubW( c.tangentImpulse2, negImpulse );
-			    newImpulse = b2MaxW( b2SubW( b2ZeroW(), maxFriction ), b2MinW( newImpulse, maxFriction ) );
-			    b2FloatW impulse = b2SubW( newImpulse, c.tangentImpulse2 );
+			    b2FloatW newImpulse = SimdSub( c.tangentImpulse2, negImpulse );
+			    newImpulse = b2MaxW( SimdSub( b2ZeroW(), maxFriction ), b2MinW( newImpulse, maxFriction ) );
+			    var impulse = SimdSub( newImpulse, c.tangentImpulse2.AsSpan );
 			    c.tangentImpulse2 = newImpulse;
 
 			    // Apply contact impulse
-			    b2FloatW Px = SimdMul( impulse, tangentX );
-			    b2FloatW Py = SimdMul( impulse, tangentY );
+			    var Px = SimdMul( impulse, tangentX );
+                var Py = SimdMul( impulse, tangentY );
 
-			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
-			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
+			    bA.v.X = SimdMulSub( bA.v.X, c.invMassA, Px );
+			    bA.v.Y = SimdMulSub( bA.v.Y, c.invMassA, Py );
+			    bA.w = SimdMulSub( bA.w, c.invIA, SimdSub( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
 
-			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
-			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
+			    bB.v.X = SimdMulAdd( bB.v.X, c.invMassB, Px );
+			    bB.v.Y = SimdMulAdd( bB.v.Y, c.invMassB, Py );
+			    bB.w = SimdMulAdd( bB.w, c.invIB, SimdSub( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
 		    }
 
 		    // Rolling resistance
 		    {
-			    b2FloatW deltaLambda = SimdMul( c.rollingMass, b2SubW( bA.w, bB.w ) );
+			    b2FloatW deltaLambda = SimdMul( c.rollingMass, SimdSub( bA.w, bB.w ) );
 			    b2FloatW lambda = c.rollingImpulse;
 			    b2FloatW maxLambda = SimdMul( c.rollingResistance, totalNormalImpulse );
 			    c.rollingImpulse = b2SymClampW( SimdAdd( lambda, deltaLambda ), maxLambda );
-			    deltaLambda = b2SubW( c.rollingImpulse, lambda );
+			    deltaLambda = SimdSub( c.rollingImpulse, lambda );
 
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, deltaLambda );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, deltaLambda );
+			    bA.w = SimdMulSub( bA.w, c.invIA, deltaLambda );
+			    bB.w = SimdMulAdd( bB.w, c.invIB, deltaLambda );
 		    }
 
 		    b2ScatterBodies( states, c.indexA, &bA );
@@ -815,16 +893,16 @@ public sealed partial class NewPhysicsSystem
 			    b2Vec2W rB = c.anchorB1;
 
 			    // Relative velocity at contact
-			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, SimdMul( bB.w, rB.Y ) ), b2SubW( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
-			    b2FloatW dvy = b2SubW( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
+			    b2FloatW dvx = SimdSub( SimdSub( bB.v.X, SimdMul( bB.w, rB.Y ) ), SimdSub( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
+			    b2FloatW dvy = SimdSub( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
 			    b2FloatW vn = SimdAdd( SimdMul( dvx, c.normal.X ), SimdMul( dvy, c.normal.Y ) );
 
 			    // Compute normal impulse
 			    b2FloatW negImpulse = SimdMul( mass, SimdAdd( vn, SimdMul( c.restitution, c.relativeVelocity1 ) ) );
 
 			    // Clamp the accumulated impulse
-			    b2FloatW newImpulse = b2MaxW( b2SubW( c.normalImpulse1, negImpulse ), b2ZeroW() );
-			    b2FloatW deltaImpulse = b2SubW( newImpulse, c.normalImpulse1 );
+			    b2FloatW newImpulse = b2MaxW( SimdSub( c.normalImpulse1, negImpulse ), b2ZeroW() );
+			    b2FloatW deltaImpulse = SimdSub( newImpulse, c.normalImpulse1 );
 			    c.normalImpulse1 = newImpulse;
 
 			    // Add the incremental impulse rather than the full impulse because this is not a sub-step
@@ -834,13 +912,13 @@ public sealed partial class NewPhysicsSystem
 			    b2FloatW Px = SimdMul( deltaImpulse, c.normal.X );
 			    b2FloatW Py = SimdMul( deltaImpulse, c.normal.Y );
 
-			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
-			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
+			    bA.v.X = SimdMulSub( bA.v.X, c.invMassA, Px );
+			    bA.v.Y = SimdMulSub( bA.v.Y, c.invMassA, Py );
+			    bA.w = SimdMulSub( bA.w, c.invIA, SimdSub( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
 
-			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
-			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
+			    bB.v.X = SimdMulAdd( bB.v.X, c.invMassB, Px );
+			    bB.v.Y = SimdMulAdd( bB.v.Y, c.invMassB, Py );
+			    bB.w = SimdMulAdd( bB.w, c.invIB, SimdSub( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
 		    }
 
 		    // second point non-penetration constraint
@@ -856,16 +934,16 @@ public sealed partial class NewPhysicsSystem
 			    b2Vec2W rB = c.anchorB2;
 
 			    // Relative velocity at contact
-			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, SimdMul( bB.w, rB.Y ) ), b2SubW( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
-			    b2FloatW dvy = b2SubW( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
+			    b2FloatW dvx = SimdSub( SimdSub( bB.v.X, SimdMul( bB.w, rB.Y ) ), SimdSub( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
+			    b2FloatW dvy = SimdSub( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
 			    b2FloatW vn = SimdAdd( SimdMul( dvx, c.normal.X ), SimdMul( dvy, c.normal.Y ) );
 
 			    // Compute normal impulse
 			    b2FloatW negImpulse = SimdMul( mass, SimdAdd( vn, SimdMul( c.restitution, c.relativeVelocity2 ) ) );
 
 			    // Clamp the accumulated impulse
-			    b2FloatW newImpulse = b2MaxW( b2SubW( c.normalImpulse2, negImpulse ), b2ZeroW() );
-			    b2FloatW deltaImpulse = b2SubW( newImpulse, c.normalImpulse2 );
+			    b2FloatW newImpulse = b2MaxW( SimdSub( c.normalImpulse2, negImpulse ), b2ZeroW() );
+			    b2FloatW deltaImpulse = SimdSub( newImpulse, c.normalImpulse2 );
 			    c.normalImpulse2 = newImpulse;
 
 			    // Add the incremental impulse rather than the full impulse because this is not a sub-step
@@ -875,13 +953,13 @@ public sealed partial class NewPhysicsSystem
 			    b2FloatW Px = SimdMul( deltaImpulse, c.normal.X );
 			    b2FloatW Py = SimdMul( deltaImpulse, c.normal.Y );
 
-			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
-			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
+			    bA.v.X = SimdMulSub( bA.v.X, c.invMassA, Px );
+			    bA.v.Y = SimdMulSub( bA.v.Y, c.invMassA, Py );
+			    bA.w = SimdMulSub( bA.w, c.invIA, SimdSub( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
 
-			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
-			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
+			    bB.v.X = SimdMulAdd( bB.v.X, c.invMassB, Px );
+			    bB.v.Y = SimdMulAdd( bB.v.Y, c.invMassB, Py );
+			    bB.w = SimdMulAdd( bB.w, c.invIB, SimdSub( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
 		    }
 
 		    b2ScatterBodies( states, c.indexA, &bA );
@@ -1519,6 +1597,78 @@ public sealed partial class NewPhysicsSystem
         }
     }
 
+    private unsafe FixedArray8<float> SimdMulAdd(ReadOnlySpan<float> a, ReadOnlySpan<float> b, ReadOnlySpan<float> c)
+    {
+        if (!Avx.IsSupported)
+        {
+            return new FixedArray8<float>(
+                a[0] + b[0] * c[0],
+                a[1] + b[1] * c[1],
+                a[2] + b[2] * c[2],
+                a[3] + b[3] * c[3],
+                a[4] + b[4] * c[4],
+                a[5] + b[5] * c[5],
+                a[6] + b[6] * c[6],
+                a[7] + b[7] * c[7]);
+        }
+
+        ref var floatRefA = ref Unsafe.As<ReadOnlySpan<float>, float>(ref a);
+        ref var floatRefB = ref Unsafe.As<ReadOnlySpan<float>, float>(ref b);
+        ref var floatRefC = ref Unsafe.As<ReadOnlySpan<float>, float>(ref c);
+        FixedArray8<float> returned = default;
+
+        fixed (float* ptrA = &floatRefA)
+        fixed (float* ptrB = &floatRefB)
+        fixed (float* ptrC = &floatRefC)
+        {
+            var aData = Avx.LoadAlignedVector256(ptrA);
+            var bData = Avx.LoadAlignedVector256(ptrB);
+            var cData = Avx.LoadAlignedVector256(ptrC);
+
+            var result = Avx.Add(aData, Avx.Multiply(bData, cData));
+
+            Unsafe.WriteUnaligned(ref Unsafe.As<FixedArray8<float>, byte>(ref returned), result);
+
+            return returned;
+        }
+    }
+
+    private unsafe FixedArray8<float> SimdMulSub(ReadOnlySpan<float> a, ReadOnlySpan<float> b, ReadOnlySpan<float> c)
+    {
+        if (!Avx.IsSupported)
+        {
+            return new FixedArray8<float>(
+                a[0] + b[0] * c[0],
+                a[1] + b[1] * c[1],
+                a[2] + b[2] * c[2],
+                a[3] + b[3] * c[3],
+                a[4] + b[4] * c[4],
+                a[5] + b[5] * c[5],
+                a[6] + b[6] * c[6],
+                a[7] + b[7] * c[7]);
+        }
+
+        ref var floatRefA = ref Unsafe.As<ReadOnlySpan<float>, float>(ref a);
+        ref var floatRefB = ref Unsafe.As<ReadOnlySpan<float>, float>(ref b);
+        ref var floatRefC = ref Unsafe.As<ReadOnlySpan<float>, float>(ref c);
+        FixedArray8<float> returned = default;
+
+        fixed (float* ptrA = &floatRefA)
+        fixed (float* ptrB = &floatRefB)
+        fixed (float* ptrC = &floatRefC)
+        {
+            var aData = Avx.LoadAlignedVector256(ptrA);
+            var bData = Avx.LoadAlignedVector256(ptrB);
+            var cData = Avx.LoadAlignedVector256(ptrC);
+
+            var result = Avx.Subtract(aData, Avx.Multiply(bData, cData));
+
+            Unsafe.WriteUnaligned(ref Unsafe.As<FixedArray8<float>, byte>(ref returned), result);
+
+            return returned;
+        }
+    }
+
     private unsafe FixedArray8<float> SimdAdd(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
         if (!Avx.IsSupported)
@@ -1583,7 +1733,7 @@ public sealed partial class NewPhysicsSystem
         }
     }
 
-    private unsafe FixedArray8<float> SimdSplat(float scalar)
+    private FixedArray8<float> SimdSplat(float scalar)
     {
         if (!Avx.IsSupported)
         {
@@ -1604,6 +1754,11 @@ public sealed partial class NewPhysicsSystem
 
         Unsafe.WriteUnaligned(ref Unsafe.As<FixedArray8<float>, byte>(ref returned), result);
         return returned;
+    }
+
+    private FixedArray8<float> SimdCross(Vector2Wide a, Vector2Wide b)
+    {
+        return SimdSub(SimdMul(a.X.AsSpan, b.Y.AsSpan).AsSpan, SimdMul(a.Y.AsSpan, b.X.AsSpan).AsSpan);
     }
 
     #endregion

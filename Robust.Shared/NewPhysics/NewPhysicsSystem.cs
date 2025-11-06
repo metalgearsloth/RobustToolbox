@@ -142,6 +142,8 @@ public sealed partial class NewPhysicsSystem : EntitySystem
      * CVars
      */
 
+    private float _maxLinearVelocity;
+
     // TODO: Cvar
     private bool _enableSpeculative;
 
