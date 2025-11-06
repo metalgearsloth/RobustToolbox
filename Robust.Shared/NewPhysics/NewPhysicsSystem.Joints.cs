@@ -45,7 +45,7 @@ public sealed partial class NewPhysicsSystem
                 break;
 
             default:
-                DebugTools.Assert( false );
+                DebugTools.Assert(false);
                 break;
         }
     }
@@ -119,7 +119,7 @@ public sealed partial class NewPhysicsSystem
                 break;
 
             default:
-                DebugTools.Assert( false );
+                DebugTools.Assert(false);
                 break;
         }
     }
@@ -139,41 +139,37 @@ public sealed partial class NewPhysicsSystem
 
     private void WarmStartJointsTask( int startIndex, int endIndex, int colorIndex )
     {
-        b2TracyCZoneNC( warm_joints, "WarmJoints", b2_colorGold, true );
-
-        b2GraphColor* color = context.graph.colors + colorIndex;
-        b2JointSim* joints = color.jointSims.data;
-        DebugTools.Assert( 0 <= startIndex && startIndex < color.jointSims.count );
-        DebugTools.Assert( startIndex <= endIndex && endIndex <= color.jointSims.count );
+        var color = _constraintGraph.colors[colorIndex];
+        ref var joints = ref color.JointSims;
+        DebugTools.Assert(0 <= startIndex && startIndex < joints.Count);
+        DebugTools.Assert(startIndex <= endIndex && endIndex <= joints.Count);
 
         for ( int i = startIndex; i < endIndex; ++i )
         {
-            b2JointSim* joint = joints + i;
-            WarmStartJoint( joint, context );
+            ref var joint = ref joints[i];
+            WarmStartJoint(ref joint);
         }
-
-        b2TracyCZoneEnd( warm_joints );
     }
 
     private void SolveJointsTask( int startIndex, int endIndex, int colorIndex, bool useBias,
         int workerIndex )
     {
-        b2TracyCZoneNC( solve_joints, "SolveJoints", b2_colorLemonChiffon, true );
+        var color = _constraintGraph.colors[colorIndex];
+        ref var joints = ref color.JointSims;
+        DebugTools.Assert(0 <= startIndex && startIndex < color.JointSims.Count);
+        DebugTools.Assert(startIndex <= endIndex && endIndex <= color.JointSims.Count);
 
-        b2GraphColor* color = context.graph.colors + colorIndex;
-        b2JointSim* joints = color.jointSims.data;
-        DebugTools.Assert( 0 <= startIndex && startIndex < color.jointSims.count );
-        DebugTools.Assert( startIndex <= endIndex && endIndex <= color.jointSims.count );
-
-        b2BitSet* jointStateBitSet = &context.world.taskContexts.data[workerIndex].jointStateBitSet;
+        // TODO: Need solver context or smth for these
+        // TODO: States by ref, probably store them in valuelist.
+        var jointStateBitSet = &context.world.taskContexts.data[workerIndex].jointStateBitSet;
 
         for ( int i = startIndex; i < endIndex; ++i )
         {
-            b2JointSim* joint = joints + i;
-            SolveJoint( joint, context, useBias );
+            ref var joint = joints[i];
+            SolveJoint(ref joint, useBias);
 
-            if ( useBias && ( joint.forceThreshold < FLT_MAX || joint.torqueThreshold < FLT_MAX ) &&
-                 b2GetBit( jointStateBitSet, joint.jointId ) == false )
+            if (useBias && (joint.forceThreshold < float.MaxValue || joint.torqueThreshold < float.MaxValue) &&
+                 b2GetBit( jointStateBitSet, joint.jointId ) == false)
             {
                 float force, torque;
                 b2GetJointReaction( joint, context.inv_h, &force, &torque );

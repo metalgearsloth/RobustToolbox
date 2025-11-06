@@ -1,4 +1,8 @@
+using System.Numerics;
+using Robust.Shared.Maths;
+using Robust.Shared.NewPhysics.Bodies;
 using Robust.Shared.NewPhysics.Joints;
+using Robust.Shared.Physics;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.NewPhysics;
@@ -61,15 +65,15 @@ private void PreparePrismaticJoint(ref JointSim sim)
 	var bodyA = _bodies[idA].Comp;
 	var bodyB = _bodies[idB].Comp;
 
-	B2_ASSERT( bodyA.setIndex == b2_awakeSet || bodyB.setIndex == b2_awakeSet );
-	b2SolverSet* setA = b2SolverSetArray_Get( &world.solverSets, bodyA.setIndex );
-	b2SolverSet* setB = b2SolverSetArray_Get( &world.solverSets, bodyB.setIndex );
+	DebugTools.Assert(bodyA.SetIndex == (int) SetType.AwakeSet || bodyB.SetIndex == (int) SetType.AwakeSet);
+	var setA = _solverSets[bodyA.SetIndex];
+	var setB = _solverSets[bodyB.SetIndex];
 
-	int localIndexA = bodyA.localIndex;
-	int localIndexB = bodyB.localIndex;
+	int localIndexA = bodyA.LocalIndex;
+	int localIndexB = bodyB.LocalIndex;
 
-	b2BodySim* bodySimA = b2BodySimArray_Get( &setA.bodySims, localIndexA );
-	b2BodySim* bodySimB = b2BodySimArray_Get( &setB.bodySims, localIndexB );
+	ref var bodySimA = ref setA.bodySims[localIndexA];
+	ref var bodySimB = ref setB.bodySims[localIndexB];
 
 	float mA = bodySimA.invMass;
 	float iA = bodySimA.invInertia;
@@ -81,24 +85,24 @@ private void PreparePrismaticJoint(ref JointSim sim)
 	sim.invIA = iA;
 	sim.invIB = iB;
 
-	b2PrismaticJoint* joint = &sim.prismaticJoint;
-	joint.indexA = bodyA.setIndex == b2_awakeSet ? localIndexA : B2_NULL_INDEX;
-	joint.indexB = bodyB.setIndex == b2_awakeSet ? localIndexB : B2_NULL_INDEX;
+	var joint = (PrismaticJoint) _joints[sim.jointId];
+	joint.IndexA = bodyA.SetIndex == (int) SetType.AwakeSet ? localIndexA : PhysicsConstants.NullIndex;
+	joint.IndexB = bodyB.SetIndex == (int) SetType.AwakeSet ? localIndexB : PhysicsConstants.NullIndex;
 
 	// Compute joint anchor frames with world space rotation, relative to center of mass
-	joint.frameA.q = b2MulRot( bodySimA.transform.q, sim.localFrameA.q );
-	joint.frameA.p = b2RotateVector( bodySimA.transform.q, b2Sub( sim.localFrameA.p, bodySimA.localCenter ) );
-	joint.frameB.q = b2MulRot( bodySimB.transform.q, sim.localFrameB.q );
-	joint.frameB.p = b2RotateVector( bodySimB.transform.q, b2Sub( sim.localFrameB.p, bodySimB.localCenter ) );
+	joint.frameA.Quaternion2D = bodySimA.transform.Quaternion2D * sim.localFrameA.Quaternion2D;
+	joint.frameA.Position = Quaternion2D.RotateVector(bodySimA.transform.Quaternion2D, sim.localFrameA.Position - bodySimA.localCenter);
+    joint.frameB.Quaternion2D = bodySimB.transform.Quaternion2D * sim.localFrameB.Quaternion2D;
+	joint.frameB.Position = Quaternion2D.RotateVector(bodySimB.transform.Quaternion2D, sim.localFrameB. Position - bodySimB.localCenter);
 
 	// Compute the initial center delta. Incremental position updates are relative to this.
-	joint.deltaCenter = b2Sub( bodySimB.center, bodySimA.center );
+	joint.deltaCenter = bodySimB.center - bodySimA.center;
 
-	joint.springSoftness = b2MakeSoft( joint.hertz, joint.dampingRatio, context.h );
+	joint.springSoftness = MakeSoft( joint.hertz, joint.dampingRatio, _h);
 
-	if ( context.enableWarmStarting == false )
+	if (_enableWarmStarting == false)
 	{
-		joint.impulse = b2Vec2_zero;
+		joint.impulse = Vector2.Zero;
 		joint.springImpulse = 0.0f;
 		joint.motorImpulse = 0.0f;
 		joint.lowerImpulse = 0.0f;
@@ -108,7 +112,7 @@ private void PreparePrismaticJoint(ref JointSim sim)
 
 private void WarmStartPrismaticJoint(ref JointSim sim)
 {
-	B2_ASSERT( sim.type == b2_prismaticJoint );
+	DebugTools.Assert(sim.type == b2JointType.b2_prismaticJoint);
 
 	float mA = sim.invMassA;
 	float mB = sim.invMassB;
@@ -116,53 +120,53 @@ private void WarmStartPrismaticJoint(ref JointSim sim)
 	float iB = sim.invIB;
 
 	// dummy state for static bodies
-	b2BodyState dummyState = b2_identityBodyState;
+	var dummyState = BodyState.Identity;
 
-	b2PrismaticJoint* joint = &sim.prismaticJoint;
+	var joint = (PrismaticJoint) _joints[sim.jointId];
 
-	b2BodyState* stateA = joint.indexA == B2_NULL_INDEX ? &dummyState : context.states + joint.indexA;
-	b2BodyState* stateB = joint.indexB == B2_NULL_INDEX ? &dummyState : context.states + joint.indexB;
+	var stateA = joint.IndexA == PhysicsConstants.NullIndex ? dummyState : _states[joint.IndexA];
+	var stateB = joint.IndexB == PhysicsConstants.NullIndex ? dummyState : _states[joint.IndexB];
 
-	b2Vec2 rA = b2RotateVector( stateA.deltaRotation, joint.frameA.p );
-	b2Vec2 rB = b2RotateVector( stateB.deltaRotation, joint.frameB.p );
+	var rA = Quaternion2D.RotateVector( stateA.deltaRotation, joint.frameA.Position );
+    var rB = Quaternion2D.RotateVector( stateB.deltaRotation, joint.frameB.Position );
 
-	b2Vec2 d = b2Add( b2Add( b2Sub( stateB.deltaPosition, stateA.deltaPosition ), joint.deltaCenter ), b2Sub( rB, rA ) );
+    var d = stateB.deltaPosition - stateA.deltaPosition + joint.deltaCenter + rB - rA;
 
-	b2Vec2 axisA = b2RotateVector( joint.frameA.q, (b2Vec2){ 1.0f, 0.0f } );
-	axisA = b2RotateVector( stateA.deltaRotation, axisA );
+    var axisA = Quaternion2D.RotateVector(joint.frameA.Quaternion2D, Vector2.UnitX);
+	axisA = Quaternion2D.RotateVector(stateA.deltaRotation, axisA);
 
 	// impulse is applied at anchor point on body B
-	float a1 = b2Cross( b2Add( rA, d ), axisA );
-	float a2 = b2Cross( rB, axisA );
+	float a1 = Vector2Helpers.Cross( rA + d, axisA );
+	float a2 = Vector2Helpers.Cross( rB, axisA );
 	float axialImpulse = joint.springImpulse + joint.motorImpulse + joint.lowerImpulse - joint.upperImpulse;
 
 	// perpendicular constraint
-	b2Vec2 perpA = b2LeftPerp( axisA );
-	float s1 = b2Cross( b2Add( rA, d ), perpA );
-	float s2 = b2Cross( rB, perpA );
-	float perpImpulse = joint.impulse.x;
-	float angleImpulse = joint.impulse.y;
+	var perpA = axisA.LeftPerp();
+	float s1 = Vector2Helpers.Cross( rA + d, perpA );
+	float s2 = Vector2Helpers.Cross( rB, perpA );
+	float perpImpulse = joint.impulse.X;
+	float angleImpulse = joint.impulse.Y;
 
-	b2Vec2 P = b2Add( b2MulSV( axialImpulse, axisA ), b2MulSV( perpImpulse, perpA ) );
+    var P = axialImpulse * axisA + perpImpulse * perpA;
 	float LA = axialImpulse * a1 + perpImpulse * s1 + angleImpulse;
 	float LB = axialImpulse * a2 + perpImpulse * s2 + angleImpulse;
 
-	if ( stateA.flags & b2_dynamicFlag )
+	if ((stateA.flags & (uint) BodyFlags.b2_dynamicFlag) != 0x0)
 	{
-		stateA.linearVelocity = b2MulSub( stateA.linearVelocity, mA, P );
+		stateA.linearVelocity = Vector2Helpers.MulSub( stateA.linearVelocity, mA, P );
 		stateA.angularVelocity -= iA * LA;
 	}
 
-	if ( stateB.flags & b2_dynamicFlag )
+	if ((stateB.flags & (uint) BodyFlags.b2_dynamicFlag) != 0x0 )
 	{
-		stateB.linearVelocity = b2MulAdd( stateB.linearVelocity, mB, P );
+		stateB.linearVelocity = Vector2Helpers.MulAdd( stateB.linearVelocity, mB, P );
 		stateB.angularVelocity += iB * LB;
 	}
 }
 
 private void SolvePrismaticJoint(ref JointSim sim, bool useBias )
 {
-	B2_ASSERT( sim.type == b2_prismaticJoint );
+	DebugTools.Assert(sim.type == b2JointType.b2_prismaticJoint);
 
 	float mA = sim.invMassA;
 	float mB = sim.invMassB;
@@ -170,40 +174,40 @@ private void SolvePrismaticJoint(ref JointSim sim, bool useBias )
 	float iB = sim.invIB;
 
 	// dummy state for static bodies
-	b2BodyState dummyState = b2_identityBodyState;
+	var dummyState = BodyState.Identity;
 
-	b2PrismaticJoint* joint = &sim.prismaticJoint;
+	var joint = (PrismaticJoint) _joints[sim.jointId];
 
-	b2BodyState* stateA = joint.indexA == B2_NULL_INDEX ? &dummyState : context.states + joint.indexA;
-	b2BodyState* stateB = joint.indexB == B2_NULL_INDEX ? &dummyState : context.states + joint.indexB;
+    var stateA = joint.IndexA == PhysicsConstants.NullIndex ? dummyState : _states[joint.IndexA];
+	var stateB = joint.IndexB == PhysicsConstants.NullIndex ? dummyState : _states[joint.IndexB];
 
-	b2Vec2 vA = stateA.linearVelocity;
+	var vA = stateA.linearVelocity;
 	float wA = stateA.angularVelocity;
-	b2Vec2 vB = stateB.linearVelocity;
+    var vB = stateB.linearVelocity;
 	float wB = stateB.angularVelocity;
 
-	b2Rot qA = b2MulRot( stateA.deltaRotation, joint.frameA.q );
-	b2Rot qB = b2MulRot( stateB.deltaRotation, joint.frameB.q );
-	b2Rot relQ = b2InvMulRot( qA, qB );
+    var qA = stateA.deltaRotation * joint.frameA.Quaternion2D;
+    var qB = stateB.deltaRotation * joint.frameB.Quaternion2D;
+    var relQ = Quaternion2D.InvMulRot( qA, qB );
 
 	// current anchors
-	b2Vec2 rA = b2RotateVector( stateA.deltaRotation, joint.frameA.p );
-	b2Vec2 rB = b2RotateVector( stateB.deltaRotation, joint.frameB.p );
+    var rA = Quaternion2D.RotateVector( stateA.deltaRotation, joint.frameA.Position );
+	var rB = Quaternion2D.RotateVector( stateB.deltaRotation, joint.frameB.Position );
 
-	b2Vec2 d = b2Add( b2Add( b2Sub( stateB.deltaPosition, stateA.deltaPosition ), joint.deltaCenter ), b2Sub( rB, rA ) );
+    var d = stateB.deltaPosition - stateA.deltaPosition + joint.deltaCenter + rB - rA;
 
-	b2Vec2 axisA = b2RotateVector( joint.frameA.q, (b2Vec2){ 1.0f, 0.0f } );
-	axisA = b2RotateVector( stateA.deltaRotation, axisA );
-	float translation = b2Dot( axisA, d );
+    var axisA = Quaternion2D.RotateVector(joint.frameA.Quaternion2D, Vector2.UnitX);
+	axisA = Quaternion2D.RotateVector( stateA.deltaRotation, axisA );
+	float translation = Vector2.Dot( axisA, d );
 
 	// These scalars are for torques generated by axial forces
-	float a1 = b2Cross( b2Add( rA, d ), axisA );
-	float a2 = b2Cross( rB, axisA );
+	float a1 = Vector2Helpers.Cross(rA + d, axisA );
+	float a2 = Vector2Helpers.Cross( rB, axisA );
 
 	float k = mA + mB + iA * a1 * a1 + iB * a2 * a2;
 	float axialMass = k > 0.0f ? 1.0f / k : 0.0f;
 
-	b2Softness softness = sim.constraintSoftness;
+	var softness = sim.constraintSoftness;
 
 	// spring constraint
 	if ( joint.enableSpring )
@@ -214,7 +218,7 @@ private void SolvePrismaticJoint(ref JointSim sim, bool useBias )
 		float massScale = joint.springSoftness.massScale;
 		float impulseScale = joint.springSoftness.impulseScale;
 
-		float Cdot = b2Dot( axisA, b2Sub( vB, vA ) ) + a2 * wB - a1 * wA;
+		float Cdot = Vector2.Dot( axisA, b2Sub( vB, vA ) ) + a2 * wB - a1 * wA;
 		float deltaImpulse = -massScale * axialMass * ( Cdot + bias ) - impulseScale * joint.springImpulse;
 		joint.springImpulse += deltaImpulse;
 
@@ -353,8 +357,8 @@ private void SolvePrismaticJoint(ref JointSim sim, bool useBias )
 		b2Vec2 perpA = b2LeftPerp( axisA );
 
 		// These scalars are for torques generated by the perpendicular constraint force
-		float s1 = b2Cross( b2Add( d, rA ), perpA );
-		float s2 = b2Cross( rB, perpA );
+		float s1 = Vector2Helpers.Cross( b2Add( d, rA ), perpA );
+		float s2 = Vector2Helpers.Cross( rB, perpA );
 
 		b2Vec2 Cdot;
 		Cdot.x = b2Dot( perpA, b2Sub( vB, vA ) ) + s2 * wB - s1 * wA;
@@ -403,10 +407,10 @@ private void SolvePrismaticJoint(ref JointSim sim, bool useBias )
 		wB += iB * LB;
 	}
 
-	B2_ASSERT( b2IsValidVec2( vA ) );
-	B2_ASSERT( b2IsValidFloat( wA ) );
-	B2_ASSERT( b2IsValidVec2( vB ) );
-	B2_ASSERT( b2IsValidFloat( wB ) );
+	DebugTools.Assert( b2IsValidVec2( vA ) );
+    DebugTools.Assert( b2IsValidFloat( wA ) );
+    DebugTools.Assert( b2IsValidVec2( vB ) );
+    DebugTools.Assert( b2IsValidFloat( wB ) );
 
 	if ( stateA.flags & b2_dynamicFlag )
 	{

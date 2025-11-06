@@ -107,7 +107,7 @@ public sealed partial class NewPhysicsSystem
 	    }
     }
 
-    void WarmStartWheelJoint(ref JointSim sim)
+    private void WarmStartWheelJoint(ref JointSim sim)
     {
 	    DebugTools.Assert( sim.type == b2JointType.b2_wheelJoint );
 
@@ -156,7 +156,7 @@ public sealed partial class NewPhysicsSystem
 	    }
     }
 
-    void SolveWheelJoint(ref JointSim sim, bool useBias)
+    private void SolveWheelJoint(ref JointSim sim, bool useBias)
     {
 	    DebugTools.Assert(sim.type == b2JointType.b2_wheelJoint);
 

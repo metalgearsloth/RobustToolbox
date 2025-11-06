@@ -1,4 +1,6 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using Robust.Shared.NewPhysics.Joints;
 using Robust.Shared.NewPhysics.Solver;
 using Robust.Shared.Threading;
@@ -12,6 +14,8 @@ public sealed partial class NewPhysicsSystem
     {
         public NewPhysicsSystem System = default!;
         public SolverStage Stage;
+
+        public List<BitArray> JointStateBitSet = new();
 
         public void Execute(int index)
         {
