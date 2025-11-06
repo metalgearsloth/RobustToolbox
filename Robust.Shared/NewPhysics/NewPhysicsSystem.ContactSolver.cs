@@ -1,6 +1,8 @@
 using System;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using Robust.Shared.Collections;
 using Robust.Shared.Maths;
 using Robust.Shared.NewPhysics.Bodies;
@@ -14,56 +16,129 @@ namespace Robust.Shared.NewPhysics;
 
 public sealed partial class NewPhysicsSystem
 {
-    // This is a load and transpose
-    private unsafe BodyStateWide GatherBodies(ref ValueList<BodyState> states, ReadOnlySpan<int> indices)
+    private static byte _MM_SHUFFLE(int fp3, int fp2, int fp1, int fp0)
     {
-        var identity = new FloatWide();
-        identity.Values._06 = 1f;
+        return (byte) ((fp3 << 6) | (fp2 << 4) | (fp1 << 2) | fp0);
+    }
 
-        fixed (float* src = states)
+    // This is a load and transpose
+    private unsafe BodyStateWide GatherBodies(Span<BodyState> states, ReadOnlySpan<int> indices)
+    {
+        if (Avx.IsSupported)
         {
+            var identityValues = new float[8];
+            identityValues[0] = 0f;
+            identityValues[1] = 0f;
+            identityValues[2] = 0f;
+            identityValues[3] = 0f;
+            identityValues[4] = 0f;
+            identityValues[5] = 0f;
+            identityValues[6] = 1f;
+            identityValues[7] = 0f;
 
+            var identity = Vector256.Create(identityValues);
+
+            ref var state0 = ref states[indices[0]];
+            ref var floatRef0 = ref Unsafe.As<BodyState, float>(ref state0);
+
+            ref var state1 = ref states[indices[1]];
+            ref var floatRef1 = ref Unsafe.As<BodyState, float>(ref state1);
+
+            ref var state2= ref states[indices[2]];
+            ref var floatRef2 = ref Unsafe.As<BodyState, float>(ref state2);
+
+            ref var state3 = ref states[indices[3]];
+            ref var floatRef3 = ref Unsafe.As<BodyState, float>(ref state3);
+
+            ref var state4 = ref states[indices[4]];
+            ref var floatRef4 = ref Unsafe.As<BodyState, float>(ref state4);
+
+            ref var state5 = ref states[indices[5]];
+            ref var floatRef5 = ref Unsafe.As<BodyState, float>(ref state5);
+
+            ref var state6 = ref states[indices[6]];
+            ref var floatRef6 = ref Unsafe.As<BodyState, float>(ref state6);
+
+            ref var state7 = ref states[indices[7]];
+            ref var floatRef7 = ref Unsafe.As<BodyState, float>(ref state7);
+
+            fixed (float* ptr0 = &floatRef0)
+            fixed (float* ptr1 = &floatRef1)
+            fixed (float* ptr2 = &floatRef2)
+            fixed (float* ptr3 = &floatRef3)
+            fixed (float* ptr4 = &floatRef4)
+            fixed (float* ptr5 = &floatRef5)
+            fixed (float* ptr6 = &floatRef6)
+            fixed (float* ptr7 = &floatRef7)
+            {
+                var b0 = indices[0] == PhysicsConstants.NullIndex ? identity : Avx.LoadAlignedVector256(ptr0);
+                var b1 = indices[1] == PhysicsConstants.NullIndex ? identity : Avx.LoadAlignedVector256(ptr1);
+                var b2 = indices[2] == PhysicsConstants.NullIndex ? identity : Avx.LoadAlignedVector256(ptr2);
+                var b3 = indices[3] == PhysicsConstants.NullIndex ? identity : Avx.LoadAlignedVector256(ptr3);
+                var b4 = indices[4] == PhysicsConstants.NullIndex ? identity : Avx.LoadAlignedVector256(ptr4);
+                var b5 = indices[5] == PhysicsConstants.NullIndex ? identity : Avx.LoadAlignedVector256(ptr5);
+                var b6 = indices[6] == PhysicsConstants.NullIndex ? identity : Avx.LoadAlignedVector256(ptr6);
+                var b7 = indices[7] == PhysicsConstants.NullIndex ? identity : Avx.LoadAlignedVector256(ptr7);
+
+                var t0 = Avx.UnpackLow(b0, b1);
+                var t1 = Avx.UnpackHigh(b0, b1);
+                var t2 = Avx.UnpackLow( b2, b3 );
+                var t3 = Avx.UnpackHigh( b2, b3 );
+                var t4 = Avx.UnpackLow( b4, b5 );
+                var t5 = Avx.UnpackHigh( b4, b5 );
+                var t6 = Avx.UnpackLow( b6, b7 );
+                var t7 = Avx.UnpackHigh( b6, b7 );
+                var tt0 = Avx.Shuffle( t0, t2, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+                var tt1 = Avx.Shuffle( t0, t2, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+                var tt2 = Avx.Shuffle( t1, t3, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+                var tt3 = Avx.Shuffle( t1, t3, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+                var tt4 = Avx.Shuffle( t4, t6, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+                var tt5 = Avx.Shuffle( t4, t6, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+                var tt6 = Avx.Shuffle( t5, t7, _MM_SHUFFLE( 1, 0, 1, 0 ) );
+                var tt7 = Avx.Shuffle( t5, t7, _MM_SHUFFLE( 3, 2, 3, 2 ) );
+
+                var simdBody = new BodyStateWide();
+                var x = Avx.Permute2x128(tt0, tt4, 0x20);
+                var y = Avx.Permute2x128(tt1, tt5, 0x20);
+                var w = Avx.Permute2x128(tt2, tt6, 0x20);
+                var flags = Avx.Permute2x128(tt3, tt7, 0x20);
+                var dpX = Avx.Permute2x128(tt0, tt4, 0x31);
+                var dpY = Avx.Permute2x128(tt1, tt5, 0x31);
+                var dqC = Avx.Permute2x128(tt2, tt6, 0x31);
+                var dqS = Avx.Permute2x128(tt3, tt7, 0x31);
+
+                simdBody.vX = Unsafe.As<Vector256<float>, FixedArray8<float>>(ref x);
+                simdBody.vY = Unsafe.As<Vector256<float>, FixedArray8<float>>(ref y);
+                simdBody.w = Unsafe.As<Vector256<float>, FixedArray8<float>>(ref w);
+                simdBody.flags = Unsafe.As<Vector256<float>, FixedArray8<float>>(ref flags);
+                simdBody.dpX = Unsafe.As<Vector256<float>, FixedArray8<float>>(ref dpX);
+                simdBody.dpY = Unsafe.As<Vector256<float>, FixedArray8<float>>(ref dpY);
+                simdBody.dqC = Unsafe.As<Vector256<float>, FixedArray8<float>>(ref dqC);
+                simdBody.dqS = Unsafe.As<Vector256<float>, FixedArray8<float>>(ref dqS);
+                return simdBody;
+            }
         }
+        // TODO: SSE version but eh
+        else
+        {
+            var sim = new BodyStateWide();
 
-	    var b0 = indices[0] == PhysicsConstants.NullIndex ? identity : Vector256.Load( (float*)( states[indices[0]] ) );
-	    b2FloatW b1 = indices[1] == PhysicsConstants.NullIndex ? identity : _mm256_load_ps( (float*)( states + indices[1] ) );
-	    b2FloatW b2 = indices[2] == PhysicsConstants.NullIndex ? identity : _mm256_load_ps( (float*)( states + indices[2] ) );
-	    b2FloatW b3 = indices[3] == PhysicsConstants.NullIndex ? identity : _mm256_load_ps( (float*)( states + indices[3] ) );
-	    b2FloatW b4 = indices[4] == PhysicsConstants.NullIndex ? identity : _mm256_load_ps( (float*)( states + indices[4] ) );
-	    b2FloatW b5 = indices[5] == PhysicsConstants.NullIndex ? identity : _mm256_load_ps( (float*)( states + indices[5] ) );
-	    b2FloatW b6 = indices[6] == PhysicsConstants.NullIndex ? identity : _mm256_load_ps( (float*)( states + indices[6] ) );
-	    b2FloatW b7 = indices[7] == PhysicsConstants.NullIndex ? identity : _mm256_load_ps( (float*)( states + indices[7] ) );
+            // Manually load it
+            for (var i = 0; i < indices.Length; i++)
+            {
+                ref var state = ref states[i];
+                sim.vX.AsSpan[i] = state.linearVelocity.X;
+                sim.vY.AsSpan[i] = state.linearVelocity.Y;
+                sim.w.AsSpan[i] = state.angularVelocity;
+                sim.flags.AsSpan[i] = state.flags;
+                sim.dpX.AsSpan[i] = state.deltaPosition.X;
+                sim.dpY.AsSpan[i] = state.deltaPosition.Y;
+                sim.dqC.AsSpan[i] = state.deltaRotation.C;
+                sim.dqS.AsSpan[i] = state.deltaRotation.S;
+            }
 
-        NumericsHelpers.Add();
-        var bbb0 = Vector256.Load(states[indices[0]]);
-
-	    b2FloatW t0 = _mm256_unpacklo_ps( b0, b1 );
-	    b2FloatW t1 = _mm256_unpackhi_ps( b0, b1 );
-	    b2FloatW t2 = _mm256_unpacklo_ps( b2, b3 );
-	    b2FloatW t3 = _mm256_unpackhi_ps( b2, b3 );
-	    b2FloatW t4 = _mm256_unpacklo_ps( b4, b5 );
-	    b2FloatW t5 = _mm256_unpackhi_ps( b4, b5 );
-	    b2FloatW t6 = _mm256_unpacklo_ps( b6, b7 );
-	    b2FloatW t7 = _mm256_unpackhi_ps( b6, b7 );
-	    b2FloatW tt0 = _mm256_shuffle_ps( t0, t2, _MM_SHUFFLE( 1, 0, 1, 0 ) );
-	    b2FloatW tt1 = _mm256_shuffle_ps( t0, t2, _MM_SHUFFLE( 3, 2, 3, 2 ) );
-	    b2FloatW tt2 = _mm256_shuffle_ps( t1, t3, _MM_SHUFFLE( 1, 0, 1, 0 ) );
-	    b2FloatW tt3 = _mm256_shuffle_ps( t1, t3, _MM_SHUFFLE( 3, 2, 3, 2 ) );
-	    b2FloatW tt4 = _mm256_shuffle_ps( t4, t6, _MM_SHUFFLE( 1, 0, 1, 0 ) );
-	    b2FloatW tt5 = _mm256_shuffle_ps( t4, t6, _MM_SHUFFLE( 3, 2, 3, 2 ) );
-	    b2FloatW tt6 = _mm256_shuffle_ps( t5, t7, _MM_SHUFFLE( 1, 0, 1, 0 ) );
-	    b2FloatW tt7 = _mm256_shuffle_ps( t5, t7, _MM_SHUFFLE( 3, 2, 3, 2 ) );
-
-	    b2BodyStateW simdBody;
-	    simdBody.v.X = _mm256_permute2f128_ps( tt0, tt4, 0x20 );
-	    simdBody.v.Y = _mm256_permute2f128_ps( tt1, tt5, 0x20 );
-	    simdBody.w = _mm256_permute2f128_ps( tt2, tt6, 0x20 );
-	    simdBody.flags = _mm256_permute2f128_ps( tt3, tt7, 0x20 );
-	    simdBody.dp.X = _mm256_permute2f128_ps( tt0, tt4, 0x31 );
-	    simdBody.dp.Y = _mm256_permute2f128_ps( tt1, tt5, 0x31 );
-	    simdBody.dq.C = _mm256_permute2f128_ps( tt2, tt6, 0x31 );
-	    simdBody.dq.S = _mm256_permute2f128_ps( tt3, tt7, 0x31 );
-	    return simdBody;
+            return sim;
+        }
     }
 
     private void PrepareContactsTask(int startIndex, int endIndex)
@@ -87,7 +162,7 @@ public sealed partial class NewPhysicsSystem
 		    ref var constraint = ref constraints[i];
             var constraintIndicesA = constraint.indexA.AsSpan;
             var constraintIndicesB = constraint.indexB.AsSpan;
-            var constraintNormals = constraint.normal.AsSpan;
+            var constraintNormals = constraint.normal;
             var constraintInvMassA = constraint.invMassA.AsSpan;
             var constraintInvMassB = constraint.invMassB.AsSpan;
             var constraintIA = constraint.invIA.AsSpan;
@@ -172,18 +247,19 @@ public sealed partial class NewPhysicsSystem
 
 				    var normal = manifold.normal;
 
-                    constraintNormals[j].X = normal.X;
-                    constraintNormals[j].Y = normal.Y;
+                    // TODO: Cast as spans above.
 
-				    ( (float*)&constraint.friction )[j] = contactSim.friction;
-				    ( (float*)&constraint.tangentSpeed )[j] = contactSim.tangentSpeed;
-				    ( (float*)&constraint.restitution )[j] = contactSim.restitution;
-				    ( (float*)&constraint.rollingResistance )[j] = contactSim.rollingResistance;
-				    ( (float*)&constraint.rollingImpulse )[j] = warmStartScale * manifold.rollingImpulse;
+                    constraintNormals.X.AsSpan[j] = normal.X;
+                    constraintNormals.Y.AsSpan[j] = normal.Y;
+                    constraint.friction.AsSpan[j] = contactSim.friction;
+                    constraint.tangentSpeed.AsSpan[j] = contactSim.tangentSpeed;
+                    constraint.restitution.AsSpan[j] = contactSim.restitution;
+                    constraint.rollingResistance.AsSpan[j] = contactSim.restitution;
+                    constraint.rollingImpulse.AsSpan[j] = warmStartScale * manifold.rollingImpulse;
 
-				    ( (float*)&constraint.biasRate )[j] = soft.biasRate;
-				    ( (float*)&constraint.massScale )[j] = soft.massScale;
-				    ( (float*)&constraint.impulseScale )[j] = soft.impulseScale;
+                    constraint.biasRate.AsSpan[j] = soft.biasRate;
+                    constraint.massScale.AsSpan[j] = soft.massScale;
+                    constraint.impulseScale.AsSpan[j] = soft.impulseScale;
 
 				    var tangent = normal.RightPerp();
 
@@ -193,31 +269,31 @@ public sealed partial class NewPhysicsSystem
 					    var rA = mp.anchorA;
                         var rB = mp.anchorB;
 
-					    ( (float*)&constraint.anchorA1.X )[j] = rA.x;
-					    ( (float*)&constraint.anchorA1.Y )[j] = rA.y;
-					    ( (float*)&constraint.anchorB1.X )[j] = rB.x;
-					    ( (float*)&constraint.anchorB1.Y )[j] = rB.y;
+					    constraint.anchorA1.X.AsSpan[j] = rA.X;
+					    constraint.anchorA1.Y.AsSpan[j] = rA.Y;
+					    constraint.anchorB1.X.AsSpan[j] = rB.X;
+					    constraint.anchorB1.Y.AsSpan[j] = rB.Y;
 
-					    ( (float*)&constraint.baseSeparation1 )[j] = mp.separation - Vector2.Dot( rB - rA, normal );
+					    constraint.baseSeparation1.AsSpan[j] = mp.separation - Vector2.Dot( rB - rA, normal );
 
-					    ( (float*)&constraint.normalImpulse1 )[j] = warmStartScale * mp.normalImpulse;
-					    ( (float*)&constraint.tangentImpulse1 )[j] = warmStartScale * mp.tangentImpulse;
-					    ( (float*)&constraint.totalNormalImpulse1 )[j] = 0.0f;
+					    constraint.normalImpulse1.AsSpan[j] = warmStartScale * mp.normalImpulse;
+					    constraint.tangentImpulse1.AsSpan[j] = warmStartScale * mp.tangentImpulse;
+					    constraint.totalNormalImpulse1.AsSpan[j] = 0.0f;
 
 					    float rnA = Vector2Helpers.Cross( rA, normal );
 					    float rnB = Vector2Helpers.Cross( rB, normal );
 					    float kNormal = mA + mB + iA * rnA * rnA + iB * rnB * rnB;
-					    ( (float*)&constraint.normalMass1 )[j] = kNormal > 0.0f ? 1.0f / kNormal : 0.0f;
+					    constraint.normalMass1.AsSpan[j] = kNormal > 0.0f ? 1.0f / kNormal : 0.0f;
 
 					    float rtA = Vector2Helpers.Cross( rA, tangent );
 					    float rtB = Vector2Helpers.Cross( rB, tangent );
 					    float kTangent = mA + mB + iA * rtA * rtA + iB * rtB * rtB;
-					    ( (float*)&constraint.tangentMass1 )[j] = kTangent > 0.0f ? 1.0f / kTangent : 0.0f;
+					    constraint.tangentMass1.AsSpan[j] = kTangent > 0.0f ? 1.0f / kTangent : 0.0f;
 
 					    // relative velocity for restitution
 					    var vrA = vA + Vector2Helpers.Cross( wA, rA );
                         var vrB = vB + Vector2Helpers.Cross( wB, rB );
-					    ( (float*)&constraint.relativeVelocity1 )[j] = Vector2.Dot( normal, b2Sub( vrB, vrA ) );
+					    constraint.relativeVelocity1.AsSpan[j] = Vector2.Dot(normal, vrB - vrA);
 				    }
 
 				    int pointCount = manifold.pointCount;
@@ -230,98 +306,666 @@ public sealed partial class NewPhysicsSystem
 					    var rA = mp.anchorA;
 					    var rB = mp.anchorB;
 
-					    ( (float*)&constraint.anchorA2.X )[j] = rA.x;
-					    ( (float*)&constraint.anchorA2.Y )[j] = rA.y;
-					    ( (float*)&constraint.anchorB2.X )[j] = rB.x;
-					    ( (float*)&constraint.anchorB2.Y )[j] = rB.y;
+					    constraint.anchorA2.X.AsSpan[j] = rA.X;
+					    constraint.anchorA2.Y.AsSpan[j] = rA.Y;
+					    constraint.anchorB2.X.AsSpan[j] = rB.X;
+					    constraint.anchorB2.Y.AsSpan[j] = rB.Y;
 
-					    ( (float*)&constraint.baseSeparation2 )[j] = mp.separation - Vector2.Dot( b2Sub( rB, rA ), normal );
+					    constraint.baseSeparation2.AsSpan[j] = mp.separation - Vector2.Dot(rB - rA, normal);
 
-					    ( (float*)&constraint.normalImpulse2 )[j] = warmStartScale * mp.normalImpulse;
-					    ( (float*)&constraint.tangentImpulse2 )[j] = warmStartScale * mp.tangentImpulse;
-					    ( (float*)&constraint.totalNormalImpulse2 )[j] = 0.0f;
+					    constraint.normalImpulse2.AsSpan[j] = warmStartScale * mp.normalImpulse;
+					    constraint.tangentImpulse2.AsSpan[j] = warmStartScale * mp.tangentImpulse;
+					    constraint.totalNormalImpulse2.AsSpan[j] = 0.0f;
 
 					    float rnA = Vector2Helpers.Cross( rA, normal );
 					    float rnB = Vector2Helpers.Cross( rB, normal );
 					    float kNormal = mA + mB + iA * rnA * rnA + iB * rnB * rnB;
-					    ( (float*)&constraint.normalMass2 )[j] = kNormal > 0.0f ? 1.0f / kNormal : 0.0f;
+					    constraint.normalMass2.AsSpan[j] = kNormal > 0.0f ? 1.0f / kNormal : 0.0f;
 
 					    float rtA = Vector2Helpers.Cross( rA, tangent );
 					    float rtB = Vector2Helpers.Cross( rB, tangent );
 					    float kTangent = mA + mB + iA * rtA * rtA + iB * rtB * rtB;
-					    ( (float*)&constraint.tangentMass2 )[j] = kTangent > 0.0f ? 1.0f / kTangent : 0.0f;
+					    constraint.tangentMass2.AsSpan[j] = kTangent > 0.0f ? 1.0f / kTangent : 0.0f;
 
 					    // relative velocity for restitution
-					    b2Vec2 vrA = b2Add( vA, Vector2Helpers.Cross( wA, rA ) );
-					    b2Vec2 vrB = b2Add( vB, Vector2Helpers.Cross( wB, rB ) );
-					    ( (float*)&constraint.relativeVelocity2 )[j] = Vector2.Dot( normal, b2Sub( vrB, vrA ) );
+					    var vrA = vA + Vector2Helpers.Cross( wA, rA );
+					    var vrB = vB + Vector2Helpers.Cross( wB, rB );
+					    constraint.relativeVelocity2.AsSpan[j] = Vector2.Dot(normal, vrB - vrA);
 				    }
 				    else
 				    {
 					    // dummy data that has no effect
-					    ( (float*)&constraint.baseSeparation2 )[j] = 0.0f;
-					    ( (float*)&constraint.normalImpulse2 )[j] = 0.0f;
-					    ( (float*)&constraint.tangentImpulse2 )[j] = 0.0f;
-					    ( (float*)&constraint.totalNormalImpulse2 )[j] = 0.0f;
-					    ( (float*)&constraint.anchorA2.X )[j] = 0.0f;
-					    ( (float*)&constraint.anchorA2.Y )[j] = 0.0f;
-					    ( (float*)&constraint.anchorB2.X )[j] = 0.0f;
-					    ( (float*)&constraint.anchorB2.Y )[j] = 0.0f;
-					    ( (float*)&constraint.normalMass2 )[j] = 0.0f;
-					    ( (float*)&constraint.tangentMass2 )[j] = 0.0f;
-					    ( (float*)&constraint.relativeVelocity2 )[j] = 0.0f;
+					    constraint.baseSeparation2.AsSpan[j] = 0.0f;
+					    constraint.normalImpulse2.AsSpan[j] = 0.0f;
+					    constraint.tangentImpulse2.AsSpan[j] = 0.0f;
+					    constraint.totalNormalImpulse2.AsSpan[j] = 0.0f;
+					    constraint.anchorA2.X.AsSpan[j] = 0.0f;
+					    constraint.anchorA2.Y.AsSpan[j] = 0.0f;
+					    constraint.anchorB2.X.AsSpan[j] = 0.0f;
+					    constraint.anchorB2.Y.AsSpan[j] = 0.0f;
+					    constraint.normalMass2.AsSpan[j] = 0.0f;
+					    constraint.tangentMass2.AsSpan[j] = 0.0f;
+					    constraint.relativeVelocity2.AsSpan[j] = 0.0f;
 				    }
 			    }
 			    else
 			    {
 				    // SIMD remainder
-				    constraint.indexA[j] = PhysicsConstants.NullIndex;
-				    constraint.indexB[j] = PhysicsConstants.NullIndex;
+				    constraint.indexA.AsSpan[j] = PhysicsConstants.NullIndex;
+				    constraint.indexB.AsSpan[j] = PhysicsConstants.NullIndex;
 
-				    ( (float*)&constraint.invMassA )[j] = 0.0f;
-				    ( (float*)&constraint.invMassB )[j] = 0.0f;
-				    ( (float*)&constraint.invIA )[j] = 0.0f;
-				    ( (float*)&constraint.invIB )[j] = 0.0f;
+				    constraint.invMassA.AsSpan[j] = 0.0f;
+				    constraint.invMassB.AsSpan[j] = 0.0f;
+				    constraint.invIA.AsSpan[j] = 0.0f;
+				    constraint.invIB.AsSpan[j] = 0.0f;
 
-				    ( (float*)&constraint.normal.X )[j] = 0.0f;
-				    ( (float*)&constraint.normal.Y )[j] = 0.0f;
-				    ( (float*)&constraint.friction )[j] = 0.0f;
-				    ( (float*)&constraint.tangentSpeed )[j] = 0.0f;
-				    ( (float*)&constraint.rollingResistance )[j] = 0.0f;
-				    ( (float*)&constraint.rollingMass )[j] = 0.0f;
-				    ( (float*)&constraint.rollingImpulse )[j] = 0.0f;
-				    ( (float*)&constraint.biasRate )[j] = 0.0f;
-				    ( (float*)&constraint.massScale )[j] = 0.0f;
-				    ( (float*)&constraint.impulseScale )[j] = 0.0f;
+				    constraint.normal.X.AsSpan[j] = 0.0f;
+				    constraint.normal.Y.AsSpan[j] = 0.0f;
+				    constraint.friction.AsSpan[j] = 0.0f;
+				    constraint.tangentSpeed.AsSpan[j] = 0.0f;
+				    constraint.rollingResistance.AsSpan[j] = 0.0f;
+				    constraint.rollingMass.AsSpan[j] = 0.0f;
+				    constraint.rollingImpulse.AsSpan[j] = 0.0f;
+				    constraint.biasRate.AsSpan[j] = 0.0f;
+				    constraint.massScale.AsSpan[j] = 0.0f;
+				    constraint.impulseScale.AsSpan[j] = 0.0f;
 
-				    ( (float*)&constraint.anchorA1.X )[j] = 0.0f;
-				    ( (float*)&constraint.anchorA1.Y )[j] = 0.0f;
-				    ( (float*)&constraint.anchorB1.X )[j] = 0.0f;
-				    ( (float*)&constraint.anchorB1.Y )[j] = 0.0f;
-				    ( (float*)&constraint.baseSeparation1 )[j] = 0.0f;
-				    ( (float*)&constraint.normalImpulse1 )[j] = 0.0f;
-				    ( (float*)&constraint.tangentImpulse1 )[j] = 0.0f;
-				    ( (float*)&constraint.totalNormalImpulse1 )[j] = 0.0f;
-				    ( (float*)&constraint.normalMass1 )[j] = 0.0f;
-				    ( (float*)&constraint.tangentMass1 )[j] = 0.0f;
+				    constraint.anchorA1.X.AsSpan[j] = 0.0f;
+				    constraint.anchorA1.Y.AsSpan[j] = 0.0f;
+				    constraint.anchorB1.X.AsSpan[j] = 0.0f;
+				    constraint.anchorB1.Y.AsSpan[j] = 0.0f;
+				    constraint.baseSeparation1.AsSpan[j] = 0.0f;
+				    constraint.normalImpulse1.AsSpan[j] = 0.0f;
+				    constraint.tangentImpulse1.AsSpan[j] = 0.0f;
+				    constraint.totalNormalImpulse1.AsSpan[j] = 0.0f;
+				    constraint.normalMass1.AsSpan[j] = 0.0f;
+				    constraint.tangentMass1.AsSpan[j] = 0.0f;
 
-				    ( (float*)&constraint.anchorA2.X )[j] = 0.0f;
-				    ( (float*)&constraint.anchorA2.Y )[j] = 0.0f;
-				    ( (float*)&constraint.anchorB2.X )[j] = 0.0f;
-				    ( (float*)&constraint.anchorB2.Y )[j] = 0.0f;
-				    ( (float*)&constraint.baseSeparation2 )[j] = 0.0f;
-				    ( (float*)&constraint.normalImpulse2 )[j] = 0.0f;
-				    ( (float*)&constraint.tangentImpulse2 )[j] = 0.0f;
-				    ( (float*)&constraint.totalNormalImpulse2 )[j] = 0.0f;
-				    ( (float*)&constraint.normalMass2 )[j] = 0.0f;
-				    ( (float*)&constraint.tangentMass2 )[j] = 0.0f;
+				    constraint.anchorA2.X.AsSpan[j] = 0.0f;
+				    constraint.anchorA2.Y.AsSpan[j] = 0.0f;
+				    constraint.anchorB2.X.AsSpan[j] = 0.0f;
+				    constraint.anchorB2.Y.AsSpan[j] = 0.0f;
+				    constraint.baseSeparation2.AsSpan[j] = 0.0f;
+				    constraint.normalImpulse2.AsSpan[j] = 0.0f;
+				    constraint.tangentImpulse2.AsSpan[j] = 0.0f;
+				    constraint.totalNormalImpulse2.AsSpan[j] = 0.0f;
+				    constraint.normalMass2.AsSpan[j] = 0.0f;
+				    constraint.tangentMass2.AsSpan[j] = 0.0f;
 
-				    ( (float*)&constraint.restitution )[j] = 0.0f;
-				    ( (float*)&constraint.relativeVelocity1 )[j] = 0.0f;
-				    ( (float*)&constraint.relativeVelocity2 )[j] = 0.0f;
+				    constraint.restitution.AsSpan[j] = 0.0f;
+				    constraint.relativeVelocity1.AsSpan[j] = 0.0f;
+				    constraint.relativeVelocity2.AsSpan[j] = 0.0f;
 			    }
 		    }
 	    }
+    }
+
+    // Integrate velocities and apply damping
+    private void IntegrateVelocitiesTask( int startIndex, int endIndex)
+    {
+	    ref var states = ref _contextBodyStates;
+	    ref var sims = ref _contextSims;
+
+        // TODO:
+	    var gravity = Vector2.Zero;
+	    float h = _h;
+	    float maxLinearSpeed = _maxLinearVelocity;
+	    float maxAngularSpeed = PhysicsConstants.MaxRotation * _invDt;
+	    float maxLinearSpeedSquared = maxLinearSpeed * maxLinearSpeed;
+	    float maxAngularSpeedSquared = maxAngularSpeed * maxAngularSpeed;
+
+	    for ( int i = startIndex; i < endIndex; ++i )
+	    {
+		    ref var sim = ref sims[i];
+		    ref var state = ref states[i];
+
+		    var v = state.linearVelocity;
+		    float w = state.angularVelocity;
+
+		    // Apply forces, torque, gravity, and damping
+		    // Apply damping.
+		    // Differential equation: dv/dt + c * v = 0
+		    // Solution: v(t) = v0 * exp(-c * t)
+		    // Time step: v(t + dt) = v0 * exp(-c * (t + dt)) = v0 * exp(-c * t) * exp(-c * dt) = v(t) * exp(-c * dt)
+		    // v2 = exp(-c * dt) * v1
+		    // Pade approximation:
+		    // v2 = v1 * 1 / (1 + c * dt)
+		    float linearDamping = 1.0f / ( 1.0f + h * sim.linearDamping );
+		    float angularDamping = 1.0f / ( 1.0f + h * sim.angularDamping );
+
+		    // Gravity scale will be zero for kinematic bodies
+		    float gravityScale = sim.invMass > 0.0f ? sim.gravityScale : 0.0f;
+
+		    // lvd = h * im * f + h * g
+		    var linearVelocityDelta = h * sim.invMass * sim.force + (h * gravityScale) * gravity;
+		    float angularVelocityDelta = h * sim.invInertia * sim.torque;
+
+		    v = Vector2Helpers.MulAdd( linearVelocityDelta, linearDamping, v );
+		    w = angularVelocityDelta + angularDamping * w;
+
+		    // Clamp to max linear speed
+		    if ( Vector2.Dot( v, v ) > maxLinearSpeedSquared )
+		    {
+			    float ratio = maxLinearSpeed / v.Length();
+			    v = ratio * v;
+			    sim.flags |= (ushort) BodyFlags.b2_isSpeedCapped;
+		    }
+
+		    // Clamp to max angular speed
+		    if ( w * w > maxAngularSpeedSquared && ( sim.flags & (ushort) BodyFlags.b2_allowFastRotation ) == 0 )
+		    {
+			    float ratio = maxAngularSpeed / MathF.Abs( w );
+			    w *= ratio;
+			    sim.flags |= (ushort) BodyFlags.b2_isSpeedCapped;
+		    }
+
+		    if ((state.flags & (ushort) BodyFlags.b2_lockLinearX) != 0x0)
+		    {
+			    v.X = 0.0f;
+		    }
+
+		    if ((state.flags & (ushort) BodyFlags.b2_lockLinearY) != 0x0)
+		    {
+			    v.Y = 0.0f;
+		    }
+
+		    if ((state.flags & (ushort) BodyFlags.b2_lockAngularZ) != 0x0)
+		    {
+			    w = 0.0f;
+		    }
+
+		    state.linearVelocity = v;
+		    state.angularVelocity = w;
+	    }
+    }
+
+    private void WarmStartContactsTask( int startIndex, int endIndex, int colorIndex )
+    {
+        var color = _constraintGraph.colors[colorIndex];
+        var constraints = _contextSimdContactConstraints.Span.Slice(color.SimdConstraintIndex, color.SimdConstraintCount);
+
+        var stateSpan = _contextBodyStates.Span;
+
+	    for ( int i = startIndex; i < endIndex; ++i )
+	    {
+		    ref var c = ref constraints[i];
+		    var bA = GatherBodies(stateSpan, c.indexA.AsSpan);
+		    var bB = GatherBodies(stateSpan, c.indexB.AsSpan);
+
+		    var tangentX = c.normal.Y;
+
+            var tangentY = SimdSub(b2ContactConstraintSIMD.Zero.AsSpan, c.normal.X.AsSpan);
+
+		    {
+			    // fixed anchors
+			    var rA = c.anchorA1;
+			    var rB = c.anchorB1;
+
+			    Vector2Wide P;
+
+			    P.X = SimdAdd( SimdMul( c.normalImpulse1.AsSpan, c.normal.X.AsSpan ).AsSpan, SimdMul( c.tangentImpulse1.AsSpan, tangentX.AsSpan ).AsSpan );
+			    P.Y = SimdAdd( SimdMul( c.normalImpulse1.AsSpan, c.normal.Y.AsSpan ).AsSpan, SimdMul( c.tangentImpulse1.AsSpan, tangentY.AsSpan ).AsSpan );
+			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2CrossW( rA, P ) );
+			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, P.X );
+			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, P.Y );
+			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2CrossW( rB, P ) );
+			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, P.X );
+			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, P.Y );
+		    }
+
+		    {
+			    // fixed anchors
+			    var rA = c.anchorA2;
+                var rB = c.anchorB2;
+
+			    b2Vec2W P;
+			    P.X = SimdAdd( SimdMul( c.normalImpulse2, c.normal.X ), SimdMul( c.tangentImpulse2, tangentX ) );
+			    P.Y = SimdAdd( SimdMul( c.normalImpulse2, c.normal.Y ), SimdMul( c.tangentImpulse2, tangentY ) );
+			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2CrossW( rA, P ) );
+			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, P.X );
+			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, P.Y );
+			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2CrossW( rB, P ) );
+			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, P.X );
+			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, P.Y );
+		    }
+
+		    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, c.rollingImpulse );
+		    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, c.rollingImpulse );
+
+		    ScatterBodies( _contextBodyStates, c.indexA, &bA );
+		    ScatterBodies( _contextBodyStates, c.indexB, &bB );
+	    }
+    }
+
+    private void SolveContactsTask( int startIndex, int endIndex, int colorIndex, bool useBias )
+    {
+	    ref var states = ref _contextBodyStates;
+        var constraints = _contextSimdContactConstraints.Span.Slice(_constraintGraph.colors[colorIndex].SimdConstraintIndex, _constraintGraph.colors[colorIndex].SimdConstraintCount);
+
+	    var inv_h = SimdSplat( _invH );
+	    var contactSpeed = SimdSplat( -_contactSpeed );
+	    var oneW = SimdSplat( 1.0f );
+
+	    for ( int i = startIndex; i < endIndex; ++i )
+	    {
+		    ref var c = ref constraints[i];
+
+		    var bA = GatherBodies(states.Span, c.indexA.AsSpan );
+            var bB = GatherBodies(states.Span, c.indexA.AsSpan );
+
+		    FixedArray8<float> biasRate, massScale, impulseScale;
+		    if ( useBias )
+		    {
+			    biasRate = SimdMul( c.massScale, c.biasRate );
+			    massScale = c.massScale;
+			    impulseScale = c.impulseScale;
+		    }
+		    else
+		    {
+			    biasRate = b2ZeroW();
+			    massScale = oneW;
+			    impulseScale = b2ZeroW();
+		    }
+
+		    b2FloatW totalNormalImpulse = b2ZeroW();
+
+		    b2Vec2W dp = { b2SubW( bB.dp.X, bA.dp.X ), b2SubW( bB.dp.Y, bA.dp.Y ) };
+
+		    // point1 non-penetration constraint
+		    {
+			    // Fixed anchors for impulses
+			    b2Vec2W rA = c.anchorA1;
+			    b2Vec2W rB = c.anchorB1;
+
+			    // Moving anchors for current separation
+			    b2Vec2W rsA = Quaternion2D.RotateVectorW( bA.dq, rA );
+			    b2Vec2W rsB = Quaternion2D.RotateVectorW( bB.dq, rB );
+
+			    // compute current separation
+			    // this is subject to round-off error if the anchor is far from the body center of mass
+			    b2Vec2W ds = { SimdAdd( dp.X, b2SubW( rsB.X, rsA.X ) ), SimdAdd( dp.Y, b2SubW( rsB.Y, rsA.Y ) ) };
+			    b2FloatW s = SimdAdd( Vector2.DotW( c.normal, ds ), c.baseSeparation1 );
+
+			    // Apply speculative bias if separation is greater than zero, otherwise apply soft constraint bias
+			    // The contactSpeed is meant to limit stiffness, not increase it.
+			    b2FloatW mask = b2GreaterThanW( s, b2ZeroW() );
+			    b2FloatW specBias = SimdMul( s, inv_h );
+			    b2FloatW softBias = b2MaxW( SimdMul( biasRate, s ), contactSpeed );
+
+			    // todo try b2MaxW(softBias, specBias);
+			    b2FloatW bias = b2BlendW( softBias, specBias, mask );
+
+			    b2FloatW pointMassScale = b2BlendW( massScale, oneW, mask );
+			    b2FloatW pointImpulseScale = b2BlendW( impulseScale, b2ZeroW(), mask );
+
+			    // Relative velocity at contact
+			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, SimdMul( bB.w, rB.Y ) ), b2SubW( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
+			    b2FloatW dvy = b2SubW( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
+			    b2FloatW vn = SimdAdd( SimdMul( dvx, c.normal.X ), SimdMul( dvy, c.normal.Y ) );
+
+			    // Compute normal impulse
+			    b2FloatW negImpulse = SimdAdd( SimdMul( c.normalMass1, SimdAdd( SimdMul( pointMassScale, vn ), bias ) ),
+										      SimdMul( pointImpulseScale, c.normalImpulse1 ) );
+
+			    // Clamp the accumulated impulse
+			    b2FloatW newImpulse = b2MaxW( b2SubW( c.normalImpulse1, negImpulse ), b2ZeroW() );
+			    b2FloatW impulse = b2SubW( newImpulse, c.normalImpulse1 );
+			    c.normalImpulse1 = newImpulse;
+			    c.totalNormalImpulse1 = SimdAdd( c.totalNormalImpulse1, newImpulse );
+
+			    totalNormalImpulse = SimdAdd( totalNormalImpulse, newImpulse );
+
+			    // Apply contact impulse
+			    b2FloatW Px = SimdMul( impulse, c.normal.X );
+			    b2FloatW Py = SimdMul( impulse, c.normal.Y );
+
+			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
+			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
+			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
+
+			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
+			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
+			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
+		    }
+
+		    // second point non-penetration constraint
+		    {
+			    // moving anchors for current separation
+			    b2Vec2W rsA = Quaternion2D.RotateVectorW( bA.dq, c.anchorA2 );
+			    b2Vec2W rsB = Quaternion2D.RotateVectorW( bB.dq, c.anchorB2 );
+
+			    // compute current separation
+			    b2Vec2W ds = { SimdAdd( dp.X, b2SubW( rsB.X, rsA.X ) ), SimdAdd( dp.Y, b2SubW( rsB.Y, rsA.Y ) ) };
+			    b2FloatW s = SimdAdd( Vector2.DotW( c.normal, ds ), c.baseSeparation2 );
+
+			    b2FloatW mask = b2GreaterThanW( s, b2ZeroW() );
+			    b2FloatW specBias = SimdMul( s, inv_h );
+			    b2FloatW softBias = b2MaxW( SimdMul( biasRate, s ), contactSpeed );
+			    b2FloatW bias = b2BlendW( softBias, specBias, mask );
+
+			    b2FloatW pointMassScale = b2BlendW( massScale, oneW, mask );
+			    b2FloatW pointImpulseScale = b2BlendW( impulseScale, b2ZeroW(), mask );
+
+			    // fixed anchors for Jacobians
+			    b2Vec2W rA = c.anchorA2;
+			    b2Vec2W rB = c.anchorB2;
+
+			    // Relative velocity at contact
+			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, SimdMul( bB.w, rB.Y ) ), b2SubW( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
+			    b2FloatW dvy = b2SubW( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
+			    b2FloatW vn = SimdAdd( SimdMul( dvx, c.normal.X ), SimdMul( dvy, c.normal.Y ) );
+
+			    // Compute normal impulse
+			    b2FloatW negImpulse = SimdAdd( SimdMul( c.normalMass2, SimdAdd( SimdMul( pointMassScale, vn ), bias ) ),
+										      SimdMul( pointImpulseScale, c.normalImpulse2 ) );
+
+			    // Clamp the accumulated impulse
+			    b2FloatW newImpulse = b2MaxW( b2SubW( c.normalImpulse2, negImpulse ), b2ZeroW() );
+			    b2FloatW impulse = b2SubW( newImpulse, c.normalImpulse2 );
+			    c.normalImpulse2 = newImpulse;
+			    c.totalNormalImpulse2 = SimdAdd( c.totalNormalImpulse2, newImpulse );
+
+			    totalNormalImpulse = SimdAdd( totalNormalImpulse, newImpulse );
+
+			    // Apply contact impulse
+			    b2FloatW Px = SimdMul( impulse, c.normal.X );
+			    b2FloatW Py = SimdMul( impulse, c.normal.Y );
+
+			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
+			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
+			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
+
+			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
+			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
+			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
+		    }
+
+		    b2FloatW tangentX = c.normal.Y;
+		    b2FloatW tangentY = b2SubW( b2ZeroW(), c.normal.X );
+
+		    // point 1 friction constraint
+		    {
+			    // fixed anchors for Jacobians
+			    b2Vec2W rA = c.anchorA1;
+			    b2Vec2W rB = c.anchorB1;
+
+			    // Relative velocity at contact
+			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, SimdMul( bB.w, rB.Y ) ), b2SubW( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
+			    b2FloatW dvy = b2SubW( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
+			    b2FloatW vt = SimdAdd( SimdMul( dvx, tangentX ), SimdMul( dvy, tangentY ) );
+
+			    // Tangent speed (conveyor belt)
+			    vt = b2SubW( vt, c.tangentSpeed );
+
+			    // Compute tangent force
+			    b2FloatW negImpulse = SimdMul( c.tangentMass1, vt );
+
+			    // Clamp the accumulated force
+			    b2FloatW maxFriction = SimdMul( c.friction, c.normalImpulse1 );
+			    b2FloatW newImpulse = b2SubW( c.tangentImpulse1, negImpulse );
+			    newImpulse = b2MaxW( b2SubW( b2ZeroW(), maxFriction ), b2MinW( newImpulse, maxFriction ) );
+			    b2FloatW impulse = b2SubW( newImpulse, c.tangentImpulse1 );
+			    c.tangentImpulse1 = newImpulse;
+
+			    // Apply contact impulse
+			    b2FloatW Px = SimdMul( impulse, tangentX );
+			    b2FloatW Py = SimdMul( impulse, tangentY );
+
+			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
+			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
+			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
+
+			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
+			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
+			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
+		    }
+
+		    // second point friction constraint
+		    {
+			    // fixed anchors for Jacobians
+			    b2Vec2W rA = c.anchorA2;
+			    b2Vec2W rB = c.anchorB2;
+
+			    // Relative velocity at contact
+			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, SimdMul( bB.w, rB.Y ) ), b2SubW( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
+			    b2FloatW dvy = b2SubW( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
+			    b2FloatW vt = SimdAdd( SimdMul( dvx, tangentX ), SimdMul( dvy, tangentY ) );
+
+			    // Tangent speed (conveyor belt)
+			    vt = b2SubW( vt, c.tangentSpeed );
+
+			    // Compute tangent force
+			    b2FloatW negImpulse = SimdMul( c.tangentMass2, vt );
+
+			    // Clamp the accumulated force
+			    b2FloatW maxFriction = SimdMul( c.friction, c.normalImpulse2 );
+			    b2FloatW newImpulse = b2SubW( c.tangentImpulse2, negImpulse );
+			    newImpulse = b2MaxW( b2SubW( b2ZeroW(), maxFriction ), b2MinW( newImpulse, maxFriction ) );
+			    b2FloatW impulse = b2SubW( newImpulse, c.tangentImpulse2 );
+			    c.tangentImpulse2 = newImpulse;
+
+			    // Apply contact impulse
+			    b2FloatW Px = SimdMul( impulse, tangentX );
+			    b2FloatW Py = SimdMul( impulse, tangentY );
+
+			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
+			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
+			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
+
+			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
+			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
+			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
+		    }
+
+		    // Rolling resistance
+		    {
+			    b2FloatW deltaLambda = SimdMul( c.rollingMass, b2SubW( bA.w, bB.w ) );
+			    b2FloatW lambda = c.rollingImpulse;
+			    b2FloatW maxLambda = SimdMul( c.rollingResistance, totalNormalImpulse );
+			    c.rollingImpulse = b2SymClampW( SimdAdd( lambda, deltaLambda ), maxLambda );
+			    deltaLambda = b2SubW( c.rollingImpulse, lambda );
+
+			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, deltaLambda );
+			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, deltaLambda );
+		    }
+
+		    b2ScatterBodies( states, c.indexA, &bA );
+		    b2ScatterBodies( states, c.indexB, &bB );
+	    }
+
+	    b2TracyCZoneEnd( solve_contact );
+    }
+
+    private void ApplyRestitutionTask( int startIndex, int endIndex, int colorIndex )
+    {
+	    b2TracyCZoneNC( restitution, "Restitution", b2_colorDodgerBlue, true );
+
+	    b2BodyState* states = context.states;
+        var constraints = _contextSimdContactConstraints.Span.Slice(_constraintGraph.colors[colorIndex].SimdConstraintIndex, _constraintGraph.colors[colorIndex].SimdConstraintCount)
+	    b2FloatW threshold = SimdSplat( context.world.restitutionThreshold );
+	    b2FloatW zero = b2ZeroW();
+
+	    for ( int i = startIndex; i < endIndex; ++i )
+	    {
+		    ref var c = ref constraints[i];
+
+		    if ( b2AllZeroW( c.restitution ) )
+		    {
+			    // No lanes have restitution. Common case.
+			    continue;
+		    }
+
+		    // Create a mask based on restitution so that lanes with no restitution are not affected
+		    // by the calculations below.
+		    b2FloatW restitutionMask = b2EqualsW( c.restitution, zero );
+
+		    b2BodyStateW bA = b2GatherBodies( states, c.indexA );
+		    b2BodyStateW bB = b2GatherBodies( states, c.indexB );
+
+		    // first point non-penetration constraint
+		    {
+			    // Set effective mass to zero if restitution should not be applied
+			    b2FloatW mask1 = b2GreaterThanW( SimdAdd( c.relativeVelocity1, threshold ), zero );
+			    b2FloatW mask2 = b2EqualsW( c.totalNormalImpulse1, zero );
+			    b2FloatW mask = b2OrW( b2OrW( mask1, mask2 ), restitutionMask );
+			    b2FloatW mass = b2BlendW( c.normalMass1, zero, mask );
+
+			    // fixed anchors for Jacobians
+			    b2Vec2W rA = c.anchorA1;
+			    b2Vec2W rB = c.anchorB1;
+
+			    // Relative velocity at contact
+			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, SimdMul( bB.w, rB.Y ) ), b2SubW( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
+			    b2FloatW dvy = b2SubW( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
+			    b2FloatW vn = SimdAdd( SimdMul( dvx, c.normal.X ), SimdMul( dvy, c.normal.Y ) );
+
+			    // Compute normal impulse
+			    b2FloatW negImpulse = SimdMul( mass, SimdAdd( vn, SimdMul( c.restitution, c.relativeVelocity1 ) ) );
+
+			    // Clamp the accumulated impulse
+			    b2FloatW newImpulse = b2MaxW( b2SubW( c.normalImpulse1, negImpulse ), b2ZeroW() );
+			    b2FloatW deltaImpulse = b2SubW( newImpulse, c.normalImpulse1 );
+			    c.normalImpulse1 = newImpulse;
+
+			    // Add the incremental impulse rather than the full impulse because this is not a sub-step
+			    c.totalNormalImpulse1 = SimdAdd( c.totalNormalImpulse1, deltaImpulse );
+
+			    // Apply contact impulse
+			    b2FloatW Px = SimdMul( deltaImpulse, c.normal.X );
+			    b2FloatW Py = SimdMul( deltaImpulse, c.normal.Y );
+
+			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
+			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
+			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
+
+			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
+			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
+			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
+		    }
+
+		    // second point non-penetration constraint
+		    {
+			    // Set effective mass to zero if restitution should not be applied
+			    b2FloatW mask1 = b2GreaterThanW( SimdAdd( c.relativeVelocity2, threshold ), zero );
+			    b2FloatW mask2 = b2EqualsW( c.totalNormalImpulse2, zero );
+			    b2FloatW mask = b2OrW( b2OrW( mask1, mask2 ), restitutionMask );
+			    b2FloatW mass = b2BlendW( c.normalMass2, zero, mask );
+
+			    // fixed anchors for Jacobians
+			    b2Vec2W rA = c.anchorA2;
+			    b2Vec2W rB = c.anchorB2;
+
+			    // Relative velocity at contact
+			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, SimdMul( bB.w, rB.Y ) ), b2SubW( bA.v.X, SimdMul( bA.w, rA.Y ) ) );
+			    b2FloatW dvy = b2SubW( SimdAdd( bB.v.Y, SimdMul( bB.w, rB.X ) ), SimdAdd( bA.v.Y, SimdMul( bA.w, rA.X ) ) );
+			    b2FloatW vn = SimdAdd( SimdMul( dvx, c.normal.X ), SimdMul( dvy, c.normal.Y ) );
+
+			    // Compute normal impulse
+			    b2FloatW negImpulse = SimdMul( mass, SimdAdd( vn, SimdMul( c.restitution, c.relativeVelocity2 ) ) );
+
+			    // Clamp the accumulated impulse
+			    b2FloatW newImpulse = b2MaxW( b2SubW( c.normalImpulse2, negImpulse ), b2ZeroW() );
+			    b2FloatW deltaImpulse = b2SubW( newImpulse, c.normalImpulse2 );
+			    c.normalImpulse2 = newImpulse;
+
+			    // Add the incremental impulse rather than the full impulse because this is not a sub-step
+			    c.totalNormalImpulse2 = SimdAdd( c.totalNormalImpulse2, deltaImpulse );
+
+			    // Apply contact impulse
+			    b2FloatW Px = SimdMul( deltaImpulse, c.normal.X );
+			    b2FloatW Py = SimdMul( deltaImpulse, c.normal.Y );
+
+			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
+			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
+			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( SimdMul( rA.X, Py ), SimdMul( rA.Y, Px ) ) );
+
+			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
+			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
+			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( SimdMul( rB.X, Py ), SimdMul( rB.Y, Px ) ) );
+		    }
+
+		    b2ScatterBodies( states, c.indexA, &bA );
+		    b2ScatterBodies( states, c.indexB, &bB );
+	    }
+
+	    b2TracyCZoneEnd( restitution );
+    }
+
+    private void IntegratePositionsTask( int startIndex, int endIndex)
+    {
+        b2TracyCZoneNC( integrate_positions, "IntPos", b2_colorDarkSeaGreen, true );
+
+        b2BodyState* states = context.states;
+        float h = context.h;
+
+        DebugTools.Assert( startIndex <= endIndex );
+
+        for ( int i = startIndex; i < endIndex; ++i )
+        {
+            b2BodyState* state = states + i;
+
+            if ( state.flags & b2_lockLinearX )
+            {
+                state.linearVelocity.x = 0.0f;
+            }
+
+            if ( state.flags & b2_lockLinearY )
+            {
+                state.linearVelocity.y = 0.0f;
+            }
+
+            if ( state.flags & b2_lockAngularZ )
+            {
+                state.angularVelocity = 0.0f;
+            }
+
+            state.deltaPosition = Vector2Helpers.MulAdd( state.deltaPosition, h, state.linearVelocity );
+            state.deltaRotation = b2IntegrateRotation( state.deltaRotation, h * state.angularVelocity );
+        }
+
+        b2TracyCZoneEnd( integrate_positions );
+    }
+
+    private void StoreImpulsesTask( int startIndex, int endIndex )
+    {
+	    var contacts = _contacts;
+	    ref var constraints = ref _contextSimdContactConstraints;
+
+        b2Manifold dummy = new();
+
+	    for ( int constraintIndex = startIndex; constraintIndex < endIndex; ++constraintIndex )
+	    {
+		    ref var c = ref constraints[constraintIndex];
+		    const float* rollingImpulse = (float*)&c.rollingImpulse;
+		    const float* normalImpulse1 = (float*)&c.normalImpulse1;
+		    const float* normalImpulse2 = (float*)&c.normalImpulse2;
+		    const float* tangentImpulse1 = (float*)&c.tangentImpulse1;
+		    const float* tangentImpulse2 = (float*)&c.tangentImpulse2;
+		    const float* totalNormalImpulse1 = (float*)&c.totalNormalImpulse1;
+		    const float* totalNormalImpulse2 = (float*)&c.totalNormalImpulse2;
+		    const float* normalVelocity1 = (float*)&c.relativeVelocity1;
+		    const float* normalVelocity2 = (float*)&c.relativeVelocity2;
+
+		    int baseIndex = _simdWidth * constraintIndex;
+
+		    for ( int laneIndex = 0; laneIndex < _simdWidth; ++laneIndex )
+		    {
+			    ref var m = contacts[baseIndex + laneIndex] == null ? dummy : contacts[baseIndex + laneIndex].manifold;
+			    m.rollingImpulse = rollingImpulse[laneIndex];
+
+			    m.points[0].normalImpulse = normalImpulse1[laneIndex];
+			    m.points[0].tangentImpulse = tangentImpulse1[laneIndex];
+			    m.points[0].totalNormalImpulse = totalNormalImpulse1[laneIndex];
+			    m.points[0].normalVelocity = normalVelocity1[laneIndex];
+
+			    m.points[1].normalImpulse = normalImpulse2[laneIndex];
+			    m.points[1].tangentImpulse = tangentImpulse2[laneIndex];
+			    m.points[1].totalNormalImpulse = totalNormalImpulse2[laneIndex];
+			    m.points[1].normalVelocity = normalVelocity2[laneIndex];
+		    }
+	    }
+
+	    b2TracyCZoneEnd( store_impulses );
     }
 
     #region Overflow
@@ -544,8 +1188,6 @@ public sealed partial class NewPhysicsSystem
 
     private void SolveOverflowContacts( bool useBias )
     {
-	    b2TracyCZoneNC( solve_contact, "Solve Contact", b2_colorAliceBlue, true );
-
 	    b2ConstraintGraph* graph = context.graph;
 	    b2GraphColor* color = graph.colors + PhysicsConstants.OverflowIndex;
 	    b2ContactConstraint* constraints = color.overflowConstraints;
@@ -554,7 +1196,7 @@ public sealed partial class NewPhysicsSystem
 	    b2SolverSet* awakeSet = b2SolverSetArray_Get( &world.solverSets, (int) SetType.AwakeSet );
 	    b2BodyState* states = awakeSet.bodyStates.data;
 
-	    float inv_h = context.inv_h;
+	    float inv_h = _invH;
 	    const float contactSpeed = context.world.contactSpeed;
 
 	    // This is a dummy body to represent a static body since static bodies don't have a solver body.
@@ -843,573 +1485,126 @@ public sealed partial class NewPhysicsSystem
 
     #endregion
 
-    // Integrate velocities and apply damping
-    private void IntegrateVelocitiesTask( int startIndex, int endIndex)
+    #region SIMD helpers
+
+    private unsafe FixedArray8<float> SimdMul(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
-	    ref var states = ref _contextBodyStates;
-	    ref var sims = ref _contextSims;
-
-	    var gravity = _gravity;
-	    float h = _h;
-	    float maxLinearSpeed = _maxLinearVelocity;
-	    float maxAngularSpeed = PhysicsConstants.MaxRotation * _invDt;
-	    float maxLinearSpeedSquared = maxLinearSpeed * maxLinearSpeed;
-	    float maxAngularSpeedSquared = maxAngularSpeed * maxAngularSpeed;
-
-	    for ( int i = startIndex; i < endIndex; ++i )
-	    {
-		    ref var sim = ref sims[i];
-		    ref var state = ref states[i];
-
-		    var v = state.linearVelocity;
-		    float w = state.angularVelocity;
-
-		    // Apply forces, torque, gravity, and damping
-		    // Apply damping.
-		    // Differential equation: dv/dt + c * v = 0
-		    // Solution: v(t) = v0 * exp(-c * t)
-		    // Time step: v(t + dt) = v0 * exp(-c * (t + dt)) = v0 * exp(-c * t) * exp(-c * dt) = v(t) * exp(-c * dt)
-		    // v2 = exp(-c * dt) * v1
-		    // Pade approximation:
-		    // v2 = v1 * 1 / (1 + c * dt)
-		    float linearDamping = 1.0f / ( 1.0f + h * sim.linearDamping );
-		    float angularDamping = 1.0f / ( 1.0f + h * sim.angularDamping );
-
-		    // Gravity scale will be zero for kinematic bodies
-		    float gravityScale = sim.invMass > 0.0f ? sim.gravityScale : 0.0f;
-
-		    // lvd = h * im * f + h * g
-		    var linearVelocityDelta = h * sim.invMass * sim.force + (h * gravityScale) * gravity;
-		    float angularVelocityDelta = h * sim.invInertia * sim.torque;
-
-		    v = Vector2Helpers.MulAdd( linearVelocityDelta, linearDamping, v );
-		    w = angularVelocityDelta + angularDamping * w;
-
-		    // Clamp to max linear speed
-		    if ( Vector2.Dot( v, v ) > maxLinearSpeedSquared )
-		    {
-			    float ratio = maxLinearSpeed / v.Length();
-			    v = ratio * v;
-			    sim.flags |= (ushort) BodyFlags.b2_isSpeedCapped;
-		    }
-
-		    // Clamp to max angular speed
-		    if ( w * w > maxAngularSpeedSquared && ( sim.flags & (ushort) BodyFlags.b2_allowFastRotation ) == 0 )
-		    {
-			    float ratio = maxAngularSpeed / MathF.Abs( w );
-			    w *= ratio;
-			    sim.flags |= (ushort) BodyFlags.b2_isSpeedCapped;
-		    }
-
-		    if ((state.flags & (ushort) BodyFlags.b2_lockLinearX) != 0x0)
-		    {
-			    v.X = 0.0f;
-		    }
-
-		    if ((state.flags & (ushort) BodyFlags.b2_lockLinearY) != 0x0)
-		    {
-			    v.Y = 0.0f;
-		    }
-
-		    if ((state.flags & (ushort) BodyFlags.b2_lockAngularZ) != 0x0)
-		    {
-			    w = 0.0f;
-		    }
-
-		    state.linearVelocity = v;
-		    state.angularVelocity = w;
-	    }
-    }
-
-    private void WarmStartContactsTask( int startIndex, int endIndex, int colorIndex )
-    {
-        // TODO: Add in the wide data-structures to Math and just do that for simplicity
-
-
-	    ref var states = ref _contextBodyStates;
-        var color = _constraintGraph.colors[colorIndex];
-        var constraints = _contextSimdContactConstraints.Span.Slice(color.SimdConstraintIndex, color.SimdConstraintCount);
-
-	    for ( int i = startIndex; i < endIndex; ++i )
-	    {
-		    ref var c = ref constraints[i];
-		    var bA = GatherBodies(ref states, c.indexA.AsSpan);
-		    var bB = GatherBodies(ref states, c.indexB.AsSpan);
-
-		    b2FloatW tangentX = c.normal.Y;
-		    b2FloatW tangentY = b2SubW( b2ZeroW(), c.normal.X );
-
-		    {
-			    // fixed anchors
-			    b2Vec2W rA = c.anchorA1;
-			    b2Vec2W rB = c.anchorB1;
-
-			    b2Vec2W P;
-                NumericsHelpers.Multiply(c.normalImpulse1, c.normal.X);
-
-			    P.X = b2AddW( b2MulW( c.normalImpulse1, c.normal.X ), b2MulW( c.tangentImpulse1, tangentX ) );
-			    P.Y = b2AddW( b2MulW( c.normalImpulse1, c.normal.Y ), b2MulW( c.tangentImpulse1, tangentY ) );
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2CrossW( rA, P ) );
-			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, P.X );
-			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, P.Y );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2CrossW( rB, P ) );
-			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, P.X );
-			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, P.Y );
-		    }
-
-		    {
-			    // fixed anchors
-			    b2Vec2W rA = c.anchorA2;
-			    b2Vec2W rB = c.anchorB2;
-
-			    b2Vec2W P;
-			    P.X = b2AddW( b2MulW( c.normalImpulse2, c.normal.X ), b2MulW( c.tangentImpulse2, tangentX ) );
-			    P.Y = b2AddW( b2MulW( c.normalImpulse2, c.normal.Y ), b2MulW( c.tangentImpulse2, tangentY ) );
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2CrossW( rA, P ) );
-			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, P.X );
-			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, P.Y );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2CrossW( rB, P ) );
-			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, P.X );
-			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, P.Y );
-		    }
-
-		    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, c.rollingImpulse );
-		    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, c.rollingImpulse );
-
-		    ScatterBodies( states, c.indexA, &bA );
-		    ScatterBodies( states, c.indexB, &bB );
-	    }
-    }
-
-    private void SolveContactsTask( int startIndex, int endIndex, int colorIndex, bool useBias )
-    {
-	    b2BodyState* states = context.states;
-	    b2ContactConstraintSIMD* constraints = context.graph.colors[colorIndex].simdConstraints;
-	    b2FloatW inv_h = b2SplatW( context.inv_h );
-	    b2FloatW contactSpeed = b2SplatW( -context.world.contactSpeed );
-	    b2FloatW oneW = b2SplatW( 1.0f );
-
-	    for ( int i = startIndex; i < endIndex; ++i )
-	    {
-		    b2ContactConstraintSIMD* c = constraints + i;
-
-		    b2BodyStateW bA = b2GatherBodies( states, c.indexA );
-		    b2BodyStateW bB = b2GatherBodies( states, c.indexB );
-
-		    b2FloatW biasRate, massScale, impulseScale;
-		    if ( useBias )
-		    {
-			    biasRate = b2MulW( c.massScale, c.biasRate );
-			    massScale = c.massScale;
-			    impulseScale = c.impulseScale;
-		    }
-		    else
-		    {
-			    biasRate = b2ZeroW();
-			    massScale = oneW;
-			    impulseScale = b2ZeroW();
-		    }
-
-		    b2FloatW totalNormalImpulse = b2ZeroW();
-
-		    b2Vec2W dp = { b2SubW( bB.dp.X, bA.dp.X ), b2SubW( bB.dp.Y, bA.dp.Y ) };
-
-		    // point1 non-penetration constraint
-		    {
-			    // Fixed anchors for impulses
-			    b2Vec2W rA = c.anchorA1;
-			    b2Vec2W rB = c.anchorB1;
-
-			    // Moving anchors for current separation
-			    b2Vec2W rsA = Quaternion2D.RotateVectorW( bA.dq, rA );
-			    b2Vec2W rsB = Quaternion2D.RotateVectorW( bB.dq, rB );
-
-			    // compute current separation
-			    // this is subject to round-off error if the anchor is far from the body center of mass
-			    b2Vec2W ds = { b2AddW( dp.X, b2SubW( rsB.X, rsA.X ) ), b2AddW( dp.Y, b2SubW( rsB.Y, rsA.Y ) ) };
-			    b2FloatW s = b2AddW( Vector2.DotW( c.normal, ds ), c.baseSeparation1 );
-
-			    // Apply speculative bias if separation is greater than zero, otherwise apply soft constraint bias
-			    // The contactSpeed is meant to limit stiffness, not increase it.
-			    b2FloatW mask = b2GreaterThanW( s, b2ZeroW() );
-			    b2FloatW specBias = b2MulW( s, inv_h );
-			    b2FloatW softBias = b2MaxW( b2MulW( biasRate, s ), contactSpeed );
-
-			    // todo try b2MaxW(softBias, specBias);
-			    b2FloatW bias = b2BlendW( softBias, specBias, mask );
-
-			    b2FloatW pointMassScale = b2BlendW( massScale, oneW, mask );
-			    b2FloatW pointImpulseScale = b2BlendW( impulseScale, b2ZeroW(), mask );
-
-			    // Relative velocity at contact
-			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, b2MulW( bB.w, rB.Y ) ), b2SubW( bA.v.X, b2MulW( bA.w, rA.Y ) ) );
-			    b2FloatW dvy = b2SubW( b2AddW( bB.v.Y, b2MulW( bB.w, rB.X ) ), b2AddW( bA.v.Y, b2MulW( bA.w, rA.X ) ) );
-			    b2FloatW vn = b2AddW( b2MulW( dvx, c.normal.X ), b2MulW( dvy, c.normal.Y ) );
-
-			    // Compute normal impulse
-			    b2FloatW negImpulse = b2AddW( b2MulW( c.normalMass1, b2AddW( b2MulW( pointMassScale, vn ), bias ) ),
-										      b2MulW( pointImpulseScale, c.normalImpulse1 ) );
-
-			    // Clamp the accumulated impulse
-			    b2FloatW newImpulse = b2MaxW( b2SubW( c.normalImpulse1, negImpulse ), b2ZeroW() );
-			    b2FloatW impulse = b2SubW( newImpulse, c.normalImpulse1 );
-			    c.normalImpulse1 = newImpulse;
-			    c.totalNormalImpulse1 = b2AddW( c.totalNormalImpulse1, newImpulse );
-
-			    totalNormalImpulse = b2AddW( totalNormalImpulse, newImpulse );
-
-			    // Apply contact impulse
-			    b2FloatW Px = b2MulW( impulse, c.normal.X );
-			    b2FloatW Py = b2MulW( impulse, c.normal.Y );
-
-			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
-			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( b2MulW( rA.X, Py ), b2MulW( rA.Y, Px ) ) );
-
-			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
-			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( b2MulW( rB.X, Py ), b2MulW( rB.Y, Px ) ) );
-		    }
-
-		    // second point non-penetration constraint
-		    {
-			    // moving anchors for current separation
-			    b2Vec2W rsA = Quaternion2D.RotateVectorW( bA.dq, c.anchorA2 );
-			    b2Vec2W rsB = Quaternion2D.RotateVectorW( bB.dq, c.anchorB2 );
-
-			    // compute current separation
-			    b2Vec2W ds = { b2AddW( dp.X, b2SubW( rsB.X, rsA.X ) ), b2AddW( dp.Y, b2SubW( rsB.Y, rsA.Y ) ) };
-			    b2FloatW s = b2AddW( Vector2.DotW( c.normal, ds ), c.baseSeparation2 );
-
-			    b2FloatW mask = b2GreaterThanW( s, b2ZeroW() );
-			    b2FloatW specBias = b2MulW( s, inv_h );
-			    b2FloatW softBias = b2MaxW( b2MulW( biasRate, s ), contactSpeed );
-			    b2FloatW bias = b2BlendW( softBias, specBias, mask );
-
-			    b2FloatW pointMassScale = b2BlendW( massScale, oneW, mask );
-			    b2FloatW pointImpulseScale = b2BlendW( impulseScale, b2ZeroW(), mask );
-
-			    // fixed anchors for Jacobians
-			    b2Vec2W rA = c.anchorA2;
-			    b2Vec2W rB = c.anchorB2;
-
-			    // Relative velocity at contact
-			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, b2MulW( bB.w, rB.Y ) ), b2SubW( bA.v.X, b2MulW( bA.w, rA.Y ) ) );
-			    b2FloatW dvy = b2SubW( b2AddW( bB.v.Y, b2MulW( bB.w, rB.X ) ), b2AddW( bA.v.Y, b2MulW( bA.w, rA.X ) ) );
-			    b2FloatW vn = b2AddW( b2MulW( dvx, c.normal.X ), b2MulW( dvy, c.normal.Y ) );
-
-			    // Compute normal impulse
-			    b2FloatW negImpulse = b2AddW( b2MulW( c.normalMass2, b2AddW( b2MulW( pointMassScale, vn ), bias ) ),
-										      b2MulW( pointImpulseScale, c.normalImpulse2 ) );
-
-			    // Clamp the accumulated impulse
-			    b2FloatW newImpulse = b2MaxW( b2SubW( c.normalImpulse2, negImpulse ), b2ZeroW() );
-			    b2FloatW impulse = b2SubW( newImpulse, c.normalImpulse2 );
-			    c.normalImpulse2 = newImpulse;
-			    c.totalNormalImpulse2 = b2AddW( c.totalNormalImpulse2, newImpulse );
-
-			    totalNormalImpulse = b2AddW( totalNormalImpulse, newImpulse );
-
-			    // Apply contact impulse
-			    b2FloatW Px = b2MulW( impulse, c.normal.X );
-			    b2FloatW Py = b2MulW( impulse, c.normal.Y );
-
-			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
-			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( b2MulW( rA.X, Py ), b2MulW( rA.Y, Px ) ) );
-
-			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
-			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( b2MulW( rB.X, Py ), b2MulW( rB.Y, Px ) ) );
-		    }
-
-		    b2FloatW tangentX = c.normal.Y;
-		    b2FloatW tangentY = b2SubW( b2ZeroW(), c.normal.X );
-
-		    // point 1 friction constraint
-		    {
-			    // fixed anchors for Jacobians
-			    b2Vec2W rA = c.anchorA1;
-			    b2Vec2W rB = c.anchorB1;
-
-			    // Relative velocity at contact
-			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, b2MulW( bB.w, rB.Y ) ), b2SubW( bA.v.X, b2MulW( bA.w, rA.Y ) ) );
-			    b2FloatW dvy = b2SubW( b2AddW( bB.v.Y, b2MulW( bB.w, rB.X ) ), b2AddW( bA.v.Y, b2MulW( bA.w, rA.X ) ) );
-			    b2FloatW vt = b2AddW( b2MulW( dvx, tangentX ), b2MulW( dvy, tangentY ) );
-
-			    // Tangent speed (conveyor belt)
-			    vt = b2SubW( vt, c.tangentSpeed );
-
-			    // Compute tangent force
-			    b2FloatW negImpulse = b2MulW( c.tangentMass1, vt );
-
-			    // Clamp the accumulated force
-			    b2FloatW maxFriction = b2MulW( c.friction, c.normalImpulse1 );
-			    b2FloatW newImpulse = b2SubW( c.tangentImpulse1, negImpulse );
-			    newImpulse = b2MaxW( b2SubW( b2ZeroW(), maxFriction ), b2MinW( newImpulse, maxFriction ) );
-			    b2FloatW impulse = b2SubW( newImpulse, c.tangentImpulse1 );
-			    c.tangentImpulse1 = newImpulse;
-
-			    // Apply contact impulse
-			    b2FloatW Px = b2MulW( impulse, tangentX );
-			    b2FloatW Py = b2MulW( impulse, tangentY );
-
-			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
-			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( b2MulW( rA.X, Py ), b2MulW( rA.Y, Px ) ) );
-
-			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
-			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( b2MulW( rB.X, Py ), b2MulW( rB.Y, Px ) ) );
-		    }
-
-		    // second point friction constraint
-		    {
-			    // fixed anchors for Jacobians
-			    b2Vec2W rA = c.anchorA2;
-			    b2Vec2W rB = c.anchorB2;
-
-			    // Relative velocity at contact
-			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, b2MulW( bB.w, rB.Y ) ), b2SubW( bA.v.X, b2MulW( bA.w, rA.Y ) ) );
-			    b2FloatW dvy = b2SubW( b2AddW( bB.v.Y, b2MulW( bB.w, rB.X ) ), b2AddW( bA.v.Y, b2MulW( bA.w, rA.X ) ) );
-			    b2FloatW vt = b2AddW( b2MulW( dvx, tangentX ), b2MulW( dvy, tangentY ) );
-
-			    // Tangent speed (conveyor belt)
-			    vt = b2SubW( vt, c.tangentSpeed );
-
-			    // Compute tangent force
-			    b2FloatW negImpulse = b2MulW( c.tangentMass2, vt );
-
-			    // Clamp the accumulated force
-			    b2FloatW maxFriction = b2MulW( c.friction, c.normalImpulse2 );
-			    b2FloatW newImpulse = b2SubW( c.tangentImpulse2, negImpulse );
-			    newImpulse = b2MaxW( b2SubW( b2ZeroW(), maxFriction ), b2MinW( newImpulse, maxFriction ) );
-			    b2FloatW impulse = b2SubW( newImpulse, c.tangentImpulse2 );
-			    c.tangentImpulse2 = newImpulse;
-
-			    // Apply contact impulse
-			    b2FloatW Px = b2MulW( impulse, tangentX );
-			    b2FloatW Py = b2MulW( impulse, tangentY );
-
-			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
-			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( b2MulW( rA.X, Py ), b2MulW( rA.Y, Px ) ) );
-
-			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
-			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( b2MulW( rB.X, Py ), b2MulW( rB.Y, Px ) ) );
-		    }
-
-		    // Rolling resistance
-		    {
-			    b2FloatW deltaLambda = b2MulW( c.rollingMass, b2SubW( bA.w, bB.w ) );
-			    b2FloatW lambda = c.rollingImpulse;
-			    b2FloatW maxLambda = b2MulW( c.rollingResistance, totalNormalImpulse );
-			    c.rollingImpulse = b2SymClampW( b2AddW( lambda, deltaLambda ), maxLambda );
-			    deltaLambda = b2SubW( c.rollingImpulse, lambda );
-
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, deltaLambda );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, deltaLambda );
-		    }
-
-		    b2ScatterBodies( states, c.indexA, &bA );
-		    b2ScatterBodies( states, c.indexB, &bB );
-	    }
-
-	    b2TracyCZoneEnd( solve_contact );
-    }
-
-    private void ApplyRestitutionTask( int startIndex, int endIndex, int colorIndex )
-    {
-	    b2TracyCZoneNC( restitution, "Restitution", b2_colorDodgerBlue, true );
-
-	    b2BodyState* states = context.states;
-	    b2ContactConstraintSIMD* constraints = context.graph.colors[colorIndex].simdConstraints;
-	    b2FloatW threshold = b2SplatW( context.world.restitutionThreshold );
-	    b2FloatW zero = b2ZeroW();
-
-	    for ( int i = startIndex; i < endIndex; ++i )
-	    {
-		    b2ContactConstraintSIMD* c = constraints + i;
-
-		    if ( b2AllZeroW( c.restitution ) )
-		    {
-			    // No lanes have restitution. Common case.
-			    continue;
-		    }
-
-		    // Create a mask based on restitution so that lanes with no restitution are not affected
-		    // by the calculations below.
-		    b2FloatW restitutionMask = b2EqualsW( c.restitution, zero );
-
-		    b2BodyStateW bA = b2GatherBodies( states, c.indexA );
-		    b2BodyStateW bB = b2GatherBodies( states, c.indexB );
-
-		    // first point non-penetration constraint
-		    {
-			    // Set effective mass to zero if restitution should not be applied
-			    b2FloatW mask1 = b2GreaterThanW( b2AddW( c.relativeVelocity1, threshold ), zero );
-			    b2FloatW mask2 = b2EqualsW( c.totalNormalImpulse1, zero );
-			    b2FloatW mask = b2OrW( b2OrW( mask1, mask2 ), restitutionMask );
-			    b2FloatW mass = b2BlendW( c.normalMass1, zero, mask );
-
-			    // fixed anchors for Jacobians
-			    b2Vec2W rA = c.anchorA1;
-			    b2Vec2W rB = c.anchorB1;
-
-			    // Relative velocity at contact
-			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, b2MulW( bB.w, rB.Y ) ), b2SubW( bA.v.X, b2MulW( bA.w, rA.Y ) ) );
-			    b2FloatW dvy = b2SubW( b2AddW( bB.v.Y, b2MulW( bB.w, rB.X ) ), b2AddW( bA.v.Y, b2MulW( bA.w, rA.X ) ) );
-			    b2FloatW vn = b2AddW( b2MulW( dvx, c.normal.X ), b2MulW( dvy, c.normal.Y ) );
-
-			    // Compute normal impulse
-			    b2FloatW negImpulse = b2MulW( mass, b2AddW( vn, b2MulW( c.restitution, c.relativeVelocity1 ) ) );
-
-			    // Clamp the accumulated impulse
-			    b2FloatW newImpulse = b2MaxW( b2SubW( c.normalImpulse1, negImpulse ), b2ZeroW() );
-			    b2FloatW deltaImpulse = b2SubW( newImpulse, c.normalImpulse1 );
-			    c.normalImpulse1 = newImpulse;
-
-			    // Add the incremental impulse rather than the full impulse because this is not a sub-step
-			    c.totalNormalImpulse1 = b2AddW( c.totalNormalImpulse1, deltaImpulse );
-
-			    // Apply contact impulse
-			    b2FloatW Px = b2MulW( deltaImpulse, c.normal.X );
-			    b2FloatW Py = b2MulW( deltaImpulse, c.normal.Y );
-
-			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
-			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( b2MulW( rA.X, Py ), b2MulW( rA.Y, Px ) ) );
-
-			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
-			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( b2MulW( rB.X, Py ), b2MulW( rB.Y, Px ) ) );
-		    }
-
-		    // second point non-penetration constraint
-		    {
-			    // Set effective mass to zero if restitution should not be applied
-			    b2FloatW mask1 = b2GreaterThanW( b2AddW( c.relativeVelocity2, threshold ), zero );
-			    b2FloatW mask2 = b2EqualsW( c.totalNormalImpulse2, zero );
-			    b2FloatW mask = b2OrW( b2OrW( mask1, mask2 ), restitutionMask );
-			    b2FloatW mass = b2BlendW( c.normalMass2, zero, mask );
-
-			    // fixed anchors for Jacobians
-			    b2Vec2W rA = c.anchorA2;
-			    b2Vec2W rB = c.anchorB2;
-
-			    // Relative velocity at contact
-			    b2FloatW dvx = b2SubW( b2SubW( bB.v.X, b2MulW( bB.w, rB.Y ) ), b2SubW( bA.v.X, b2MulW( bA.w, rA.Y ) ) );
-			    b2FloatW dvy = b2SubW( b2AddW( bB.v.Y, b2MulW( bB.w, rB.X ) ), b2AddW( bA.v.Y, b2MulW( bA.w, rA.X ) ) );
-			    b2FloatW vn = b2AddW( b2MulW( dvx, c.normal.X ), b2MulW( dvy, c.normal.Y ) );
-
-			    // Compute normal impulse
-			    b2FloatW negImpulse = b2MulW( mass, b2AddW( vn, b2MulW( c.restitution, c.relativeVelocity2 ) ) );
-
-			    // Clamp the accumulated impulse
-			    b2FloatW newImpulse = b2MaxW( b2SubW( c.normalImpulse2, negImpulse ), b2ZeroW() );
-			    b2FloatW deltaImpulse = b2SubW( newImpulse, c.normalImpulse2 );
-			    c.normalImpulse2 = newImpulse;
-
-			    // Add the incremental impulse rather than the full impulse because this is not a sub-step
-			    c.totalNormalImpulse2 = b2AddW( c.totalNormalImpulse2, deltaImpulse );
-
-			    // Apply contact impulse
-			    b2FloatW Px = b2MulW( deltaImpulse, c.normal.X );
-			    b2FloatW Py = b2MulW( deltaImpulse, c.normal.Y );
-
-			    bA.v.X = Vector2Helpers.MulSubW( bA.v.X, c.invMassA, Px );
-			    bA.v.Y = Vector2Helpers.MulSubW( bA.v.Y, c.invMassA, Py );
-			    bA.w = Vector2Helpers.MulSubW( bA.w, c.invIA, b2SubW( b2MulW( rA.X, Py ), b2MulW( rA.Y, Px ) ) );
-
-			    bB.v.X = Vector2Helpers.MulAddW( bB.v.X, c.invMassB, Px );
-			    bB.v.Y = Vector2Helpers.MulAddW( bB.v.Y, c.invMassB, Py );
-			    bB.w = Vector2Helpers.MulAddW( bB.w, c.invIB, b2SubW( b2MulW( rB.X, Py ), b2MulW( rB.Y, Px ) ) );
-		    }
-
-		    b2ScatterBodies( states, c.indexA, &bA );
-		    b2ScatterBodies( states, c.indexB, &bB );
-	    }
-
-	    b2TracyCZoneEnd( restitution );
-    }
-
-    private void IntegratePositionsTask( int startIndex, int endIndex)
-    {
-        b2TracyCZoneNC( integrate_positions, "IntPos", b2_colorDarkSeaGreen, true );
-
-        b2BodyState* states = context.states;
-        float h = context.h;
-
-        DebugTools.Assert( startIndex <= endIndex );
-
-        for ( int i = startIndex; i < endIndex; ++i )
+        if (!Avx.IsSupported)
         {
-            b2BodyState* state = states + i;
-
-            if ( state.flags & b2_lockLinearX )
-            {
-                state.linearVelocity.x = 0.0f;
-            }
-
-            if ( state.flags & b2_lockLinearY )
-            {
-                state.linearVelocity.y = 0.0f;
-            }
-
-            if ( state.flags & b2_lockAngularZ )
-            {
-                state.angularVelocity = 0.0f;
-            }
-
-            state.deltaPosition = Vector2Helpers.MulAdd( state.deltaPosition, h, state.linearVelocity );
-            state.deltaRotation = b2IntegrateRotation( state.deltaRotation, h * state.angularVelocity );
+            return new FixedArray8<float>(
+                a[0] * b[0],
+                a[1] * b[1],
+                a[2] * b[2],
+                a[3] * b[3],
+                a[4] * b[4],
+                a[5] * b[5],
+                a[6] * b[6],
+                a[7] * b[7]);
         }
 
-        b2TracyCZoneEnd( integrate_positions );
+        ref var floatRefA = ref Unsafe.As<ReadOnlySpan<float>, float>(ref a);
+        ref var floatRefB = ref Unsafe.As<ReadOnlySpan<float>, float>(ref b);
+        FixedArray8<float> returned = default;
+
+        fixed (float* ptrA = &floatRefA)
+        fixed (float* ptrB = &floatRefB)
+        {
+            var aData = Avx.LoadAlignedVector256(ptrA);
+            var bData = Avx.LoadAlignedVector256(ptrB);
+            var result = Avx.Multiply(aData, bData);
+
+            Unsafe.WriteUnaligned(ref Unsafe.As<FixedArray8<float>, byte>(ref returned), result);
+
+            return returned;
+        }
     }
 
-    private void StoreImpulsesTask( int startIndex, int endIndex )
+    private unsafe FixedArray8<float> SimdAdd(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
-	    b2TracyCZoneNC( store_impulses, "Store", b2_colorFireBrick, true );
+        if (!Avx.IsSupported)
+        {
+            return new FixedArray8<float>(
+                a[0] * b[0],
+                a[1] * b[1],
+                a[2] * b[2],
+                a[3] * b[3],
+                a[4] * b[4],
+                a[5] * b[5],
+                a[6] * b[6],
+                a[7] * b[7]);
+        }
 
-	    var contacts = _contacts;
-	    const b2ContactConstraintSIMD* constraints = context.simdContactConstraints;
+        ref var floatRefA = ref Unsafe.As<ReadOnlySpan<float>, float>(ref a);
+        ref var floatRefB = ref Unsafe.As<ReadOnlySpan<float>, float>(ref b);
+        FixedArray8<float> returned = default;
 
-	    b2Manifold dummy = { 0 };
+        fixed (float* ptrA = &floatRefA)
+        fixed (float* ptrB = &floatRefB)
+        {
+            var aData = Avx.LoadAlignedVector256(ptrA);
+            var bData = Avx.LoadAlignedVector256(ptrB);
+            var result = Avx.Add(aData, bData);
 
-	    for ( int constraintIndex = startIndex; constraintIndex < endIndex; ++constraintIndex )
-	    {
-		    const b2ContactConstraintSIMD* c = constraints + constraintIndex;
-		    const float* rollingImpulse = (float*)&c.rollingImpulse;
-		    const float* normalImpulse1 = (float*)&c.normalImpulse1;
-		    const float* normalImpulse2 = (float*)&c.normalImpulse2;
-		    const float* tangentImpulse1 = (float*)&c.tangentImpulse1;
-		    const float* tangentImpulse2 = (float*)&c.tangentImpulse2;
-		    const float* totalNormalImpulse1 = (float*)&c.totalNormalImpulse1;
-		    const float* totalNormalImpulse2 = (float*)&c.totalNormalImpulse2;
-		    const float* normalVelocity1 = (float*)&c.relativeVelocity1;
-		    const float* normalVelocity2 = (float*)&c.relativeVelocity2;
+            Unsafe.WriteUnaligned(ref Unsafe.As<FixedArray8<float>, byte>(ref returned), result);
 
-		    int baseIndex = B2_SIMD_WIDTH * constraintIndex;
-
-		    for ( int laneIndex = 0; laneIndex < B2_SIMD_WIDTH; ++laneIndex )
-		    {
-			    ref var m = contacts[baseIndex + laneIndex] == null ? &dummy : &contacts[baseIndex + laneIndex].manifold;
-			    m.rollingImpulse = rollingImpulse[laneIndex];
-
-			    m.points[0].normalImpulse = normalImpulse1[laneIndex];
-			    m.points[0].tangentImpulse = tangentImpulse1[laneIndex];
-			    m.points[0].totalNormalImpulse = totalNormalImpulse1[laneIndex];
-			    m.points[0].normalVelocity = normalVelocity1[laneIndex];
-
-			    m.points[1].normalImpulse = normalImpulse2[laneIndex];
-			    m.points[1].tangentImpulse = tangentImpulse2[laneIndex];
-			    m.points[1].totalNormalImpulse = totalNormalImpulse2[laneIndex];
-			    m.points[1].normalVelocity = normalVelocity2[laneIndex];
-		    }
-	    }
-
-	    b2TracyCZoneEnd( store_impulses );
+            return returned;
+        }
     }
+
+    private unsafe FixedArray8<float> SimdSub(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
+    {
+        if (!Avx.IsSupported)
+        {
+            return new FixedArray8<float>(
+                a[0] * b[0],
+                a[1] * b[1],
+                a[2] * b[2],
+                a[3] * b[3],
+                a[4] * b[4],
+                a[5] * b[5],
+                a[6] * b[6],
+                a[7] * b[7]);
+        }
+
+        ref var floatRefA = ref Unsafe.As<ReadOnlySpan<float>, float>(ref a);
+        ref var floatRefB = ref Unsafe.As<ReadOnlySpan<float>, float>(ref b);
+        FixedArray8<float> returned = default;
+
+        fixed (float* ptrA = &floatRefA)
+        fixed (float* ptrB = &floatRefB)
+        {
+            var aData = Avx.LoadAlignedVector256(ptrA);
+            var bData = Avx.LoadAlignedVector256(ptrB);
+            var result = Avx.Subtract(aData, bData);
+
+            Unsafe.WriteUnaligned(ref Unsafe.As<FixedArray8<float>, byte>(ref returned), result);
+
+            return returned;
+        }
+    }
+
+    private unsafe FixedArray8<float> SimdSplat(float scalar)
+    {
+        if (!Avx.IsSupported)
+        {
+            return new FixedArray8<float>(
+                scalar,
+                scalar,
+                scalar,
+                scalar,
+                scalar,
+                scalar,
+                scalar,
+                scalar);
+        }
+
+        FixedArray8<float> returned = default;
+
+        var result = Vector256.Create(scalar);
+
+        Unsafe.WriteUnaligned(ref Unsafe.As<FixedArray8<float>, byte>(ref returned), result);
+        return returned;
+    }
+
+    #endregion
 }

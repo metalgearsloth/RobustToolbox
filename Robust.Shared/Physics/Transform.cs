@@ -180,10 +180,11 @@ namespace Robust.Shared.Physics
         }
     }
 
+    [StructLayout(LayoutKind.Explicit)]
     public struct Quaternion2D
     {
-        public float C;
-        public float S;
+        [FieldOffset(sizeof(float) * 0)] public float C;
+        [FieldOffset(sizeof(float) * 1)] public float S;
 
         public float Angle => MathF.Atan2(S, C);
 

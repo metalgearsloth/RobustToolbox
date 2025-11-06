@@ -4,12 +4,7 @@ namespace Robust.Shared.NewPhysics.Math;
 
 internal record struct Vector2Wide
 {
-    public static readonly Vector2Wide Zero = new()
-    {
-        X = new FixedArray8<float>(),
-        Y = new FixedArray8<float>()
-    };
-
+    // We have this and not floatWide so we can do the X / Y access more easily
     public FixedArray8<float> X;
     public FixedArray8<float> Y;
 }

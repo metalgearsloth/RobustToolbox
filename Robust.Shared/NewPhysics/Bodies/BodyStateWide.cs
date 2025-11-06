@@ -1,14 +1,22 @@
-using System.Numerics;
-using Robust.Shared.Physics;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.NewPhysics.Bodies;
 
 internal record struct BodyStateWide
 {
-    public FixedArray8<Vector2> v;
+    public FixedArray8<float> vX;
+    public FixedArray8<float> vY;
+
+    // Angular
     public FixedArray8<float> w;
+
     public FixedArray8<float> flags;
-    public FixedArray8<Vector2> dp;
-    public FixedArray8<Quaternion2D> dq;
+
+    // Transform pos
+    public FixedArray8<float> dpX;
+    public FixedArray8<float> dpY;
+
+    // Transform rot
+    public FixedArray8<float> dqC;
+    public FixedArray8<float> dqS;
 }
