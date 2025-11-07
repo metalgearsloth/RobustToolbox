@@ -1,16 +1,23 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
 using Robust.Shared.NewPhysics.Sensors;
 using Robust.Shared.Physics;
 using Robust.Shared.Physics.Collision;
 using Robust.Shared.Physics.Dynamics;
+using Robust.Shared.Physics.Systems;
+using Robust.Shared.Threading;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.NewPhysics;
 
 public sealed partial class NewPhysicsSystem
 {
-    internal record struct b2SensorQueryContext
+    private record struct SensorTaskContext;
+
+    internal record struct SensorQueryContext
     {
-	    b2SensorTaskContext* taskContext;
+	    SensorTaskContext taskContext;
 	    public Sensor sensor;
         public Fixture sensorShape;
         public Transform transform;
@@ -32,7 +39,7 @@ public sealed partial class NewPhysicsSystem
     // Each sensor has an double buffered array of overlaps
     // These overlaps use a shape reference with index and generation
 
-    private static bool SensorQueryCallback( int proxyId, ulong userData, b2SensorQueryContext queryContext)
+    private static bool SensorQueryCallback( int proxyId, ulong userData, SensorQueryContext queryContext)
     {
 	    int shapeId = (int)userData;
 
@@ -107,128 +114,30 @@ public sealed partial class NewPhysicsSystem
 	    return 1;
     }
 
-    private void SensorTask( int startIndex, int endIndex, uint threadIndex)
-    {
-	    b2SensorTaskContext* taskContext = world->sensorTaskContexts.data + threadIndex;
-
-	    DebugTools.Assert(startIndex < endIndex);
-
-	    b2DynamicTree* trees = world->broadPhase.trees;
-	    for ( int sensorIndex = startIndex; sensorIndex < endIndex; ++sensorIndex )
-	    {
-		    var sensor = _sensors[sensorIndex];
-		    var sensorShape = _shapes[sensor.shapeId];
-
-		    // Swap overlap arrays
-		    (sensor.overlaps1, sensor.overlaps2) = (sensor.overlaps2, sensor.overlaps1);
-            sensor.overlaps2.Clear();
-
-		    // Append sensor hits
-		    int hitCount = sensor.hits.Count;
-		    for ( int i = 0; i < hitCount; ++i )
-		    {
-                sensor.overlaps2.Add(sensor.hits[i]);
-		    }
-
-		    // Clear the hits
-		    sensor.hits.Clear();
-
-		    var body = _bodies[sensorShape.BodyId];
-		    if ( body.SetIndex == (int) SetType.DisabledSet || sensorShape.EnableSensorEvents == false )
-		    {
-			    if ( sensor->overlaps1.count != 0 )
-			    {
-				    // This sensor is dropping all overlaps because it has been disabled.
-				    b2SetBit( &taskContext->eventBits, sensorIndex );
-			    }
-			    continue;
-		    }
-
-		    var transform = GetPhysicsTransform(body.Owner);
-
-		    var queryContext = new b2SensorQueryContext()
-            {
-			    sensor = sensor,
-			    sensorShape = sensorShape,
-			    transform = transform,
-		    };
-
-		    DebugTools.Assert( sensorShape.SensorIndex == sensorIndex );
-		    var queryBounds = sensorShape.aabb;
-
-		    // Query all trees
-		    b2DynamicTree_Query( trees + 0, queryBounds, sensorShape->filter.maskBits, SensorQueryCallback, &queryContext );
-		    b2DynamicTree_Query( trees + 1, queryBounds, sensorShape->filter.maskBits, SensorQueryCallback, &queryContext );
-		    b2DynamicTree_Query( trees + 2, queryBounds, sensorShape->filter.maskBits, SensorQueryCallback, &queryContext );
-
-		    // Sort the overlaps to enable finding begin and end events.
-		    qsort( sensor->overlaps2.data, sensor->overlaps2.count, sizeof( b2Visitor ), b2CompareVisitors );
-
-		    // Remove duplicates from overlaps2 (sorted). Duplicates are possible due to the hit events appended earlier.
-		    int uniqueCount = 0;
-		    int overlapCount = sensor->overlaps2.count;
-		    b2Visitor* overlapData = sensor->overlaps2.data;
-		    for ( int i = 0; i < overlapCount; ++i )
-		    {
-			    if ( uniqueCount == 0 || overlapData[i].shapeId != overlapData[uniqueCount - 1].shapeId )
-			    {
-				    overlapData[uniqueCount] = overlapData[i];
-				    uniqueCount += 1;
-			    }
-		    }
-		    sensor->overlaps2.count = uniqueCount;
-
-		    int count1 = sensor->overlaps1.count;
-		    int count2 = sensor->overlaps2.count;
-		    if ( count1 != count2 )
-		    {
-			    // something changed
-			    b2SetBit( &taskContext->eventBits, sensorIndex );
-		    }
-		    else
-		    {
-			    for ( int i = 0; i < count1; ++i )
-			    {
-				    b2Visitor* s1 = sensor->overlaps1.data + i;
-				    b2Visitor* s2 = sensor->overlaps2.data + i;
-
-				    if ( s1->shapeId != s2->shapeId || s1->generation != s2->generation )
-				    {
-					    // something changed
-					    b2SetBit( &taskContext->eventBits, sensorIndex );
-					    break;
-				    }
-			    }
-		    }
-	    }
-
-	    b2TracyCZoneEnd( sensor_task );
-}
-
     private void OverlapSensors()
     {
-        int sensorCount = _sensors.count;
+        int sensorCount = _sensors.Count;
 
         if ( sensorCount == 0 )
 	    {
 		    return;
 	    }
 
-	    b2TracyCZoneNC( overlap_sensors, "Sensors", b2_colorMediumPurple, true );
+        var batchSize = _sensorJob.BatchSize;
+        var batches = (sensorCount / batchSize) + 1;
 
-	    for ( int i = 0; i < world.workerCount; ++i )
-	    {
-		    b2SetBitCountAndClear( &world.sensorTaskContexts.data[i].eventBits, sensorCount );
-	    }
+        for (var i = 0; i < _sensorJob.EventBits.Count; i++)
+        {
+            _sensorJob.EventBits[i].SetAll(false);
+        }
+
+        for (var i = _sensorJob.EventBits.Count; i < batches; i++)
+        {
+            _sensorJob.EventBits.Add(new BitArray(batchSize));
+        }
 
 	    // Parallel-for sensors overlaps
-	    int minRange = 16;
-	    void* userSensorTask = world.enqueueTaskFcn( &SensorTask, sensorCount, minRange, world, world.userTaskContext );
-	    world.taskCount += 1;
-	    if ( userSensorTask != NULL )
-	    {
-		    world.finishTaskFcn( userSensorTask, world.userTaskContext );
-	    }
+        _parallel.ProcessNow(_sensorJob, sensorCount);
 
 	    b2TracyCZoneNC( sensor_state, "Events", b2_colorLightSlateGray, true );
 
@@ -374,6 +283,113 @@ public sealed partial class NewPhysicsSystem
             // Fixup moved sensor
             var otherSensorShape = _shapes[movedSensor.shapeId];
             otherSensorShape.SensorIndex = fixture.SensorIndex;
+        }
+    }
+
+    private sealed class SensorJob : IParallelRobustJob
+    {
+        public int BatchSize => 16;
+
+        public NewPhysicsSystem Physics = default!;
+
+        public List<BitArray> EventBits = new();
+
+        public void Execute(int sensorIndex)
+        {
+            b2SensorTaskContext* taskContext = world->sensorTaskContexts.data + threadIndex;
+
+            var batchIndex = sensorIndex / BatchSize;
+            var eventBits = EventBits[batchIndex];
+
+            // TODO: Check the other eventbit batches
+
+	        b2DynamicTree* trees = world->broadPhase.trees;
+
+		    var sensor = Physics._sensors[sensorIndex];
+		    var sensorShape = Physics._shapes[sensor.shapeId];
+
+		    // Swap overlap arrays
+		    (sensor.overlaps1, sensor.overlaps2) = (sensor.overlaps2, sensor.overlaps1);
+            sensor.overlaps2.Clear();
+
+		    // Append sensor hits
+		    int hitCount = sensor.hits.Count;
+		    for ( int i = 0; i < hitCount; ++i )
+		    {
+                sensor.overlaps2.Add(sensor.hits[i]);
+		    }
+
+		    // Clear the hits
+		    sensor.hits.Clear();
+
+		    var body = _bodies[sensorShape.BodyId];
+		    if ( body.Comp.SetIndex == (int) SetType.DisabledSet || sensorShape.EnableSensorEvents == false )
+		    {
+			    if ( sensor.overlaps1.Count != 0 )
+			    {
+				    // This sensor is dropping all overlaps because it has been disabled.
+				    eventBits.Set(sensorIndex, true);
+			    }
+
+                return;
+            }
+
+		    var transform = Physics.GetPhysicsTransform(body.Owner);
+
+		    var queryContext = new SensorQueryContext()
+            {
+			    sensor = sensor,
+			    sensorShape = sensorShape,
+			    transform = transform,
+		    };
+
+		    DebugTools.Assert( sensorShape.SensorIndex == sensorIndex );
+		    var queryBounds = sensorShape.aabb;
+
+		    // Query all trees
+		    b2DynamicTree_Query( trees + 0, queryBounds, sensorShape->filter.maskBits, SensorQueryCallback, &queryContext );
+		    b2DynamicTree_Query( trees + 1, queryBounds, sensorShape->filter.maskBits, SensorQueryCallback, &queryContext );
+		    b2DynamicTree_Query( trees + 2, queryBounds, sensorShape->filter.maskBits, SensorQueryCallback, &queryContext );
+
+		    // Sort the overlaps to enable finding begin and end events.
+		    qsort( sensor->overlaps2.data, sensor->overlaps2.count, sizeof( b2Visitor ), b2CompareVisitors );
+
+		    // Remove duplicates from overlaps2 (sorted). Duplicates are possible due to the hit events appended earlier.
+		    int uniqueCount = 0;
+		    int overlapCount = sensor.overlaps2.Count;
+		    var overlapData = sensor.overlaps2;
+		    for ( int i = 0; i < overlapCount; ++i )
+		    {
+			    if ( uniqueCount == 0 || overlapData[i].shapeId != overlapData[uniqueCount - 1].shapeId )
+			    {
+				    overlapData[uniqueCount] = overlapData[i];
+				    uniqueCount += 1;
+			    }
+		    }
+		    sensor.overlaps2.count = uniqueCount;
+
+		    int count1 = sensor.overlaps1.Count;
+		    int count2 = sensor.overlaps2.Count;
+		    if ( count1 != count2 )
+		    {
+			    // something changed
+			    eventBits.Set(sensorIndex, true);
+		    }
+		    else
+		    {
+			    for ( int i = 0; i < count1; ++i )
+                {
+                    var s1 = sensor.overlaps1[i];
+                    var s2 = sensor.overlaps2[i];
+
+				    if ( s1.shapeId != s2.shapeId || s1.generation != s2.generation )
+				    {
+					    // something changed
+					    eventBits.Set(sensorIndex, true);
+					    break;
+				    }
+			    }
+		    }
         }
     }
 }

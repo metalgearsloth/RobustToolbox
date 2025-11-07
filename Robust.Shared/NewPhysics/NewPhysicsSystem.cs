@@ -46,6 +46,7 @@ public sealed partial class NewPhysicsSystem : EntitySystem
     private SplitIslandJob _splitJob = default!;
     private WaitHandle _splitHandle = default!;
     private FinalizeBodiesJob _finalizeJob = default!;
+    private SensorJob _sensorJob = default!;
 
     private ConstraintGraph _constraintGraph = new();
 
@@ -184,6 +185,7 @@ public sealed partial class NewPhysicsSystem : EntitySystem
         };
 
         _finalizeJob = new();
+        _sensorJob = new();
 
         InitializeSolverSets();
     }
