@@ -124,14 +124,14 @@ public sealed partial class NewPhysicsSystem
 	    }
 
         var batchSize = _sensorJob.BatchSize;
-        var batches = (sensorCount / batchSize) + 1;
+        var batchCount = (sensorCount / batchSize) + 1;
 
         for (var i = 0; i < _sensorJob.EventBits.Count; i++)
         {
             _sensorJob.EventBits[i].SetAll(false);
         }
 
-        for (var i = _sensorJob.EventBits.Count; i < batches; i++)
+        for (var i = _sensorJob.EventBits.Count; i < batchCount; i++)
         {
             _sensorJob.EventBits.Add(new BitArray(batchSize));
         }
@@ -139,113 +139,107 @@ public sealed partial class NewPhysicsSystem
 	    // Parallel-for sensors overlaps
         _parallel.ProcessNow(_sensorJob, sensorCount);
 
-	    b2TracyCZoneNC( sensor_state, "Events", b2_colorLightSlateGray, true );
-
-	    b2BitSet* bitSet = &world.sensorTaskContexts.data[0].eventBits;
-	    for ( int i = 1; i < world.workerCount; ++i )
-	    {
-		    b2InPlaceUnion( bitSet, &world.sensorTaskContexts.data[i].eventBits );
-	    }
-
 	    // Iterate sensors bits and publish events
 	    // Process sensor state changes. Iterate over set bits
-	    uint64_t* bits = bitSet.bits;
-	    uint32_t blockCount = bitSet.blockCount;
+        for (var i = 0; i < batchSize; i++)
+        {
+            var bitset = _sensorJob.EventBits[i];
+            var blockCount = _sensorJob.BatchSize;
 
-	    for ( uint32_t k = 0; k < blockCount; ++k )
-	    {
-		    uint64_t word = bits[k];
-		    while ( word != 0 )
-		    {
-			    uint32_t ctz = b2CTZ64( word );
-			    int sensorIndex = (int)( 64 * k + ctz );
+            for (var k = 0; k < blockCount; ++k)
+	        {
+		        var word = bitset[k];
+		        while (word)
+		        {
+			        uint32_t ctz = b2CTZ64( word );
+			        int sensorIndex = (int)( 64 * k + ctz );
 
-			    b2Sensor* sensor = b2SensorArray_Get( &world.sensors, sensorIndex );
-			    b2Shape* sensorShape = b2ShapeArray_Get( &world.shapes, sensor.shapeId );
-			    b2ShapeId sensorId = { sensor.shapeId + 1, world.worldId, sensorShape.generation };
+			        var sensor = _sensors[sensorIndex];
+			        var sensorShape = _shapes[sensor.shapeId];
+			        var sensorId = { sensor.shapeId + 1, world.worldId, sensorShape.generation };
 
-			    int count1 = sensor.overlaps1.count;
-			    int count2 = sensor.overlaps2.count;
-			    const b2Visitor* refs1 = sensor.overlaps1.data;
-			    const b2Visitor* refs2 = sensor.overlaps2.data;
+			        int count1 = sensor.overlaps1.Count;
+			        int count2 = sensor.overlaps2.Count;
+			        ref var refs1 = ref sensor.overlaps1;
+			        ref var refs2 = ref sensor.overlaps2;
 
-			    // overlaps1 can have overlaps that end
-			    // overlaps2 can have overlaps that begin
-			    int index1 = 0, index2 = 0;
-			    while ( index1 < count1 && index2 < count2 )
-			    {
-				    const b2Visitor* r1 = refs1 + index1;
-				    const b2Visitor* r2 = refs2 + index2;
-				    if ( r1.shapeId == r2.shapeId )
-				    {
-					    if ( r1.generation < r2.generation )
-					    {
-						    // end
-						    b2ShapeId visitorId = { r1.shapeId + 1, world.worldId, r1.generation };
-						    b2SensorEndTouchEvent event = {
-							    .sensorShapeId = sensorId,
-							    .visitorShapeId = visitorId,
-						    };
-						    b2SensorEndTouchEventArray_Push( &world.sensorEndEvents[world.endEventArrayIndex], event );
-						    index1 += 1;
-					    }
-					    else if ( r1.generation > r2.generation )
-					    {
-						    // begin
-						    b2ShapeId visitorId = { r2.shapeId + 1, world.worldId, r2.generation };
-						    b2SensorBeginTouchEvent event = { sensorId, visitorId };
-						    b2SensorBeginTouchEventArray_Push( &world.sensorBeginEvents, event );
-						    index2 += 1;
-					    }
-					    else
-					    {
-						    // persisted
-						    index1 += 1;
-						    index2 += 1;
-					    }
-				    }
-				    else if ( r1.shapeId < r2.shapeId )
-				    {
-					    // end
-					    b2ShapeId visitorId = { r1.shapeId + 1, world.worldId, r1.generation };
-					    b2SensorEndTouchEvent event = { sensorId, visitorId };
-					    b2SensorEndTouchEventArray_Push( &world.sensorEndEvents[world.endEventArrayIndex], event );
-					    index1 += 1;
-				    }
-				    else
-				    {
-					    // begin
-					    b2ShapeId visitorId = { r2.shapeId + 1, world.worldId, r2.generation };
-					    b2SensorBeginTouchEvent event = { sensorId, visitorId };
-					    b2SensorBeginTouchEventArray_Push( &world.sensorBeginEvents, event );
-					    index2 += 1;
-				    }
-			    }
+			        // overlaps1 can have overlaps that end
+			        // overlaps2 can have overlaps that begin
+			        int index1 = 0, index2 = 0;
+			        while ( index1 < count1 && index2 < count2 )
+                    {
+                        ref var r1 = ref refs1[index1];
+                        ref var r2 = ref refs2[index2];
 
-			    while ( index1 < count1 )
-			    {
-				    // end
-				    const b2Visitor* r1 = refs1 + index1;
-				    b2ShapeId visitorId = { r1.shapeId + 1, world->worldId, r1->generation };
-				    b2SensorEndTouchEvent event = { sensorId, visitorId };
-				    b2SensorEndTouchEventArray_Push( &world->sensorEndEvents[world->endEventArrayIndex], event );
-				    index1 += 1;
-			    }
+				        if ( r1.shapeId == r2.shapeId )
+				        {
+					        if ( r1.generation < r2.generation )
+					        {
+						        // end
+						        b2ShapeId visitorId = { r1.shapeId + 1, world.worldId, r1.generation };
+                                var ev = new SensorEndTouchEvent();
+                                _sensorEndEvents[_endEventArrayIndex].Add(ev);
 
-			    while ( index2 < count2 )
-			    {
-				    // begin
-				    const b2Visitor* r2 = refs2 + index2;
-				    b2ShapeId visitorId = { r2->shapeId + 1, world->worldId, r2->generation };
-				    b2SensorBeginTouchEvent event = { sensorId, visitorId };
-				    b2SensorBeginTouchEventArray_Push( &world->sensorBeginEvents, event );
-				    index2 += 1;
-			    }
+						        index1 += 1;
+					        }
+					        else if ( r1.generation > r2.generation )
+					        {
+						        // begin
+						        b2ShapeId visitorId = { r2.shapeId + 1, world.worldId, r2.generation };
+                                var ev = new SensorBeginTouchEvent();
+                                _sensorBeginEvents.Add(ev);
+						        index2 += 1;
+					        }
+					        else
+					        {
+						        // persisted
+						        index1 += 1;
+						        index2 += 1;
+					        }
+				        }
+				        else if ( r1.shapeId < r2.shapeId )
+				        {
+					        // end
+					        b2ShapeId visitorId = { r1.shapeId + 1, world.worldId, r1.generation };
+                            var ev = new SensorEndTouchEvent();
+                            _sensorEndEvents[_endEventArrayIndex].Add(ev);
+					        index1 += 1;
+				        }
+				        else
+				        {
+					        // begin
+					        b2ShapeId visitorId = { r2.shapeId + 1, world.worldId, r2.generation };
+                            var ev = new SensorBeginTouchEvent();
+                            _sensorBeginEvents.Add(ev);
+					        index2 += 1;
+				        }
+			        }
 
-			    // Clear the smallest set bit
-			    word = word & ( word - 1 );
-		    }
-	    }
+			        while ( index1 < count1 )
+			        {
+				        // end
+				        const b2Visitor* r1 = refs1 + index1;
+				        b2ShapeId visitorId = { r1.shapeId + 1, world->worldId, r1->generation };
+                        var ev = new SensorEndTouchEvent();
+                        _sensorEndEvents[_endEventArrayIndex].Add(ev);
+				        index1 += 1;
+			        }
+
+			        while ( index2 < count2 )
+			        {
+				        // begin
+				        const b2Visitor* r2 = refs2 + index2;
+				        b2ShapeId visitorId = { r2->shapeId + 1, world->worldId, r2->generation };
+                        var ev = new SensorBeginTouchEvent();
+                        _sensorBeginEvents.Add(ev);
+				        index2 += 1;
+			        }
+
+			        // Clear the smallest set bit
+			        word = word & ( word - 1 );
+		        }
+	        }
+        }
     }
 
     private void DestroySensor(Fixture fixture)
