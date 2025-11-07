@@ -28,7 +28,7 @@ public sealed partial class NewPhysicsSystem : EntitySystem
      * - Worlds don't exist as we use EntityManager to handle the same concept.
      */
 
-    // TODO: Move data to bodystate / bodysim
+    // TODO: Move data to bodystate / bodysim?
     // TODO: Access valuelists by ref
     // TODO: Joints especially on valuelists by ref
     // TODO: body / contact / joint creation and destruction, also enabled + bodytype in particular
@@ -39,6 +39,7 @@ public sealed partial class NewPhysicsSystem : EntitySystem
     [Dependency] private readonly IParallelManager _parallel = default!;
     [Dependency] private readonly SharedTransformSystem XformSystem = default!;
 
+    private InitializeTransformsJob _initTransformsJob = default!;
     private CollideJob _collideJob = default!;
     private RebuildJob _rebuildJob = default!;
     private WaitHandle _rebuildHandle = default!;
@@ -163,12 +164,14 @@ public sealed partial class NewPhysicsSystem : EntitySystem
 
     internal bool _locked;
 
-    const int Iterations = 1;
-    const int RelaxIterations = 1;
+    private const int Iterations = 1;
+    private const int RelaxIterations = 1;
 
     public override void Initialize()
     {
         base.Initialize();
+
+        _initTransformsJob = new InitializeTransformsJob();
 
         _collideJob = new CollideJob();
 

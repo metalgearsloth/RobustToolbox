@@ -7,11 +7,12 @@ using Robust.Shared.IoC;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
+using Robust.Shared.NewPhysics;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Physics.Dynamics;
-using Robust.Shared.Physics.Dynamics.Contacts;
 using Robust.Shared.Threading;
 using Robust.Shared.Utility;
+using ContactFlags = Robust.Shared.Physics.Dynamics.Contacts.ContactFlags;
 
 namespace Robust.Shared.Physics.Systems
 {
@@ -281,7 +282,7 @@ namespace Robust.Shared.Physics.Systems
                             Matrix3x2 worldMatrix,
                             Matrix3x2 invWorldMatrix,
                             SharedMapSystem _map,
-                            SharedPhysicsSystem _physicsSystem,
+                            NewPhysicsSystem _physicsSystem,
                             SharedTransformSystem xformSystem,
                             EntityQuery<FixturesComponent> fixturesQuery,
                             EntityQuery<PhysicsComponent> physicsQuery,
@@ -336,7 +337,9 @@ namespace Robust.Shared.Physics.Systems
                                             var otherFixture = fixturesB.Fixtures[otherId];
 
                                             // There's already a contact so ignore it.
-                                            if (fixture.Contacts.ContainsKey(otherFixture))
+                                            var pairKey = tuple._physicsSystem.HasContact(fixture, otherFixture);
+
+                                            if (pairKey)
                                                 break;
 
                                             for (var j = 0; j < otherFixture.Shape.ChildCount; j++)
@@ -416,7 +419,7 @@ namespace Robust.Shared.Physics.Systems
         private void QueryBroadphase(IBroadPhase broadPhase, (List<(FixtureProxy, FixtureProxy, PairFlag)>, HashSet<FixtureProxy> MoveBuffer, SharedBroadphaseSystem Broadphase, SharedPhysicsSystem PhysicsSystem, FixtureProxy) state, Box2 aabb)
         {
             broadPhase.QueryAabb(ref state, static (
-                ref (List<(FixtureProxy, FixtureProxy, PairFlag)> pairs, HashSet<FixtureProxy> moveBuffer, SharedBroadphaseSystem broadphase, SharedPhysicsSystem physicsSystem, FixtureProxy proxy) tuple,
+                ref (List<(FixtureProxy, FixtureProxy, PairFlag)> pairs, HashSet<FixtureProxy> moveBuffer, SharedBroadphaseSystem broadphase, NewPhysicsSystem physicsSystem, FixtureProxy proxy) tuple,
                 in FixtureProxy other) =>
             {
                 DebugTools.Assert(other.Body.CanCollide);
@@ -438,7 +441,9 @@ namespace Robust.Shared.Physics.Systems
                 }
 
                 // Check if contact already exists.
-                if (tuple.proxy.Fixture.Contacts.ContainsKey(other.Fixture))
+                var pair = tuple.physicsSystem.HasContact(tuple.proxy.Fixture, other.Fixture);
+
+                if (pair)
                     return true;
 
                 // TODO: Add in the slow path check here but turnstiles currently explodes this on content so.

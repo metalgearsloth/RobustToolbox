@@ -157,7 +157,7 @@ public sealed partial class NewPhysicsSystem
 
     private ulong B2_SHAPE_PAIR_KEY(int K1, int K2)
     {
-        return K1 < K2 ? (ulong) K1 << 32 | (ulong)K2 : (ulong)K2 << 32 | (ulong)K1;
+        return K1 < K2 ? (ulong) K1 << 32 | (uint)K2 : (ulong)K2 << 32 | (uint)K1;
     }
 
     private ref ContactSim GetContactSim(b2Contact contact)

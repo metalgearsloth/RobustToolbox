@@ -23,7 +23,7 @@ public sealed partial class NewPhysicsSystem
     // This is a load and transpose
     private unsafe BodyStateWide GatherBodies(Span<BodyState> states, ReadOnlySpan<int> indices)
     {
-        if (Avx.IsSupported)
+        if (NumericsHelpers.Vector256Enabled)
         {
             var identityValues = new float[8];
             identityValues[0] = 0f;
@@ -163,7 +163,7 @@ public sealed partial class NewPhysicsSystem
     // Writes everything back to the solver bodies but only the velocities change
     private unsafe void ScatterBodies(Span<BodyState> states, ReadOnlySpan<int> indices, ref BodyStateWide simdBody)
     {
-        if (Avx.IsSupported)
+        if (NumericsHelpers.Vector256Enabled)
         {
             ref var vxRef = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.vX);
             ref var vyRef = ref Unsafe.As<FixedArray8<float>, float>(ref simdBody.vX);
@@ -1663,7 +1663,7 @@ public sealed partial class NewPhysicsSystem
 
     private unsafe FixedArray8<float> SimdMul(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
-        if (!Avx.IsSupported)
+        if (!NumericsHelpers.Vector256Enabled)
         {
             return new FixedArray8<float>(
                 a[0] * b[0],
@@ -1695,7 +1695,7 @@ public sealed partial class NewPhysicsSystem
 
     private unsafe FixedArray8<float> SimdMulAdd(ReadOnlySpan<float> a, ReadOnlySpan<float> b, ReadOnlySpan<float> c)
     {
-        if (!Avx.IsSupported)
+        if (!NumericsHelpers.Vector256Enabled)
         {
             return new FixedArray8<float>(
                 a[0] + b[0] * c[0],
@@ -1731,7 +1731,7 @@ public sealed partial class NewPhysicsSystem
 
     private unsafe FixedArray8<float> SimdMulSub(ReadOnlySpan<float> a, ReadOnlySpan<float> b, ReadOnlySpan<float> c)
     {
-        if (!Avx.IsSupported)
+        if (!NumericsHelpers.Vector256Enabled)
         {
             return new FixedArray8<float>(
                 a[0] + b[0] * c[0],
@@ -1767,7 +1767,7 @@ public sealed partial class NewPhysicsSystem
 
     private unsafe FixedArray8<float> SimdAdd(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
-        if (!Avx.IsSupported)
+        if (!NumericsHelpers.Vector256Enabled)
         {
             return new FixedArray8<float>(
                 a[0] * b[0],
@@ -1799,7 +1799,7 @@ public sealed partial class NewPhysicsSystem
 
     private unsafe FixedArray8<float> SimdSub(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
-        if (!Avx.IsSupported)
+        if (!NumericsHelpers.Vector256Enabled)
         {
             return new FixedArray8<float>(
                 a[0] * b[0],
@@ -1831,7 +1831,7 @@ public sealed partial class NewPhysicsSystem
 
     private FixedArray8<float> SimdSplat(float scalar)
     {
-        if (!Avx.IsSupported)
+        if (!NumericsHelpers.Vector256Enabled)
         {
             return new FixedArray8<float>(
                 scalar,

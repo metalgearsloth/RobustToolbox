@@ -4,6 +4,7 @@ using Robust.Shared.Collections;
 using Robust.Shared.IoC;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics.Systems;
+using Robust.Shared.Threading;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.NewPhysics;
@@ -34,6 +35,10 @@ public sealed partial class NewPhysicsSystem
             return;
 
         // TODO: Add generations back for shapeids orrr alternatively just store the things directly probably.
+
+        // Update BodySim transforms as we have a transform hierarchy.
+        var awakeCount = _solverSets[(int)SetType.AwakeSet].bodySims.Count;
+        var xformJob = _parallel.Process(_initTransformsJob, awakeCount);
 
         // Prepare event capture
         _contactBeginEvents.Clear();
@@ -70,6 +75,7 @@ public sealed partial class NewPhysicsSystem
             _contactEndEvents[_endEventArrayIndex].Clear();
 
             // todo_erin would be useful to still process collision while paused
+            xformJob.WaitOne();
             return;
         }
 
@@ -97,15 +103,7 @@ public sealed partial class NewPhysicsSystem
         _contactSoftness = MakeSoft( contactHertz, _contactDampingRatio, _h );
         _staticSoftness = MakeSoft( 2.0f * contactHertz, _contactDampingRatio, _h );
 
-        // Update body state transforms
-        var awakeSet = _solverSets[(int)SetType.AwakeSet];
-
-        for (var i = 0; i < awakeSet.bodySims.Count; i++)
-        {
-            // TODO: Dump data off of physicscomp
-            ref var sim = ref awakeSet.bodySims[i];
-            sim.transform
-        }
+        xformJob.WaitOne();
 
         // Update contacts
         Collide();
@@ -123,5 +121,21 @@ public sealed partial class NewPhysicsSystem
         _sensorEndEvents[_endEventArrayIndex].Clear();
         _contactEndEvents[_endEventArrayIndex].Clear();
         _locked = false;
+    }
+
+    private sealed class InitializeTransformsJob : IParallelRobustJob
+    {
+        public int BatchSize => 32;
+
+        public NewPhysicsSystem System = default!;
+
+        public void Execute(int index)
+        {
+            // Update body state transforms
+            var awakeSet = System._solverSets[(int)SetType.AwakeSet];
+            // TODO: Dump data off of physicscomp
+            ref var sim = ref awakeSet.bodySims[index];
+            sim.transform = System.GetPhysicsTransform(sim.body.Owner);
+        }
     }
 }
