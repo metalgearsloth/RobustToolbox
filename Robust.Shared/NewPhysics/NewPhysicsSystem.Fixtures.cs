@@ -1,5 +1,6 @@
 using System.Diagnostics.Contracts;
 using Robust.Shared.Physics.Dynamics;
+using Robust.Shared.Physics.Systems;
 
 namespace Robust.Shared.NewPhysics;
 
@@ -18,5 +19,10 @@ public sealed partial class NewPhysicsSystem
 
         var pairKey = B2_SHAPE_PAIR_KEY(fixtureA.Id, fixtureB.Id);
         return _pairSet.Contains(pairKey);
+    }
+
+    private bool ShouldShapesCollide(QueryFilter filterA, QueryFilter filterB )
+    {
+        return ( filterA.MaskBits & filterB.LayerBits ) != 0 && ( filterA.LayerBits & filterB.MaskBits ) != 0;
     }
 }

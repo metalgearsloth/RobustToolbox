@@ -45,6 +45,12 @@ namespace Robust.Shared.Physics.Dynamics
         [NonSerialized]
         public int Id;
 
+        /// <summary>
+        /// If relevant
+        /// </summary>
+        [ViewVariables]
+        internal int SensorIndex;
+
         [DataField]
         public SurfaceMaterial Material = new();
 

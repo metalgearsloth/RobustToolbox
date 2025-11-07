@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using Microsoft.Extensions.ObjectPool;
 using Robust.Shared.Collections;
 using Robust.Shared.GameObjects;
 using Robust.Shared.IoC;
@@ -8,6 +9,7 @@ using Robust.Shared.NewPhysics.Bodies;
 using Robust.Shared.NewPhysics.Contacts;
 using Robust.Shared.NewPhysics.Islands;
 using Robust.Shared.NewPhysics.Joints;
+using Robust.Shared.NewPhysics.Sensors;
 using Robust.Shared.NewPhysics.Solver;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Physics.Dynamics;
@@ -26,14 +28,16 @@ public sealed partial class NewPhysicsSystem : EntitySystem
      * - Worlds don't exist as we use EntityManager to handle the same concept.
      */
 
+    // TODO: Move data to bodystate / bodysim
     // TODO: Access valuelists by ref
     // TODO: Joints especially on valuelists by ref
-    // TODO: body / contact / joint creation and destruction
+    // TODO: body / contact / joint creation and destruction, also enabled + bodytype in particular
     // TODO: Dirtying
     // TODO: Writing bodystates back to the bodies.
     // TODO: Check generations on contacts + bodies + ids.
 
     [Dependency] private readonly IParallelManager _parallel = default!;
+    [Dependency] private readonly SharedTransformSystem XformSystem = default!;
 
     private CollideJob _collideJob = default!;
     private RebuildJob _rebuildJob = default!;
@@ -62,6 +66,7 @@ public sealed partial class NewPhysicsSystem : EntitySystem
 
     // Box2D cheats with joints because it uses a union.
 
+    private readonly List<Sensor> _sensors = new();
     private readonly List<Entity<PhysicsComponent>> _bodies = new();
     private readonly List<b2Contact> _contacts = new();
     private readonly List<Island> _islands = new();
@@ -76,6 +81,8 @@ public sealed partial class NewPhysicsSystem : EntitySystem
     /*
      * Pools
      */
+
+    private readonly ObjectPool<ContactSim> _contactSimPool = new DefaultObjectPool<ContactSim>(new DefaultPooledObjectPolicy<ContactSim>(), maximumRetained: 128);
 
     private readonly IdPool _bodyIdPool = new();
     private readonly IdPool _contactIdPool = new();

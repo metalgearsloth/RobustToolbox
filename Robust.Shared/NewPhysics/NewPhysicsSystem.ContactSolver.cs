@@ -781,9 +781,9 @@ public sealed partial class NewPhysicsSystem
 
 			    // Apply speculative bias if separation is greater than zero, otherwise apply soft constraint bias
 			    // The contactSpeed is meant to limit stiffness, not increase it.
-			    b2FloatW mask = SimdGreaterThan( s, zero );
-			    b2FloatW specBias = SimdMul( s, inv_h );
-			    b2FloatW softBias = SimdMax( SimdMul( biasRate, s ), contactSpeed );
+			    var mask = SimdGreaterThan( s, zero );
+                var specBias = SimdMul( s, inv_h );
+                var softBias = SimdMax( SimdMul( biasRate, s ), contactSpeed );
 
 			    // todo try b2MaxW(softBias, specBias);
 			    b2FloatW bias = SimdBlend( softBias, specBias, mask );

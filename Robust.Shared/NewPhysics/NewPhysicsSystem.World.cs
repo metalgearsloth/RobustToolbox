@@ -97,6 +97,16 @@ public sealed partial class NewPhysicsSystem
         _contactSoftness = MakeSoft( contactHertz, _contactDampingRatio, _h );
         _staticSoftness = MakeSoft( 2.0f * contactHertz, _contactDampingRatio, _h );
 
+        // Update body state transforms
+        var awakeSet = _solverSets[(int)SetType.AwakeSet];
+
+        for (var i = 0; i < awakeSet.bodySims.Count; i++)
+        {
+            // TODO: Dump data off of physicscomp
+            ref var sim = ref awakeSet.bodySims[i];
+            sim.transform
+        }
+
         // Update contacts
         Collide();
 

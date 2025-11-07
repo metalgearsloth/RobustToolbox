@@ -16,8 +16,8 @@ internal sealed class ContactSim()
     public int bodySimIndexA;
     public int bodySimIndexB;
 
-    public Fixture shapeA;
-    public Fixture shapeB;
+    public Fixture shapeA = default!;
+    public Fixture shapeB = default!;
 
     public float invMassA;
     public float invIA;

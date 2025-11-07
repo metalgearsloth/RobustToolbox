@@ -51,7 +51,7 @@ public sealed partial class NewPhysicsSystem
 
 			    var contact = _contacts[contactId];
 
-			    contactKey = contact.edges[edgeIndex].nextKey;
+			    contactKey = contact.edges.AsSpan[edgeIndex].nextKey;
 
 			    if ( contact.setIndex != (int) SetType.DisabledSet )
 			    {
@@ -66,7 +66,7 @@ public sealed partial class NewPhysicsSystem
 
 			    contact.setIndex = (int) SetType.AwakeSet;
 			    contact.localIndex = awakeSet.contactSims.Count;
-                var awakeContactSim = new ContactSim();
+                var awakeContactSim = _contactSimPool.Get();
                 awakeSet.contactSims.Add(awakeContactSim);
 
 			    var movedContactSim = disabledSet.contactSims.RemoveSwap(localIndex);
@@ -78,6 +78,7 @@ public sealed partial class NewPhysicsSystem
 				    var movedContact = _contacts[movedContactSim.contactId];
 				    DebugTools.Assert( movedContact.localIndex == movedLocalIndex );
 				    movedContact.localIndex = localIndex;
+                    _contactSimPool.Return(movedContactSim);
 			    }
 		    }
 	    }

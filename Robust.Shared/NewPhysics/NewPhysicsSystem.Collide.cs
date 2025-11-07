@@ -120,13 +120,6 @@ public sealed partial class NewPhysicsSystem
         }
     }
 
-    private ref BodySim GetBodySim(PhysicsComponent body)
-    {
-        var set = _solverSets[body.SetIndex];
-        ref var sims = ref set.bodySims;
-        return ref sims[body.LocalIndex];
-    }
-
     internal sealed class ConstraintGraph
     {
         // including overflow at the end
@@ -233,9 +226,6 @@ public sealed partial class NewPhysicsSystem
 	    // Contact bit set on ids because contact pointers are unstable as they move between touching and not touching.
 	    int contactIdCapacity = _contactIdPool.Capacity;
 
-        // TODO: Bitset pool
-        // Make them size 64 and then for each job allocate it, then process them all
-
         // We do this inline so we can get the bitset back from each job and combine them at the end.
         var batches = (contactCount / _collideJob.BatchSize) + 1;
 
@@ -248,9 +238,8 @@ public sealed partial class NewPhysicsSystem
 
 	    // Serially update contact state
 	    // todo_erin bring this zone together with island merge
-        var awakeSet = _solverSets[(int)SetType.AwakeSet];
-
 	    int endEventArrayIndex = _endEventArrayIndex;
+        ref var awakeSet = ref _solverSets[(int)SetType.AwakeSet];
 
         var shapes = _shapes;
 
@@ -614,6 +603,7 @@ public sealed partial class NewPhysicsSystem
 		    {
 			    var movedContact = _contacts[movedContactSim.contactId];
 			    movedContact.localIndex = contact.localIndex;
+                _contactSimPool.Return(movedContactSim);
 		    }
 	    }
 
@@ -807,7 +797,7 @@ public sealed partial class NewPhysicsSystem
 	    contact.colorIndex = colorIndex;
 	    contact.localIndex = newColor.ContactSims.Count;
 
-        var newContact = new ContactSim();
+        var newContact = _contactSimPool.Get();
         newColor.ContactSims.Add(newContact);
 
 	    // todo perhaps skip this if the contact is already awake
@@ -900,16 +890,17 @@ public sealed partial class NewPhysicsSystem
     private void RemoveNonTouchingContact(int setIndex, int localIndex)
     {
         var set = _solverSets[setIndex];
-        set.contactSims.RemoveSwap(localIndex);
+        var removedSim = set.contactSims.RemoveSwap(localIndex);
         var movedIndex = set.contactSims.Count;
+        _contactSimPool.Return(removedSim);
 
         if (movedIndex <= 0)
             return;
 
-        var sims = CollectionsMarshal.AsSpan(set.contactSims);
+        ref var sims = ref set.contactSims;
         ref var movedContactSim = ref sims[localIndex];
         var movedContact = _contacts[movedContactSim.contactId];
-        DebugTools.Assert((int) movedContact.setIndex == setIndex);
+        DebugTools.Assert(movedContact.setIndex == setIndex);
         DebugTools.Assert(movedContact.localIndex == movedIndex);
         DebugTools.Assert(movedContact.colorIndex == PhysicsConstants.NullIndex);
         movedContact.localIndex = localIndex;

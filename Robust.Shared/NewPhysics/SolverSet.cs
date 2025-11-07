@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using Robust.Shared.Collections;
 using Robust.Shared.NewPhysics.Bodies;
 using Robust.Shared.NewPhysics.Islands;

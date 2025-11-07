@@ -340,7 +340,7 @@ public sealed partial class NewPhysicsSystem
 		    {
 			    // Grab the next body off the stack and add it to the island.
 			    int bodyId = stack[--stackCount];
-			    var body = _bodies[bodyId];
+			    var body = _bodies[bodyId].Comp;
 			    DebugTools.Assert( body.SetIndex == (int) SetType.AwakeSet) );
 			    DebugTools.Assert( body.IslandId == islandId );
 

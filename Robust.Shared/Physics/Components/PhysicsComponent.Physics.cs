@@ -27,6 +27,7 @@ using System.Numerics;
 using Robust.Shared.GameObjects;
 using Robust.Shared.GameStates;
 using Robust.Shared.Maths;
+using Robust.Shared.NewPhysics;
 using Robust.Shared.Physics.Dynamics.Contacts;
 using Robust.Shared.Physics.Systems;
 using Robust.Shared.Serialization.Manager.Attributes;
@@ -41,35 +42,52 @@ public sealed partial class PhysicsComponent : Component, IComponentDelta
     public GameTick LastFieldUpdate { get; set; }
     public GameTick[] LastModifiedFields { get; set; }
 
-    [ViewVariables]
-    internal int Id;
-
     /// <summary>
-    /// Solver set of the body.
+    /// Solver set of the body. May be <see cref="PhysicsConstants.NullIndex"/>
     /// </summary>
     [ViewVariables]
     internal int SetIndex;
 
     /// <summary>
-    /// Index of this body into its solver set.
+    /// Index of this body into its solver set. May be <see cref="PhysicsConstants.NullIndex"/>
     /// </summary>
     [ViewVariables]
     internal int LocalIndex;
 
     [ViewVariables]
-    internal int IslandId;
-
-    [ViewVariables]
     internal int headContactKey;
 
     [ViewVariables]
-    internal int islandNext;
+    public int ContactCount { get; internal set; }
+
+    internal int headShapeId;
+
+    [ViewVariables]
+    public int FixtureCount { get; internal set; }
+
+    internal int headChainId;
+
+    internal int headJointKey;
+
+    public int JointCount { get; internal set; }
+
+    // All enabled dynamic and kinematic bodies are in an island.
+    [ViewVariables]
+    internal int IslandId;
 
     [ViewVariables]
     internal int islandPrev;
 
     [ViewVariables]
-    public int ContactCount { get; internal set; }
+    internal int islandNext;
+
+    [ViewVariables]
+    internal int Id;
+
+    // this is used to adjust the fellAsleep flag in the body move array
+    internal int bodyMoveIndex;
+
+    internal ushort generation;
 
     [DataField]
     public bool IgnorePaused;
@@ -102,9 +120,9 @@ public sealed partial class PhysicsComponent : Component, IComponentDelta
     /// <remarks>
     ///     Also known as Enabled in Box2D
     /// </remarks>
-    [DataField, Access(typeof(SharedPhysicsSystem), Friend = AccessPermissions.ReadWriteExecute,
+    [Access(typeof(SharedPhysicsSystem), Friend = AccessPermissions.ReadWriteExecute,
          Other = AccessPermissions.Read)]
-    public bool CanCollide = true;
+    public bool CanCollide => SetIndex == (int) SetType.DisabledSet;
 
     /// <summary>
     ///     Non-hard physics bodies will not cause action collision (e.g. blocking of movement)
@@ -139,7 +157,7 @@ public sealed partial class PhysicsComponent : Component, IComponentDelta
     ///     Current mass of the entity in kilograms. This may be 0 depending on the body type.
     /// </summary>
     [ViewVariables(VVAccess.ReadOnly)]
-    public float Mass => (BodyType & (BodyType.Dynamic | BodyType.KinematicController)) != 0 ? _mass : 0.0f;
+    public float Mass => (BodyType & (BodyType.Dynamic)) != 0 ? _mass : 0.0f;
 
     internal float _mass;
 
@@ -147,7 +165,7 @@ public sealed partial class PhysicsComponent : Component, IComponentDelta
     ///     Inverse mass of the entity in kilograms (1 / Mass).
     /// </summary>
     [ViewVariables]
-    public float InvMass => (BodyType & (BodyType.Dynamic | BodyType.KinematicController)) != 0 ? _invMass : 0.0f;
+    public float InvMass => (BodyType & (BodyType.Dynamic)) != 0 ? _invMass : 0.0f;
 
     internal float _invMass;
 
@@ -268,9 +286,6 @@ public sealed partial class PhysicsComponent : Component, IComponentDelta
     /// </summary>
     [DataField, Access(typeof(SharedPhysicsSystem), Friend = AccessPermissions.ReadWriteExecute, Other = AccessPermissions.Read)]
     public BodyStatus BodyStatus { get; set; }
-
-    [DataField, Access(typeof(SharedPhysicsSystem))]
-    public bool IgnoreGravity;
 
     [ViewVariables, Access(typeof(SharedPhysicsSystem))]
     public bool Predict;

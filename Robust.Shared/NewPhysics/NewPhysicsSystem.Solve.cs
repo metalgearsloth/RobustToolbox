@@ -4,6 +4,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Robust.Shared.Collections;
 using Robust.Shared.Maths;
+using Robust.Shared.NewPhysics.Bodies;
 using Robust.Shared.NewPhysics.Contacts;
 using Robust.Shared.NewPhysics.Joints;
 using Robust.Shared.NewPhysics.Solver;
@@ -30,11 +31,6 @@ public sealed partial class NewPhysicsSystem
 
             ValidateNoEnlarged();
             return;
-        }
-
-        // TODO: Update awakebodyset bodysims
-        {
-            throw new NotImplementedException();
         }
 
         // Solve constraints using graph coloring
@@ -934,6 +930,387 @@ public sealed partial class NewPhysicsSystem
         }
     }
 
+    #define B2_MAX_CONTINUOUS_SENSOR_HITS 8
+
+struct b2ContinuousContext
+{
+	b2World* world;
+	b2BodySim* fastBodySim;
+	b2Shape* fastShape;
+	b2Vec2 centroid1, centroid2;
+	b2Sweep sweep;
+	float fraction;
+	b2SensorHit sensorHits[B2_MAX_CONTINUOUS_SENSOR_HITS];
+	float sensorFractions[B2_MAX_CONTINUOUS_SENSOR_HITS];
+	int sensorCount;
+};
+
+#define B2_CORE_FRACTION 0.25f
+
+// This is called from b2DynamicTree_Query for continuous collision
+static bool b2ContinuousQueryCallback( int proxyId, uint64_t userData, void* context )
+{
+	B2_UNUSED( proxyId );
+
+	int shapeId = (int)userData;
+
+	struct b2ContinuousContext* continuousContext = context;
+	b2Shape* fastShape = continuousContext->fastShape;
+	b2BodySim* fastBodySim = continuousContext->fastBodySim;
+
+	B2_ASSERT( fastShape->sensorIndex == B2_NULL_INDEX );
+
+	// Skip same shape
+	if ( shapeId == fastShape->id )
+	{
+		return true;
+	}
+
+	b2World* world = continuousContext->world;
+
+	b2Shape* shape = b2ShapeArray_Get( &world->shapes, shapeId );
+
+	// Skip same body
+	if ( shape->bodyId == fastShape->bodyId )
+	{
+		return true;
+	}
+
+	bool isSensor = shape->sensorIndex != B2_NULL_INDEX;
+
+	// Skip sensors unless the shapes want sensor events
+	if ( isSensor && ( shape->enableSensorEvents == false || fastShape->enableSensorEvents == false ) )
+	{
+		return true;
+	}
+
+	// Skip filtered shapes
+	bool canCollide = b2ShouldShapesCollide( fastShape->filter, shape->filter );
+	if ( canCollide == false )
+	{
+		return true;
+	}
+
+	b2Body* body = b2BodyArray_Get( &world->bodies, shape->bodyId );
+
+	b2BodySim* bodySim = b2GetBodySim( world, body );
+	B2_ASSERT( body->type == b2_staticBody || ( fastBodySim->flags & b2_isBullet ) );
+
+	// Skip bullets
+	if ( bodySim->flags & b2_isBullet )
+	{
+		return true;
+	}
+
+	// Skip filtered bodies
+	b2Body* fastBody = b2BodyArray_Get( &world->bodies, fastBodySim->bodyId );
+	canCollide = b2ShouldBodiesCollide( world, fastBody, body );
+	if ( canCollide == false )
+	{
+		return true;
+	}
+
+	// Custom user filtering
+	if ( shape->enableCustomFiltering || fastShape->enableCustomFiltering )
+	{
+		b2CustomFilterFcn* customFilterFcn = world->customFilterFcn;
+		if ( customFilterFcn != NULL )
+		{
+			b2ShapeId idA = { shape->id + 1, world->worldId, shape->generation };
+			b2ShapeId idB = { fastShape->id + 1, world->worldId, fastShape->generation };
+			canCollide = customFilterFcn( idA, idB, world->customFilterContext );
+			if ( canCollide == false )
+			{
+				return true;
+			}
+		}
+	}
+
+	// Early out on fast parallel movement over a chain shape.
+	if ( shape->type == b2_chainSegmentShape )
+	{
+		b2Transform transform = bodySim->transform;
+		b2Vec2 p1 = b2TransformPoint( transform, shape->chainSegment.segment.point1 );
+		b2Vec2 p2 = b2TransformPoint( transform, shape->chainSegment.segment.point2 );
+		b2Vec2 e = b2Sub( p2, p1 );
+		float length;
+		e = b2GetLengthAndNormalize( &length, e );
+		if ( length > B2_LINEAR_SLOP )
+		{
+			b2Vec2 c1 = continuousContext->centroid1;
+			float separation1 = b2Cross( b2Sub( c1, p1 ), e );
+			b2Vec2 c2 = continuousContext->centroid2;
+			float separation2 = b2Cross( b2Sub( c2, p1 ), e );
+
+			float coreDistance = B2_CORE_FRACTION * fastBodySim->minExtent;
+
+			if ( separation1 < 0.0f || ( separation1 - separation2 < coreDistance && separation2 > coreDistance ) )
+			{
+				// Minimal clipping
+				return true;
+			}
+		}
+	}
+
+	// todo_erin testing early out for segments
+#if 0
+	if ( shape->type == b2_segmentShape )
+	{
+		b2Transform transform = bodySim->transform;
+		b2Vec2 p1 = b2TransformPoint( transform, shape->segment.point1 );
+		b2Vec2 p2 = b2TransformPoint( transform, shape->segment.point2 );
+		b2Vec2 e = b2Sub( p2, p1 );
+		b2Vec2 c1 = continuousContext->centroid1;
+		b2Vec2 c2 = continuousContext->centroid2;
+		float offset1 = b2Cross( b2Sub( c1, p1 ), e );
+		float offset2 = b2Cross( b2Sub( c2, p1 ), e );
+
+		if ( offset1 > 0.0f && offset2 > 0.0f )
+		{
+			// Started behind or finished in front
+			return true;
+		}
+
+		if ( offset1 < 0.0f && offset2 < 0.0f )
+		{
+			// Started behind or finished in front
+			return true;
+		}
+	}
+#endif
+
+	b2TOIInput input;
+	input.proxyA = b2MakeShapeDistanceProxy( shape );
+	input.proxyB = b2MakeShapeDistanceProxy( fastShape );
+	input.sweepA = b2MakeSweep( bodySim );
+	input.sweepB = continuousContext->sweep;
+	input.maxFraction = continuousContext->fraction;
+
+	b2TOIOutput output = b2TimeOfImpact( &input );
+	if ( isSensor )
+	{
+		// Only accept a sensor hit that is sooner than the current solid hit.
+		if ( output.fraction <= continuousContext->fraction && continuousContext->sensorCount < B2_MAX_CONTINUOUS_SENSOR_HITS )
+		{
+			int index = continuousContext->sensorCount;
+
+			// The hit shape is a sensor
+			b2SensorHit sensorHit = {
+				.sensorId = shape->id,
+				.visitorId = fastShape->id,
+			};
+
+			continuousContext->sensorHits[index] = sensorHit;
+			continuousContext->sensorFractions[index] = output.fraction;
+			continuousContext->sensorCount += 1;
+		}
+	}
+	else
+	{
+		float hitFraction = continuousContext->fraction;
+		bool didHit = false;
+
+		if ( 0.0f < output.fraction && output.fraction < continuousContext->fraction )
+		{
+			hitFraction = output.fraction;
+			didHit = true;
+		}
+		else if ( 0.0f == output.fraction )
+		{
+			// fallback to TOI of a small circle around the fast shape centroid
+			b2Vec2 centroid = b2GetShapeCentroid( fastShape );
+			b2ShapeExtent extent = b2ComputeShapeExtent( fastShape, centroid );
+			float radius = B2_CORE_FRACTION * extent.minExtent;
+			input.proxyB = b2MakeProxy( &centroid, 1, radius );
+			output = b2TimeOfImpact( &input );
+			if ( 0.0f < output.fraction && output.fraction < continuousContext->fraction )
+			{
+				hitFraction = output.fraction;
+				didHit = true;
+			}
+		}
+
+		if ( didHit && ( shape->enablePreSolveEvents || fastShape->enablePreSolveEvents ) && world->preSolveFcn != NULL )
+		{
+			b2ShapeId shapeIdA = { shape->id + 1, world->worldId, shape->generation };
+			b2ShapeId shapeIdB = { fastShape->id + 1, world->worldId, fastShape->generation };
+			didHit = world->preSolveFcn( shapeIdA, shapeIdB, output.point, output.normal, world->preSolveContext );
+		}
+
+		if ( didHit )
+		{
+			fastBodySim->flags |= b2_hadTimeOfImpact;
+			continuousContext->fraction = hitFraction;
+		}
+	}
+
+	// Continue query
+	return true;
+}
+
+static void b2SolveContinuous( b2World* world, int bodySimIndex, b2TaskContext* taskContext )
+{
+	b2TracyCZoneNC( ccd, "CCD", b2_colorDarkGoldenRod, true );
+
+	b2SolverSet* awakeSet = b2SolverSetArray_Get( &world->solverSets, b2_awakeSet );
+	b2BodySim* fastBodySim = b2BodySimArray_Get( &awakeSet->bodySims, bodySimIndex );
+	B2_ASSERT( fastBodySim->flags & b2_isFast );
+
+	b2Sweep sweep = b2MakeSweep( fastBodySim );
+
+	b2Transform xf1;
+	xf1.q = sweep.q1;
+	xf1.p = b2Sub( sweep.c1, b2RotateVector( sweep.q1, sweep.localCenter ) );
+
+	b2Transform xf2;
+	xf2.q = sweep.q2;
+	xf2.p = b2Sub( sweep.c2, b2RotateVector( sweep.q2, sweep.localCenter ) );
+
+	b2DynamicTree* staticTree = world->broadPhase.trees + b2_staticBody;
+	b2DynamicTree* kinematicTree = world->broadPhase.trees + b2_kinematicBody;
+	b2DynamicTree* dynamicTree = world->broadPhase.trees + b2_dynamicBody;
+	b2Body* fastBody = b2BodyArray_Get( &world->bodies, fastBodySim->bodyId );
+
+	struct b2ContinuousContext context = { 0 };
+	context.world = world;
+	context.sweep = sweep;
+	context.fastBodySim = fastBodySim;
+	context.fraction = 1.0f;
+
+	bool isBullet = ( fastBodySim->flags & b2_isBullet ) != 0;
+
+	int shapeId = fastBody->headShapeId;
+	while ( shapeId != B2_NULL_INDEX )
+	{
+		b2Shape* fastShape = b2ShapeArray_Get( &world->shapes, shapeId );
+		shapeId = fastShape->nextShapeId;
+
+		context.fastShape = fastShape;
+		context.centroid1 = b2TransformPoint( xf1, fastShape->localCentroid );
+		context.centroid2 = b2TransformPoint( xf2, fastShape->localCentroid );
+
+		b2AABB box1 = fastShape->aabb;
+		b2AABB box2 = b2ComputeShapeAABB( fastShape, xf2 );
+
+		// Store this to avoid double computation in the case there is no impact event
+		fastShape->aabb = box2;
+
+		// No continuous collision for sensors (but still need the updated bounds)
+		if ( fastShape->sensorIndex != B2_NULL_INDEX )
+		{
+			continue;
+		}
+
+		b2AABB sweptBox = b2AABB_Union( box1, box2 );
+
+		b2DynamicTree_Query( staticTree, sweptBox, B2_DEFAULT_MASK_BITS, b2ContinuousQueryCallback, &context );
+
+		if ( isBullet )
+		{
+			b2DynamicTree_Query( kinematicTree, sweptBox, B2_DEFAULT_MASK_BITS, b2ContinuousQueryCallback, &context );
+			b2DynamicTree_Query( dynamicTree, sweptBox, B2_DEFAULT_MASK_BITS, b2ContinuousQueryCallback, &context );
+		}
+	}
+
+	const float speculativeDistance = B2_SPECULATIVE_DISTANCE;
+	const float aabbMargin = B2_AABB_MARGIN;
+
+	if ( context.fraction < 1.0f )
+	{
+		// Handle time of impact event
+		b2Rot q = b2NLerp( sweep.q1, sweep.q2, context.fraction );
+		b2Vec2 c = b2Lerp( sweep.c1, sweep.c2, context.fraction );
+		b2Vec2 origin = b2Sub( c, b2RotateVector( q, sweep.localCenter ) );
+
+		// Advance body
+		b2Transform transform = { origin, q };
+		fastBodySim->transform = transform;
+		fastBodySim->center = c;
+		fastBodySim->rotation0 = q;
+		fastBodySim->center0 = c;
+
+		// Update body move event
+		b2BodyMoveEvent* event = b2BodyMoveEventArray_Get( &world->bodyMoveEvents, bodySimIndex );
+		event->transform = transform;
+
+		// Prepare AABBs for broad-phase.
+		// Even though a body is fast, it may not move much. So the AABB may not need enlargement.
+
+		shapeId = fastBody->headShapeId;
+		while ( shapeId != B2_NULL_INDEX )
+		{
+			b2Shape* shape = b2ShapeArray_Get( &world->shapes, shapeId );
+
+			// Must recompute aabb at the interpolated transform
+			b2AABB aabb = b2ComputeShapeAABB( shape, transform );
+			aabb.lowerBound.x -= speculativeDistance;
+			aabb.lowerBound.y -= speculativeDistance;
+			aabb.upperBound.x += speculativeDistance;
+			aabb.upperBound.y += speculativeDistance;
+			shape->aabb = aabb;
+
+			if ( b2AABB_Contains( shape->fatAABB, aabb ) == false )
+			{
+				b2AABB fatAABB;
+				fatAABB.lowerBound.x = aabb.lowerBound.x - aabbMargin;
+				fatAABB.lowerBound.y = aabb.lowerBound.y - aabbMargin;
+				fatAABB.upperBound.x = aabb.upperBound.x + aabbMargin;
+				fatAABB.upperBound.y = aabb.upperBound.y + aabbMargin;
+				shape->fatAABB = fatAABB;
+
+				shape->enlargedAABB = true;
+				fastBodySim->flags |= b2_enlargeBounds;
+			}
+
+			shapeId = shape->nextShapeId;
+		}
+	}
+	else
+	{
+		// No time of impact event
+
+		// Advance body
+		fastBodySim->rotation0 = fastBodySim->transform.q;
+		fastBodySim->center0 = fastBodySim->center;
+
+		// Prepare AABBs for broad-phase
+		shapeId = fastBody->headShapeId;
+		while ( shapeId != B2_NULL_INDEX )
+		{
+			b2Shape* shape = b2ShapeArray_Get( &world->shapes, shapeId );
+
+			// shape->aabb is still valid from above
+
+			if ( b2AABB_Contains( shape->fatAABB, shape->aabb ) == false )
+			{
+				b2AABB fatAABB;
+				fatAABB.lowerBound.x = shape->aabb.lowerBound.x - aabbMargin;
+				fatAABB.lowerBound.y = shape->aabb.lowerBound.y - aabbMargin;
+				fatAABB.upperBound.x = shape->aabb.upperBound.x + aabbMargin;
+				fatAABB.upperBound.y = shape->aabb.upperBound.y + aabbMargin;
+				shape->fatAABB = fatAABB;
+
+				shape->enlargedAABB = true;
+				fastBodySim->flags |= b2_enlargeBounds;
+			}
+
+			shapeId = shape->nextShapeId;
+		}
+	}
+
+	// Push sensor hits on the the task context for serial processing.
+	for ( int i = 0; i < context.sensorCount; ++i )
+	{
+		// Skip any sensor hits that occurred after a solid hit
+		if ( context.sensorFractions[i] < context.fraction )
+		{
+			b2SensorHitArray_Push( &taskContext->sensorHits, context.sensorHits[i] );
+		}
+	}
+
+	b2TracyCZoneEnd( ccd );
+}
+
     private sealed class FinalizeBodiesJob : IParallelRobustJob
     {
         public int BatchSize => 64;
@@ -978,8 +1355,8 @@ public sealed partial class NewPhysicsSystem
 
             // TODO: Split from above into its own thing
 
-	        b2BodyState* state = states + simIndex;
-		    b2BodySim* sim = sims + simIndex;
+	        ref var state = ref states[simIndex];
+		    ref var sim = ref sims[simIndex];
 
 		    if ( state.flags & b2_lockLinearX )
 		    {
@@ -1000,9 +1377,9 @@ public sealed partial class NewPhysicsSystem
 		    float w = state.angularVelocity;
 
 		    DebugTools.Assert( b2IsValidVec2( v ) );
-		    DebugTools.Assert( b2IsValidFloat( w ) );
+		    DebugTools.Assert( w.IsValid());
 
-		    sim.center = b2Add( sim.center, state.deltaPosition );
+		    sim.center += state.deltaPosition;
 		    sim.transform.q = b2NormalizeRot( b2MulRot( state.deltaRotation, sim.transform.q ) );
 
 		    // Use the velocity of the farthest point on the body to account for rotation.
@@ -1057,7 +1434,7 @@ public sealed partial class NewPhysicsSystem
 				    }
 				    else
 				    {
-					    b2SolveContinuous( world, simIndex, taskContext );
+					    SolveContinuous( world, simIndex, taskContext );
 				    }
 			    }
 			    else
