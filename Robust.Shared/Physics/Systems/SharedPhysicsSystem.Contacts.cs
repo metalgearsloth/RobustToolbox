@@ -50,87 +50,6 @@ namespace Robust.Shared.Physics.Systems;
 
 public abstract partial class SharedPhysicsSystem
 {
-    // TODO: Jesus we should really have a test for this
-    /// <summary>
-    ///     Ordering is under <see cref="ShapeType"/>
-    ///     uses enum to work out which collision evaluation to use.
-    /// </summary>
-    private static Contact.ContactType[,] _registers =
-    {
-       {
-           // Circle register
-           Contact.ContactType.Circle,
-           Contact.ContactType.EdgeAndCircle,
-           Contact.ContactType.PolygonAndCircle,
-           Contact.ContactType.ChainAndCircle,
-       },
-       {
-           // Edge register
-           Contact.ContactType.EdgeAndCircle,
-           Contact.ContactType.NotSupported, // Edge
-           Contact.ContactType.EdgeAndPolygon,
-           Contact.ContactType.NotSupported, // Chain
-       },
-       {
-           // Polygon register
-           Contact.ContactType.PolygonAndCircle,
-           Contact.ContactType.EdgeAndPolygon,
-           Contact.ContactType.Polygon,
-           Contact.ContactType.ChainAndPolygon,
-       },
-       {
-           // Chain register
-           Contact.ContactType.ChainAndCircle,
-           Contact.ContactType.NotSupported, // Edge
-           Contact.ContactType.ChainAndPolygon,
-           Contact.ContactType.NotSupported, // Chain
-       }
-   };
-
-    private int ContactCount => _activeContacts.Count;
-
-    private const int ContactPoolInitialSize = 128;
-    private const int ContactsPerThread = 32;
-
-    private ObjectPool<Contact> _contactPool = default!;
-
-    private readonly LinkedList<Contact> _activeContacts = new();
-
-    private sealed class ContactPoolPolicy : IPooledObjectPolicy<Contact>
-    {
-        private readonly SharedDebugPhysicsSystem _debugPhysicsSystem;
-        private readonly IManifoldManager _manifoldManager;
-
-        public ContactPoolPolicy(SharedDebugPhysicsSystem debugPhysicsSystem, IManifoldManager manifoldManager)
-        {
-            _debugPhysicsSystem = debugPhysicsSystem;
-            _manifoldManager = manifoldManager;
-        }
-
-        public Contact Create()
-        {
-            var contact = new Contact(_manifoldManager);
-#if DEBUG
-            contact._debugPhysics = _debugPhysicsSystem;
-#endif
-            contact.Manifold = new Manifold();
-
-            return contact;
-        }
-
-        public bool Return(Contact obj)
-        {
-            DebugTools.Assert(obj.Flags is ContactFlags.None or ContactFlags.Deleted);
-            SetContact(obj,
-                false,
-                new Entity<PhysicsComponent?, TransformComponent?>(EntityUid.Invalid, null, null),
-                new Entity<PhysicsComponent?, TransformComponent?>(EntityUid.Invalid, null, null),
-                string.Empty, string.Empty,
-                null, 0,
-                null, 0);
-            return true;
-        }
-    }
 
     private static void SetContact(Contact contact,
         bool enabled,
@@ -263,8 +182,10 @@ public abstract partial class SharedPhysicsSystem
         // Broadphase has already done the faster check for collision mask / layers
         // so no point duplicating
 
-        DebugTools.Assert(!fixtureA.Contacts.ContainsKey(fixtureB));
-        DebugTools.Assert(!fixtureB.Contacts.ContainsKey(fixtureA));
+        var pairKey = GetPairKey(fixtureA.Id, fixtureB.Id);
+
+        DebugTools.Assert(!_pairKeys.Contains(pairKey));
+
         var xformA = entA.Comp2;
         var xformB = entB.Comp2;
 
@@ -281,8 +202,6 @@ public abstract partial class SharedPhysicsSystem
         var fixB = contact.FixtureB!;
         var bodA = contact.BodyA!;
         var bodB = contact.BodyB!;
-
-        var pairKey = GetPairKey(fixtureA.Id, fixtureB.Id);
 
         _pairKeys.Add(pairKey);
 

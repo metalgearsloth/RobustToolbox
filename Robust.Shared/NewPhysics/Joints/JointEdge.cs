@@ -5,9 +5,9 @@ namespace Robust.Shared.NewPhysics.Joints;
 /// is an edge. A joint edge belongs to a doubly linked list
 /// maintained in each attached body. Each joint has two joint
 /// nodes, one for each attached body.
-internal record struct b2JointEdge
+internal record struct JointEdge
 {
-    public  int bodyId;
+    public int bodyId;
     public int prevKey;
     public int nextKey;
 }

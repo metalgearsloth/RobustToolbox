@@ -20,11 +20,6 @@ namespace Robust.Shared.Physics
         public IBroadPhase StaticTree = new DynamicTreeBroadPhase();
 
         /// <summary>
-        /// Stores all other non-static entities not in another tree.
-        /// </summary>
-        public DynamicTree<EntityUid> SundriesTree = default!;
-
-        /// <summary>
         /// Stores all other static entities not in another tree.
         /// </summary>
         public DynamicTree<EntityUid> StaticSundriesTree = default!;

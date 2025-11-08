@@ -91,7 +91,6 @@ namespace Robust.Shared.Physics.Systems
         {
             component.StaticTree.Rebuild(fullBuild);
             component.DynamicTree.Rebuild(fullBuild);
-            component.SundriesTree._b2Tree.Rebuild(fullBuild);
             component.StaticSundriesTree._b2Tree.Rebuild(fullBuild);
         }
 
@@ -99,7 +98,6 @@ namespace Robust.Shared.Physics.Systems
         {
             component.StaticTree.RebuildBottomUp();
             component.DynamicTree.RebuildBottomUp();
-            component.SundriesTree._b2Tree.RebuildBottomUp();
             component.StaticSundriesTree._b2Tree.RebuildBottomUp();
         }
 
@@ -534,6 +532,15 @@ namespace Robust.Shared.Physics.Systems
                 return;
 
             TouchProxies(fixture);
+        }
+
+        internal void DestroyShapeProxy(Fixture shape)
+        {
+            if (shape.ProxyKey == PhysicsConstants.NullIndex) return;
+
+            DebugTools.Assert(shape.Broadphase != null);
+            shape.Broadphase.RemoveProxy(shape.ProxyKey);
+            shape.ProxyKey = DynamicTree.Proxy.Free;
         }
 
         internal void GetBroadphases(MapId mapId, Box2 aabb, BroadphaseCallback callback)

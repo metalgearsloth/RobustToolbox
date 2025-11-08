@@ -9,25 +9,144 @@ namespace Robust.Shared.NewPhysics;
 
 public sealed partial class NewPhysicsSystem
 {
+    private void DestroyJointInternal(BaseJoint joint, bool wakeBodies)
+    {
+	    int jointId = joint.JointId;
+
+	    ref var edgeA = ref joint.Edges._00;
+	    ref var edgeB = ref joint.Edges._01;
+
+	    int idA = edgeA.bodyId;
+	    int idB = edgeB.bodyId;
+	    var bodyA = _bodies[idA];
+	    var bodyB = _bodies[idB];
+
+	    // Remove from body A
+	    if (edgeA.prevKey != PhysicsConstants.NullIndex)
+	    {
+		    var prevJoint = _joints[edgeA.prevKey >> 1];
+		    ref var prevEdge = ref prevJoint.Edges.AsSpan[edgeA.prevKey & 1];
+		    prevEdge.nextKey = edgeA.nextKey;
+	    }
+
+	    if (edgeA.nextKey != PhysicsConstants.NullIndex)
+	    {
+		    var nextJoint = _joints[edgeA.nextKey >> 1];
+		    ref var nextEdge = ref nextJoint.Edges.AsSpan[edgeA.nextKey & 1];
+		    nextEdge.prevKey = edgeA.prevKey;
+	    }
+
+	    int edgeKeyA = ( jointId << 1 ) | 0;
+	    if (bodyA.Comp.headJointKey == edgeKeyA)
+	    {
+		    bodyA.Comp.headJointKey = edgeA.nextKey;
+	    }
+
+	    bodyA.Comp.JointCount -= 1;
+
+	    // Remove from body B
+	    if (edgeB.prevKey != PhysicsConstants.NullIndex)
+	    {
+		    var prevJoint = _joints[edgeB.prevKey >> 1];
+		    var prevEdge = prevJoint.Edges.AsSpan[edgeB.prevKey & 1];
+		    prevEdge.nextKey = edgeB.nextKey;
+	    }
+
+	    if ( edgeB.nextKey != PhysicsConstants.NullIndex )
+	    {
+		    var nextJoint = _joints[edgeB.nextKey >> 1];
+		    var nextEdge = nextJoint.Edges.AsSpan[edgeB.nextKey & 1];
+		    nextEdge.prevKey = edgeB.prevKey;
+	    }
+
+	    int edgeKeyB = ( jointId << 1 ) | 1;
+	    if ( bodyB.Comp.headJointKey == edgeKeyB )
+	    {
+		    bodyB.Comp.headJointKey = edgeB.nextKey;
+	    }
+
+	    bodyB.Comp.JointCount -= 1;
+
+	    if ( joint.IslandId != PhysicsConstants.NullIndex )
+	    {
+		    DebugTools.Assert( joint.SetIndex > (int) SetType.DisabledSet );
+		    UnlinkJoint(joint);
+	    }
+	    else
+	    {
+		    DebugTools.Assert(joint.SetIndex <= (int) SetType.DisabledSet);
+	    }
+
+	    // Remove joint from solver set that owns it
+	    int setIndex = joint.SetIndex;
+	    int localIndex = joint.LocalIndex;
+
+	    if ( setIndex == (int) SetType.AwakeSet)
+	    {
+		    RemoveJointFromGraph(joint.Edges._00.bodyId, joint.Edges._01.bodyId, joint.ColorIndex, localIndex );
+	    }
+	    else
+	    {
+		    var set = _solverSets[setIndex];
+		    int movedIndex = b2JointSimArray_RemoveSwap( &set.jointSims, localIndex );
+		    if ( movedIndex != B2_NULL_INDEX )
+		    {
+			    // Fix moved joint
+			    b2JointSim* movedJointSim = set.jointSims.data + localIndex;
+			    int movedId = movedJointSim.jointId;
+			    b2Joint* movedJoint = b2JointArray_Get( &world.joints, movedId );
+			    B2_ASSERT( movedJoint.localIndex == movedIndex );
+			    movedJoint.localIndex = localIndex;
+		    }
+	    }
+
+	    // Free joint and id (preserve joint generation)
+	    joint.setIndex = B2_NULL_INDEX;
+	    joint.localIndex = B2_NULL_INDEX;
+	    joint.colorIndex = B2_NULL_INDEX;
+	    joint.jointId = B2_NULL_INDEX;
+	    b2FreeId( &world.jointIdPool, jointId );
+
+	    if ( wakeBodies )
+	    {
+		    WakeBody(bodyA);
+		    WakeBody(bodyB);
+	    }
+
+	    ValidateSolverSets();
+    }
+
+    public void DestroyJoint(BaseJoint joint, bool wakeAttached)
+    {
+	    DebugTools.Assert(!_locked);
+
+	    if (_locked)
+	    {
+		    return;
+	    }
+
+	    DestroyJointInternal(joint, wakeAttached);
+    }
+
     b2Joint* b2GetJointFullId( b2World* world, b2JointId jointId )
     {
         int id = jointId.index1 - 1;
-        b2Joint* joint = b2JointArray_Get( &world->joints, id );
-        B2_ASSERT( joint->jointId == id && joint->generation == jointId.generation );
+        b2Joint* joint = b2JointArray_Get( &world.joints, id );
+        B2_ASSERT( joint.jointId == id && joint.generation == jointId.generation );
         return joint;
     }
 
     b2JointSim* b2GetJointSim( b2World* world, b2Joint* joint )
     {
-        if ( joint->setIndex == b2_awakeSet )
+        if ( joint.setIndex == b2_awakeSet )
         {
-            B2_ASSERT( 0 <= joint->colorIndex && joint->colorIndex < B2_GRAPH_COLOR_COUNT );
-            b2GraphColor* color = world->constraintGraph.colors + joint->colorIndex;
-            return b2JointSimArray_Get( &color->jointSims, joint->localIndex );
+            B2_ASSERT( 0 <= joint.colorIndex && joint.colorIndex < B2_GRAPH_COLOR_COUNT );
+            b2GraphColor* color = world.constraintGraph.colors + joint.colorIndex;
+            return b2JointSimArray_Get( &color.jointSims, joint.localIndex );
         }
 
-        b2SolverSet* set = b2SolverSetArray_Get( &world->solverSets, joint->setIndex );
-        return b2JointSimArray_Get( &set->jointSims, joint->localIndex );
+        b2SolverSet* set = b2SolverSetArray_Get( &world.solverSets, joint.setIndex );
+        return b2JointSimArray_Get( &set.jointSims, joint.localIndex );
     }
 
     private void GetJointReaction(ref JointSim sim, float invTimeStep, ref float force, ref float torque)

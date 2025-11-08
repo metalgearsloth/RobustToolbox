@@ -13,6 +13,7 @@ using Robust.Shared.NewPhysics.Sensors;
 using Robust.Shared.NewPhysics.Solver;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Physics.Dynamics;
+using Robust.Shared.Physics.Systems;
 using Robust.Shared.Threading;
 using Robust.Shared.Utility;
 
@@ -37,6 +38,7 @@ public sealed partial class NewPhysicsSystem : EntitySystem
     // TODO: Check generations on contacts + bodies + ids.
 
     [Dependency] private readonly IParallelManager _parallel = default!;
+    [Dependency] private readonly SharedBroadphaseSystem _broadphase = default!;
     [Dependency] private readonly SharedTransformSystem XformSystem = default!;
 
     private InitializeTransformsJob _initTransformsJob = default!;

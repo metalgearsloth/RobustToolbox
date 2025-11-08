@@ -13,12 +13,6 @@ public abstract partial class SharedPhysicsSystem
     // Will get expanded as v3 gets ported but for now just handles fixture tracking.
     internal Fixture AddWorldFixture()
     {
-        // P1 id pool + fixtures and figuring out a way to do it.
-        //
-
-        // TODO: Addddd solver sets
-        // - Port cancollide
-
         var fixture = new Fixture();
         AddWorldFixture(fixture);
         return fixture;
@@ -26,7 +20,7 @@ public abstract partial class SharedPhysicsSystem
 
     internal void AddWorldFixture(Fixture fixture)
     {
-        DebugTools.Assert(fixture.Contacts.Count == 0);
+        DebugTools.Assert(fixture.ContactCount == 0);
         DebugTools.Assert(fixture.Id == 0);
         var id = _shapesPool.AllocId();
 

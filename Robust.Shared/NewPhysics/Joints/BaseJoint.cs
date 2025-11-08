@@ -22,7 +22,7 @@ public abstract partial class BaseJoint
     // PhysicsConstants.NullIndex when slot is free
     internal int LocalIndex;
 
-    internal FixedArray2<b2JointEdge> Edges;
+    internal FixedArray2<JointEdge> Edges;
 
     internal int JointId;
     internal int IslandId;

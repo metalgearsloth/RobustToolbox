@@ -11,8 +11,6 @@ namespace Robust.Shared.NewPhysics;
 
 public sealed partial class NewPhysicsSystem
 {
-    [Dependency] private readonly SharedBroadphaseSystem _broadphase = default!;
-
     private PhysicsProfile _profile = new();
 
     private float _contactSpeed;

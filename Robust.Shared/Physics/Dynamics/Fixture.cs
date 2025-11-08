@@ -21,14 +21,12 @@
 */
 
 using System;
-using System.Collections.Generic;
-using System.Numerics;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Maths;
 using Robust.Shared.NewPhysics;
 using Robust.Shared.Physics.Collision.Shapes;
 using Robust.Shared.Physics.Components;
-using Robust.Shared.Physics.Dynamics.Contacts;
+using Robust.Shared.Physics.Shapes;
 using Robust.Shared.Physics.Systems;
 using Robust.Shared.Serialization;
 using Robust.Shared.Serialization.Manager.Attributes;
@@ -41,6 +39,8 @@ namespace Robust.Shared.Physics.Dynamics
     [DataDefinition]
     public sealed partial class Fixture : IEquatable<Fixture>, ISerializationHooks
     {
+        // TODO: Need fixturestate at this point.
+
         /// <summary>
         /// Index + 1 of this fixture into the physics fixtures.
         /// </summary>
@@ -53,26 +53,32 @@ namespace Robust.Shared.Physics.Dynamics
         [ViewVariables]
         internal int SensorIndex;
 
-        [DataField]
-        public SurfaceMaterial Material = new();
-
-        [DataField]
-        public bool EnableSensorEvents = true;
-
-        [DataField]
-        public bool EnableContactEvents = true;
-
-        [DataField]
-        public bool EnableCustomFiltering = true;
-
-        [DataField]
-        public bool EnableHitEvents = true;
-
-        [DataField]
-        public bool EnablePreSolveEvents = false;
+        [NonSerialized]
+        internal IBroadPhase? Broadphase;
 
         [NonSerialized]
-        public PhysicsComponent Body = default!;
+        internal DynamicTree.Proxy ProxyKey;
+
+        [DataField]
+        public SurfaceMaterial Material { get; internal set; } = new();
+
+        [DataField]
+        public bool EnableSensorEvents { get; internal set; } = true;
+
+        [DataField]
+        public bool EnableContactEvents { get; internal set; } = true;
+
+        [DataField]
+        public bool EnableCustomFiltering { get; internal set; } = true;
+
+        [DataField]
+        public bool EnableHitEvents { get; internal set; } = true;
+
+        [DataField]
+        public bool EnablePreSolveEvents { get; internal set; } = false;
+
+        [field: NonSerialized]
+        public PhysicsComponent Body { get; internal set; } = default!;
 
         [NonSerialized, ViewVariables]
         public Box2 aabb;
@@ -148,13 +154,7 @@ namespace Robust.Shared.Physics.Dynamics
             if (Shape is PhysShapeAabb aabb)
             {
                 var bounds = aabb.LocalBounds;
-                var poly = new PolygonShape();
-                Span<Vector2> verts = stackalloc Vector2[4];
-                verts[0] = bounds.BottomLeft;
-                verts[1] = bounds.BottomRight;
-                verts[2] = bounds.TopRight;
-                verts[3] = bounds.TopLeft;
-                poly.Set(verts, 4);
+                var poly = new Polygon(bounds);
                 Shape = poly;
             }
         }

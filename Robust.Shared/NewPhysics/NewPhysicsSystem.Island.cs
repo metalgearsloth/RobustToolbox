@@ -183,7 +183,7 @@ public sealed partial class NewPhysicsSystem
 
 	    // connect body lists
 	    DebugTools.Assert( big.tailBody != PhysicsConstants.NullIndex );
-	    var tailBody = _bodies[big.tailBody];
+	    var tailBody = _bodies[big.tailBody].Comp;
 	    DebugTools.Assert( tailBody.islandNext == PhysicsConstants.NullIndex );
 	    tailBody.islandNext = small.headBody;
 
@@ -267,6 +267,52 @@ public sealed partial class NewPhysicsSystem
 	    ValidateIsland(bigId);
 
 	    return bigId;
+    }
+
+    private void UnlinkJoint(BaseJoint joint)
+    {
+        if (joint.IslandId == PhysicsConstants.NullIndex)
+        {
+            return;
+        }
+
+        // remove from island
+        int islandId = joint.IslandId;
+        var island = _islands[islandId];
+
+        if (joint.IslandPrev != PhysicsConstants.NullIndex)
+        {
+            var prevJoint = _joints[joint.IslandPrev];
+            DebugTools.Assert( prevJoint.IslandNext == joint.JointId );
+            prevJoint.IslandNext = joint.IslandNext;
+        }
+
+        if (joint.IslandNext != PhysicsConstants.NullIndex)
+        {
+            var nextJoint = _joints[joint.IslandNext];
+            DebugTools.Assert( nextJoint.IslandPrev == joint.JointId );
+            nextJoint.IslandPrev = joint.IslandPrev;
+        }
+
+        if (island.headJoint == joint.JointId)
+        {
+            island.headJoint = joint.IslandNext;
+        }
+
+        if (island.tailJoint == joint.JointId)
+        {
+            island.tailJoint = joint.IslandPrev;
+        }
+
+        DebugTools.Assert(island.jointCount > 0);
+        island.jointCount -= 1;
+        island.constraintRemoveCount += 1;
+
+        joint.IslandId = PhysicsConstants.NullIndex;
+        joint.IslandPrev = PhysicsConstants.NullIndex;
+        joint.IslandNext = PhysicsConstants.NullIndex;
+
+        ValidateIsland(islandId);
     }
 
     // Possible optimizations:
