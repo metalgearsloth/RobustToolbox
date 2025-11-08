@@ -133,7 +133,7 @@ public sealed partial class NewPhysicsSystem
             var awakeSet = System._solverSets[(int)SetType.AwakeSet];
             // TODO: Dump data off of physicscomp
             ref var sim = ref awakeSet.bodySims[index];
-            sim.transform = System.GetPhysicsTransform(sim.body.Owner);
+            sim.Transform = System.GetPhysicsTransform(sim.Body.Owner);
         }
     }
 }

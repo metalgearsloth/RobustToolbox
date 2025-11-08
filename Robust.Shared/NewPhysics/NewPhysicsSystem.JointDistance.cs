@@ -47,10 +47,10 @@ public sealed partial class NewPhysicsSystem
 	    ref var bodySimA = ref setA.bodySims[localIndexA];
 	    ref var bodySimB = ref setB.bodySims[localIndexB];
 
-	    float mA = bodySimA.invMass;
-	    float iA = bodySimA.invInertia;
-	    float mB = bodySimB.invMass;
-	    float iB = bodySimB.invInertia;
+	    float mA = bodySimA.InvMass;
+	    float iA = bodySimA.InvInertia;
+	    float mB = bodySimB.InvMass;
+	    float iB = bodySimB.InvInertia;
 
 	    sim.invMassA = mA;
 	    sim.invMassB = mB;
@@ -63,9 +63,9 @@ public sealed partial class NewPhysicsSystem
 	    joint.IndexB = bodyB.SetIndex == (int) SetType.AwakeSet ? localIndexB : PhysicsConstants.NullIndex;
 
 	    // initial anchors in world space
-	    joint.AnchorA = Quaternion2D.RotateVector( bodySimA.transform.Quaternion2D, sim.localFrameA.Position - bodySimA.localCenter );
-	    joint.AnchorB = Quaternion2D.RotateVector( bodySimB.transform.Quaternion2D, sim.localFrameB.Position - bodySimB.localCenter );
-	    joint.DeltaCenter = bodySimB.center - bodySimA.center;
+	    joint.AnchorA = Quaternion2D.RotateVector( bodySimA.Transform.Quaternion2D, sim.localFrameA.Position - bodySimA.LocalCenter );
+	    joint.AnchorB = Quaternion2D.RotateVector( bodySimB.Transform.Quaternion2D, sim.localFrameB.Position - bodySimB.LocalCenter );
+	    joint.DeltaCenter = bodySimB.Center - bodySimA.Center;
 
 	    var rA = joint.AnchorA;
 	    var rB = joint.AnchorB;
@@ -117,14 +117,14 @@ public sealed partial class NewPhysicsSystem
 
 	    if ((stateA.flags & (uint) BodyFlags.b2_dynamicFlag) != 0x0)
 	    {
-		    stateA.linearVelocity = Vector2Helpers.MulSub( stateA.linearVelocity, mA, P );
-		    stateA.angularVelocity -= iA * Vector2Helpers.Cross( rA, P );
+		    stateA.LinearVelocity = Vector2Helpers.MulSub( stateA.LinearVelocity, mA, P );
+		    stateA.AngularVelocity -= iA * Vector2Helpers.Cross( rA, P );
 	    }
 
 	    if ((stateB.flags & (uint) BodyFlags.b2_dynamicFlag) != 0x0)
 	    {
-		    stateB.linearVelocity = Vector2Helpers.MulAdd(stateB.linearVelocity, mB, P);
-		    stateB.angularVelocity += iB * Vector2Helpers.Cross(rB, P);
+		    stateB.LinearVelocity = Vector2Helpers.MulAdd(stateB.LinearVelocity, mB, P);
+		    stateB.AngularVelocity += iB * Vector2Helpers.Cross(rB, P);
 	    }
     }
 
@@ -144,10 +144,10 @@ public sealed partial class NewPhysicsSystem
 	    var stateA = joint.IndexA == PhysicsConstants.NullIndex ? dummyState : _states[joint.IndexA];
 	    var stateB = joint.IndexB == PhysicsConstants.NullIndex ? dummyState : _states[joint.IndexB];
 
-	    var vA = stateA.linearVelocity;
-	    float wA = stateA.angularVelocity;
-	    var vB = stateB.linearVelocity;
-	    float wB = stateB.angularVelocity;
+	    var vA = stateA.LinearVelocity;
+	    float wA = stateA.AngularVelocity;
+	    var vB = stateB.LinearVelocity;
+	    float wB = stateB.AngularVelocity;
 
 	    // current anchors
 	    var rA = Quaternion2D.RotateVector( stateA.deltaRotation, joint.AnchorA );
@@ -307,14 +307,14 @@ public sealed partial class NewPhysicsSystem
 
 	    if ((stateA.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0)
 	    {
-		    stateA.linearVelocity = vA;
-		    stateA.angularVelocity = wA;
+		    stateA.LinearVelocity = vA;
+		    stateA.AngularVelocity = wA;
 	    }
 
 	    if ((stateB.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0)
 	    {
-		    stateB.linearVelocity = vB;
-		    stateB.angularVelocity = wB;
+		    stateB.LinearVelocity = vB;
+		    stateB.AngularVelocity = wB;
 	    }
     }
 }

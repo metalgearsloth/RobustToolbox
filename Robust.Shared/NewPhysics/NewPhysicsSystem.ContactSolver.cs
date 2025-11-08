@@ -146,9 +146,9 @@ public sealed partial class NewPhysicsSystem
             for (var i = 0; i < indices.Length; i++)
             {
                 ref var state = ref states[i];
-                sim.vX.AsSpan[i] = state.linearVelocity.X;
-                sim.vY.AsSpan[i] = state.linearVelocity.Y;
-                sim.w.AsSpan[i] = state.angularVelocity;
+                sim.vX.AsSpan[i] = state.LinearVelocity.X;
+                sim.vY.AsSpan[i] = state.LinearVelocity.Y;
+                sim.w.AsSpan[i] = state.AngularVelocity;
                 sim.flags.AsSpan[i] = state.flags;
                 sim.dpX.AsSpan[i] = state.deltaPosition.X;
                 sim.dpY.AsSpan[i] = state.deltaPosition.Y;
@@ -317,9 +317,9 @@ public sealed partial class NewPhysicsSystem
             for (var i = 0; i < indices.Length; i++)
             {
                 ref var state = ref states[indices[i]];
-                state.linearVelocity.X = simdBody.vX.AsSpan[i];
-                state.linearVelocity.Y = simdBody.vY.AsSpan[i];
-                state.angularVelocity = simdBody.w.AsSpan[i];
+                state.LinearVelocity.X = simdBody.vX.AsSpan[i];
+                state.LinearVelocity.Y = simdBody.vY.AsSpan[i];
+                state.AngularVelocity = simdBody.w.AsSpan[i];
                 state.flags = (uint) simdBody.flags.AsSpan[i];
                 state.deltaPosition.X = simdBody.dpX.AsSpan[i];
                 state.deltaPosition.Y = simdBody.dpY.AsSpan[i];
@@ -387,8 +387,8 @@ public sealed partial class NewPhysicsSystem
 				    if ( indexA != PhysicsConstants.NullIndex )
 				    {
 					    ref var stateA = ref awakeStates[indexA];
-					    vA = stateA.linearVelocity;
-					    wA = stateA.angularVelocity;
+					    vA = stateA.LinearVelocity;
+					    wA = stateA.AngularVelocity;
 				    }
 
 				    var vB = Vector2.Zero;
@@ -398,8 +398,8 @@ public sealed partial class NewPhysicsSystem
 				    if ( indexB != PhysicsConstants.NullIndex )
 				    {
 					    ref var stateB = ref awakeStates[indexB];
-					    vB = stateB.linearVelocity;
-					    wB = stateB.angularVelocity;
+					    vB = stateB.LinearVelocity;
+					    wB = stateB.AngularVelocity;
 				    }
 
                     constraintInvMassA[j] = mA;
@@ -607,8 +607,8 @@ public sealed partial class NewPhysicsSystem
 		    ref var sim = ref sims[i];
 		    ref var state = ref states[i];
 
-		    var v = state.linearVelocity;
-		    float w = state.angularVelocity;
+		    var v = state.LinearVelocity;
+		    float w = state.AngularVelocity;
 
 		    // Apply forces, torque, gravity, and damping
 		    // Apply damping.
@@ -618,15 +618,15 @@ public sealed partial class NewPhysicsSystem
 		    // v2 = exp(-c * dt) * v1
 		    // Pade approximation:
 		    // v2 = v1 * 1 / (1 + c * dt)
-		    float linearDamping = 1.0f / ( 1.0f + h * sim.linearDamping );
-		    float angularDamping = 1.0f / ( 1.0f + h * sim.angularDamping );
+		    float linearDamping = 1.0f / ( 1.0f + h * sim.LinearDamping );
+		    float angularDamping = 1.0f / ( 1.0f + h * sim.AngularDamping );
 
 		    // Gravity scale will be zero for kinematic bodies
-		    float gravityScale = sim.invMass > 0.0f ? sim.gravityScale : 0.0f;
+		    float gravityScale = sim.InvMass > 0.0f ? sim.GravityScale : 0.0f;
 
 		    // lvd = h * im * f + h * g
-		    var linearVelocityDelta = h * sim.invMass * sim.force + (h * gravityScale) * gravity;
-		    float angularVelocityDelta = h * sim.invInertia * sim.torque;
+		    var linearVelocityDelta = h * sim.InvMass * sim.Force + (h * gravityScale) * gravity;
+		    float angularVelocityDelta = h * sim.InvInertia * sim.Torque;
 
 		    v = Vector2Helpers.MulAdd( linearVelocityDelta, linearDamping, v );
 		    w = angularVelocityDelta + angularDamping * w;
@@ -636,15 +636,15 @@ public sealed partial class NewPhysicsSystem
 		    {
 			    float ratio = maxLinearSpeed / v.Length();
 			    v = ratio * v;
-			    sim.flags |= (ushort) BodyFlags.b2_isSpeedCapped;
+			    sim.Flags |= (ushort) BodyFlags.b2_isSpeedCapped;
 		    }
 
 		    // Clamp to max angular speed
-		    if ( w * w > maxAngularSpeedSquared && ( sim.flags & (ushort) BodyFlags.b2_allowFastRotation ) == 0 )
+		    if ( w * w > maxAngularSpeedSquared && ( sim.Flags & (ushort) BodyFlags.b2_allowFastRotation ) == 0 )
 		    {
 			    float ratio = maxAngularSpeed / MathF.Abs( w );
 			    w *= ratio;
-			    sim.flags |= (ushort) BodyFlags.b2_isSpeedCapped;
+			    sim.Flags |= (ushort) BodyFlags.b2_isSpeedCapped;
 		    }
 
 		    if ((state.flags & (ushort) BodyFlags.b2_lockLinearX) != 0x0)
@@ -662,8 +662,8 @@ public sealed partial class NewPhysicsSystem
 			    w = 0.0f;
 		    }
 
-		    state.linearVelocity = v;
-		    state.angularVelocity = w;
+		    state.LinearVelocity = v;
+		    state.AngularVelocity = w;
 	    }
     }
 
@@ -1095,21 +1095,21 @@ public sealed partial class NewPhysicsSystem
 
             if ((state.flags & (ushort) BodyFlags.b2_lockLinearX) != 0x0)
             {
-                state.linearVelocity.X = 0.0f;
+                state.LinearVelocity.X = 0.0f;
             }
 
             if ((state.flags & (ushort) BodyFlags.b2_lockLinearY) != 0x0)
             {
-                state.linearVelocity.Y = 0.0f;
+                state.LinearVelocity.Y = 0.0f;
             }
 
             if ((state.flags & (ushort) BodyFlags.b2_lockAngularZ) != 0x0)
             {
-                state.angularVelocity = 0.0f;
+                state.AngularVelocity = 0.0f;
             }
 
-            state.deltaPosition = Vector2Helpers.MulAdd( state.deltaPosition, h, state.linearVelocity );
-            state.deltaRotation = Quaternion2D.IntegrateRotation( state.deltaRotation, h * state.angularVelocity );
+            state.deltaPosition = Vector2Helpers.MulAdd( state.deltaPosition, h, state.LinearVelocity );
+            state.deltaRotation = Quaternion2D.IntegrateRotation( state.deltaRotation, h * state.AngularVelocity );
         }
     }
 
@@ -1225,8 +1225,8 @@ public sealed partial class NewPhysicsSystem
 		    if ( indexA != PhysicsConstants.NullIndex )
 		    {
 			    ref var stateA = ref awakeStates[indexA];
-			    vA = stateA.linearVelocity;
-			    wA = stateA.angularVelocity;
+			    vA = stateA.LinearVelocity;
+			    wA = stateA.AngularVelocity;
 		    }
 
             var vB = Vector2.Zero;
@@ -1236,8 +1236,8 @@ public sealed partial class NewPhysicsSystem
 		    if ( indexB != PhysicsConstants.NullIndex )
 		    {
 			    ref var stateB = ref awakeStates[indexB];
-			    vB = stateB.linearVelocity;
-			    wB = stateB.angularVelocity;
+			    vB = stateB.LinearVelocity;
+			    wB = stateB.AngularVelocity;
 		    }
 
 		    if ( indexA == PhysicsConstants.NullIndex || indexB == PhysicsConstants.NullIndex )
@@ -1319,10 +1319,10 @@ public sealed partial class NewPhysicsSystem
 		    var stateA = indexA == PhysicsConstants.NullIndex ? dummyState : states[indexA];
             var stateB = indexB == PhysicsConstants.NullIndex ? dummyState : states[indexB];
 
-            var vA = stateA.linearVelocity;
-		    float wA = stateA.angularVelocity;
-            var vB = stateB.linearVelocity;
-		    float wB = stateB.angularVelocity;
+            var vA = stateA.LinearVelocity;
+		    float wA = stateA.AngularVelocity;
+            var vB = stateB.LinearVelocity;
+		    float wB = stateB.AngularVelocity;
 
 		    float mA = constraint.invMassA;
 		    float iA = constraint.invIA;
@@ -1354,15 +1354,15 @@ public sealed partial class NewPhysicsSystem
 
 		    if ( (stateA.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0 )
 		    {
-			    stateA.linearVelocity = vA;
-			    stateA.angularVelocity = wA;
+			    stateA.LinearVelocity = vA;
+			    stateA.AngularVelocity = wA;
                 states[indexA] = stateA;
 		    }
 
 		    if ( (stateB.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0 )
 		    {
-			    stateB.linearVelocity = vB;
-			    stateB.angularVelocity = wB;
+			    stateB.LinearVelocity = vB;
+			    stateB.AngularVelocity = wB;
                 states[indexB] = stateB;
 		    }
 	    }
@@ -1392,13 +1392,13 @@ public sealed partial class NewPhysicsSystem
 		    float iB = constraint.invIB;
 
 		    var stateA = constraint.indexA == PhysicsConstants.NullIndex ? dummyState : states[constraint.indexA];
-            var vA = stateA.linearVelocity;
-		    float wA = stateA.angularVelocity;
+            var vA = stateA.LinearVelocity;
+		    float wA = stateA.AngularVelocity;
             var dqA = stateA.deltaRotation;
 
 		    var stateB = constraint.indexB == PhysicsConstants.NullIndex ? dummyState : states[constraint.indexB];
-            var vB = stateB.linearVelocity;
-		    float wB = stateB.angularVelocity;
+            var vB = stateB.LinearVelocity;
+		    float wB = stateB.AngularVelocity;
             var dqB = stateB.deltaRotation;
 
             var dp = stateB.deltaPosition - stateA.deltaPosition;
@@ -1514,15 +1514,15 @@ public sealed partial class NewPhysicsSystem
 
 		    if ( (stateA.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0 )
 		    {
-			    stateA.linearVelocity = vA;
-			    stateA.angularVelocity = wA;
+			    stateA.LinearVelocity = vA;
+			    stateA.AngularVelocity = wA;
                 states[constraint.indexA] = stateA;
             }
 
 		    if ( (stateB.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0 )
 		    {
-			    stateB.linearVelocity = vB;
-			    stateB.angularVelocity = wB;
+			    stateB.LinearVelocity = vB;
+			    stateB.AngularVelocity = wB;
                 states[constraint.indexB] = stateB;
             }
 	    }
@@ -1558,12 +1558,12 @@ public sealed partial class NewPhysicsSystem
 		    float iB = constraint.invIB;
 
 		    var stateA = constraint.indexA == PhysicsConstants.NullIndex ? dummyState : states[constraint.indexA];
-            var vA = stateA.linearVelocity;
-		    float wA = stateA.angularVelocity;
+            var vA = stateA.LinearVelocity;
+		    float wA = stateA.AngularVelocity;
 
 		    var stateB = constraint.indexB == PhysicsConstants.NullIndex ? dummyState : states[constraint.indexB];
-		    var vB = stateB.linearVelocity;
-		    float wB = stateB.angularVelocity;
+		    var vB = stateB.LinearVelocity;
+		    float wB = stateB.AngularVelocity;
 
             var normal = constraint.normal;
 		    int pointCount = constraint.pointCount;
@@ -1616,15 +1616,15 @@ public sealed partial class NewPhysicsSystem
 
 		    if ( (stateA.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0 )
 		    {
-			    stateA.linearVelocity = vA;
-			    stateA.angularVelocity = wA;
+			    stateA.LinearVelocity = vA;
+			    stateA.AngularVelocity = wA;
                 states[constraint.indexA] = stateA;
 		    }
 
 		    if ( (stateB.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0 )
 		    {
-			    stateB.linearVelocity = vB;
-			    stateB.angularVelocity = wB;
+			    stateB.LinearVelocity = vB;
+			    stateB.AngularVelocity = wB;
                 states[constraint.indexB] = stateB;
 		    }
 	    }

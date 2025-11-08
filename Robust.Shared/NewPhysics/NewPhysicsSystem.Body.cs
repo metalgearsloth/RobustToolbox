@@ -12,13 +12,13 @@ public sealed partial class NewPhysicsSystem
 {
     private bool IsValid(in BodyId id)
     {
-        if ( id.index1 < 1 || _bodies.Count < id.index1 )
+        if ( id.Index1 < 1 || _bodies.Count < id.Index1 )
         {
             // invalid index
             return false;
         }
 
-        var ent = _bodies[id.index1 - 1];
+        var ent = _bodies[id.Index1 - 1];
         var body = ent.Comp;
 
         if ( body.SetIndex == PhysicsConstants.NullIndex )
@@ -41,7 +41,7 @@ public sealed partial class NewPhysicsSystem
     private Entity<PhysicsComponent> GetBodyFullId(BodyId bodyId)
     {
         DebugTools.Assert(IsValid(bodyId));
-        return _bodies[bodyId.index1 - 1];
+        return _bodies[bodyId.Index1 - 1];
     }
 
     private BodyId MakeBodyId(int bodyId)
@@ -49,7 +49,7 @@ public sealed partial class NewPhysicsSystem
         var body = _bodies[bodyId];
         return new BodyId()
         {
-            index1 = bodyId + 1,
+            Index1 = bodyId + 1,
             Uid = body.Owner,
         };
     }

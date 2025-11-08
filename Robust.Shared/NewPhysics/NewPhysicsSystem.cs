@@ -71,7 +71,6 @@ public sealed partial class NewPhysicsSystem : EntitySystem
     // Box2D cheats with joints because it uses a union.
 
     private readonly List<Sensor> _sensors = new();
-    private readonly List<Entity<PhysicsComponent>> _bodies = new();
     private readonly List<b2Contact> _contacts = new();
     private readonly List<Island> _islands = new();
     private readonly List<Fixture> _shapes = new();

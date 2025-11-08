@@ -34,24 +34,23 @@ internal record struct BodyState
 {
     public static readonly BodyState Identity = new()
     {
-        linearVelocity = Vector2.Zero,
-        angularVelocity = 0f,
+        LinearVelocity = Vector2.Zero,
+        AngularVelocity = 0f,
         flags = 0,
         deltaPosition = Vector2.Zero,
         deltaRotation = new(1f, 0f),
     };
 
     [FieldOffset(sizeof(float) * 0)]
-    public Vector2 linearVelocity;
+    public Vector2 LinearVelocity;
 
     [FieldOffset(sizeof(float) * 2)]
-    public float angularVelocity;
+    public float AngularVelocity;
 
-    // b2BodyFlags
     // Important flags: locking, dynamic
     // I know it's a uint but 32 bits is 32 bits.
     [FieldOffset(sizeof(float) * 3)]
-    public uint flags;
+    public BodyFlags flags;
 
     // Using delta position reduces round-off error far from the origin
     [FieldOffset(sizeof(float) * 4)]

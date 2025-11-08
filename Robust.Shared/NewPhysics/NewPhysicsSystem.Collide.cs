@@ -75,18 +75,18 @@ public sealed partial class NewPhysicsSystem
 
 			    // avoid cache misses in b2PrepareContactsTask
 			    contactSim.bodySimIndexA = bodyA.SetIndex == (int) SetType.AwakeSet ? bodyA.LocalIndex : PhysicsConstants.NullIndex;
-			    contactSim.invMassA = bodySimA.invMass;
-			    contactSim.invIA = bodySimA.invInertia;
+			    contactSim.invMassA = bodySimA.InvMass;
+			    contactSim.invIA = bodySimA.InvInertia;
 
 			    contactSim.bodySimIndexB = bodyB.SetIndex == (int) SetType.AwakeSet ? bodyB.LocalIndex : PhysicsConstants.NullIndex;
-			    contactSim.invMassB = bodySimB.invMass;
-			    contactSim.invIB = bodySimB.invInertia;
+			    contactSim.invMassB = bodySimB.InvMass;
+			    contactSim.invIB = bodySimB.InvInertia;
 
-			    var transformA = bodySimA.transform;
-			    var transformB = bodySimB.transform;
+			    var transformA = bodySimA.Transform;
+			    var transformB = bodySimB.Transform;
 
-                var centerOffsetA = Quaternion2D.RotateVector(transformA.Quaternion2D, bodySimA.localCenter);
-                var centerOffsetB = Quaternion2D.RotateVector(transformB.Quaternion2D, bodySimB.localCenter);
+                var centerOffsetA = Quaternion2D.RotateVector(transformA.Quaternion2D, bodySimA.LocalCenter);
+                var centerOffsetB = Quaternion2D.RotateVector(transformB.Quaternion2D, bodySimB.LocalCenter);
 
 			    // This updates solid contacts
 			    bool touching =
@@ -818,8 +818,8 @@ public sealed partial class NewPhysicsSystem
 		    newContact.bodySimIndexA = localIndex;
 
 		    ref var bodySimA = ref awakeSims[localIndex];
-		    newContact.invMassA = bodySimA.invMass;
-		    newContact.invIA = bodySimA.invInertia;
+		    newContact.invMassA = bodySimA.InvMass;
+		    newContact.invIA = bodySimA.InvInertia;
 	    }
 
 	    if (typeB == BodyType.Static)
@@ -838,8 +838,8 @@ public sealed partial class NewPhysicsSystem
 		    newContact.bodySimIndexB = localIndex;
 
 		    ref var bodySimB = ref awakeSims[localIndex];
-		    newContact.invMassB = bodySimB.invMass;
-		    newContact.invIB = bodySimB.invInertia;
+		    newContact.invMassB = bodySimB.InvMass;
+		    newContact.invIB = bodySimB.InvInertia;
 	    }
     }
 

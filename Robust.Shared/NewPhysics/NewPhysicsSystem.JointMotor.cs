@@ -46,10 +46,10 @@ public sealed partial class NewPhysicsSystem
 	    ref var bodySimA = ref setA.bodySims[localIndexA];
 	    ref var bodySimB = ref setB.bodySims[localIndexB];
 
-	    float mA = bodySimA.invMass;
-	    float iA = bodySimA.invInertia;
-	    float mB = bodySimB.invMass;
-	    float iB = bodySimB.invInertia;
+	    float mA = bodySimA.InvMass;
+	    float iA = bodySimA.InvInertia;
+	    float mB = bodySimB.InvMass;
+	    float iB = bodySimB.InvInertia;
 
 	    sim.invMassA = mA;
 	    sim.invMassB = mB;
@@ -61,13 +61,13 @@ public sealed partial class NewPhysicsSystem
 	    joint.IndexB = bodyB.SetIndex == (int) SetType.AwakeSet ? localIndexB : PhysicsConstants.NullIndex;
 
 	    // Compute joint anchor frames with world space rotation, relative to center of mass
-        joint.frameA.Quaternion2D = bodySimA.transform.Quaternion2D * sim.localFrameA.Quaternion2D;
-	    joint.frameA.Position = Quaternion2D.RotateVector(bodySimA.transform.Quaternion2D, sim.localFrameA.Position - bodySimA.localCenter);
-	    joint.frameB.Quaternion2D = bodySimB.transform.Quaternion2D * sim.localFrameB.Quaternion2D;
-	    joint.frameB.Position = Quaternion2D.RotateVector(bodySimB.transform.Quaternion2D, sim.localFrameB.Position - bodySimB.localCenter);
+        joint.frameA.Quaternion2D = bodySimA.Transform.Quaternion2D * sim.localFrameA.Quaternion2D;
+	    joint.frameA.Position = Quaternion2D.RotateVector(bodySimA.Transform.Quaternion2D, sim.localFrameA.Position - bodySimA.LocalCenter);
+	    joint.frameB.Quaternion2D = bodySimB.Transform.Quaternion2D * sim.localFrameB.Quaternion2D;
+	    joint.frameB.Position = Quaternion2D.RotateVector(bodySimB.Transform.Quaternion2D, sim.localFrameB.Position - bodySimB.LocalCenter);
 
 	    // Compute the initial center delta. Incremental position updates are relative to this.
-	    joint.deltaCenter = bodySimB.center - bodySimA.center;
+	    joint.deltaCenter = bodySimB.Center - bodySimA.Center;
 
 	    var rA = joint.frameA.Position;
 	    var rB = joint.frameB.Position;
@@ -119,14 +119,14 @@ public sealed partial class NewPhysicsSystem
 
 	    if ((stateA.flags & (ushort) BodyFlags.b2_dynamicFlag ) != 0x0)
 	    {
-		    stateA.linearVelocity = Vector2Helpers.MulSub( stateA.linearVelocity, mA, linearImpulse );
-		    stateA.angularVelocity -= iA * ( Vector2Helpers.Cross( rA, linearImpulse ) + angularImpulse );
+		    stateA.LinearVelocity = Vector2Helpers.MulSub( stateA.LinearVelocity, mA, linearImpulse );
+		    stateA.AngularVelocity -= iA * ( Vector2Helpers.Cross( rA, linearImpulse ) + angularImpulse );
 	    }
 
 	    if ((stateB.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0)
 	    {
-		    stateB.linearVelocity = Vector2Helpers.MulAdd( stateB.linearVelocity, mB, linearImpulse );
-		    stateB.angularVelocity += iB * ( Vector2Helpers.Cross( rB, linearImpulse ) + angularImpulse );
+		    stateB.LinearVelocity = Vector2Helpers.MulAdd( stateB.LinearVelocity, mB, linearImpulse );
+		    stateB.AngularVelocity += iB * ( Vector2Helpers.Cross( rB, linearImpulse ) + angularImpulse );
 	    }
     }
 
@@ -146,10 +146,10 @@ public sealed partial class NewPhysicsSystem
 	    var stateA = joint.IndexA == PhysicsConstants.NullIndex ? dummyState : _states[joint.IndexA];
 	    var stateB = joint.IndexB == PhysicsConstants.NullIndex ? dummyState : _states[joint.IndexB];
 
-	    var vA = stateA.linearVelocity;
-	    float wA = stateA.angularVelocity;
-	    var vB = stateB.linearVelocity;
-	    float wB = stateB.angularVelocity;
+	    var vA = stateA.LinearVelocity;
+	    float wA = stateA.AngularVelocity;
+	    var vB = stateB.LinearVelocity;
+	    float wB = stateB.AngularVelocity;
 
 	    // angular spring
 	    if ( joint.maxSpringTorque > 0.0f && joint.angularHertz > 0.0f )
@@ -269,14 +269,14 @@ public sealed partial class NewPhysicsSystem
 
 	    if ((stateA.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0)
 	    {
-		    stateA.linearVelocity = vA;
-		    stateA.angularVelocity = wA;
+		    stateA.LinearVelocity = vA;
+		    stateA.AngularVelocity = wA;
 	    }
 
 	    if ((stateB.flags & (ushort) BodyFlags.b2_dynamicFlag) != 0x0)
 	    {
-		    stateB.linearVelocity = vB;
-		    stateB.angularVelocity = wB;
+		    stateB.LinearVelocity = vB;
+		    stateB.AngularVelocity = wB;
 	    }
     }
 }

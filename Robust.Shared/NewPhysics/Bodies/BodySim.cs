@@ -9,33 +9,32 @@ namespace Robust.Shared.NewPhysics.Bodies;
 internal record struct BodySim
 {
     // transform for body origin
-    public Transform transform;
+    public Transform Transform;
 
     // center of mass position in world space
-    public Vector2 center;
+    public Vector2 Center;
 
     // previous rotation and COM for TOI
-    public Quaternion2D rotation0;
-    public Vector2 center0;
+    public Quaternion2D Rotation0;
+    public Vector2 Center0;
 
     // location of center of mass relative to the body origin
-    public Vector2 localCenter;
+    public Vector2 LocalCenter;
 
-    public Vector2 force;
-    public float torque;
+    public Vector2 Force;
+    public float Torque;
 
     // inverse inertia
-    public float invMass;
-    public float invInertia;
+    public float InvMass;
+    public float InvInertia;
 
-    public float minExtent;
-    public float maxExtent;
-    public float linearDamping;
-    public float angularDamping;
-    public float gravityScale;
+    public float MinExtent;
+    public float MaxExtent;
+    public float LinearDamping;
+    public float AngularDamping;
+    public float GravityScale;
 
-    public PhysicsComponent body;
+    public PhysicsComponent Body;
 
-    // b2BodyFlags
-    public uint flags;
+    public BodyFlags Flags;
 }
