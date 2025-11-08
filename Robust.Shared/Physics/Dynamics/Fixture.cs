@@ -33,7 +33,6 @@ using Robust.Shared.Physics.Systems;
 using Robust.Shared.Serialization;
 using Robust.Shared.Serialization.Manager.Attributes;
 using Robust.Shared.Serialization.TypeSerializers.Implementations.Custom;
-using Robust.Shared.Utility;
 using Robust.Shared.ViewVariables;
 
 namespace Robust.Shared.Physics.Dynamics
@@ -42,8 +41,11 @@ namespace Robust.Shared.Physics.Dynamics
     [DataDefinition]
     public sealed partial class Fixture : IEquatable<Fixture>, ISerializationHooks
     {
-        [NonSerialized]
-        public int Id;
+        /// <summary>
+        /// Index + 1 of this fixture into the physics fixtures.
+        /// </summary>
+        [ViewVariables, NonSerialized]
+        internal int Id;
 
         /// <summary>
         /// If relevant
@@ -175,6 +177,7 @@ namespace Robust.Shared.Physics.Dynamics
             Restitution = restitution;
         }
 
+        [Access(typeof(SharedPhysicsSystem), Friend = AccessPermissions.ReadWriteExecute)]
         public Fixture()
         {
         }

@@ -262,6 +262,7 @@ public abstract partial class SharedPhysicsSystem
     {
         // Broadphase has already done the faster check for collision mask / layers
         // so no point duplicating
+
         DebugTools.Assert(!fixtureA.Contacts.ContainsKey(fixtureB));
         DebugTools.Assert(!fixtureB.Contacts.ContainsKey(fixtureA));
         var xformA = entA.Comp2;
@@ -280,6 +281,10 @@ public abstract partial class SharedPhysicsSystem
         var fixB = contact.FixtureB!;
         var bodA = contact.BodyA!;
         var bodB = contact.BodyB!;
+
+        var pairKey = GetPairKey(fixtureA.Id, fixtureB.Id);
+
+        _pairKeys.Add(pairKey);
 
         // Insert into world
         _activeContacts.AddLast(contact.MapNode);
@@ -347,6 +352,9 @@ public abstract partial class SharedPhysicsSystem
         var aUid = contact.EntityA;
         var bUid = contact.EntityB;
         contact.Flags |= ContactFlags.Deleting;
+        // At least for now we get this here in case either fixture is touched during the event (until we get deferred events).
+        DebugTools.Assert(fixtureA.Id > 0 && fixtureB.Id > 0);
+        var pairKey = GetPairKey(fixtureA.Id, fixtureB.Id);
 
         if (contact.IsTouching)
         {
@@ -372,6 +380,9 @@ public abstract partial class SharedPhysicsSystem
 
         // Remove from the world
         _activeContacts.Remove(contact.MapNode);
+
+        DebugTools.Assert(_pairKeys.Contains(pairKey));
+        _pairKeys.Remove(pairKey);
 
         // Remove from body 1
         DebugTools.Assert(fixtureA.Contacts.ContainsKey(fixtureB));
@@ -421,6 +432,7 @@ public abstract partial class SharedPhysicsSystem
             var bodyB = contact.BodyB!;
             var uidA = contact.EntityA;
             var uidB = contact.EntityB;
+            DebugTools.Assert(fixtureA.Id > 0 && fixtureB.Id > 0);
 
             // Do not try to collide disabled bodies
             if (!bodyA.CanCollide || !bodyB.CanCollide)
