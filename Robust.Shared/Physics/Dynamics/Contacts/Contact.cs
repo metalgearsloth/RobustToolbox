@@ -240,27 +240,7 @@ namespace Robust.Shared.Physics.Dynamics.Contacts
             }
 
             IsTouching = touching;
-            var status = ContactStatus.NoContact;
-
-            if (!wasTouching)
-            {
-                if (touching)
-                {
-                    status = ContactStatus.StartTouching;
-                }
-            }
-            else
-            {
-                if (!touching)
-                {
-                    status = ContactStatus.EndTouching;
-                }
-                // Still touching
-                else
-                {
-                    status = ContactStatus.Touching;
-                }
-            }
+            var status = GetContactStatus(this, wasTouching);
 
 #if DEBUG
             if (!sensor)
@@ -270,6 +250,32 @@ namespace Robust.Shared.Physics.Dynamics.Contacts
 #endif
 
             return status;
+        }
+
+        [Pure]
+        internal static ContactStatus GetContactStatus(Contact contact, bool wasTouching)
+        {
+            if (!wasTouching)
+            {
+                if (contact.IsTouching)
+                {
+                    return ContactStatus.StartTouching;
+                }
+            }
+            else
+            {
+                if (!contact.IsTouching)
+                {
+                    return ContactStatus.EndTouching;
+                }
+                // Still touching
+                else
+                {
+                    return ContactStatus.Touching;
+                }
+            }
+
+            return ContactStatus.NoContact;
         }
 
         /// <summary>
