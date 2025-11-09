@@ -3,13 +3,16 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics.Collision.Shapes;
+using Robust.Shared.Serialization;
 using Robust.Shared.Serialization.Manager.Attributes;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.Physics.Shapes;
 
 // Internal so people don't use it when it will have breaking changes very soon.
-internal record struct Polygon : IPhysShape
+[Serializable, NetSerializable]
+[DataDefinition]
+public partial record struct Polygon : IPhysShape
 {
     [DataField]
     public byte VertexCount { get; internal set; }

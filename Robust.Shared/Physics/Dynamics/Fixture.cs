@@ -28,6 +28,7 @@ using Robust.Shared.Maths;
 using Robust.Shared.Physics.Collision.Shapes;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Physics.Dynamics.Contacts;
+using Robust.Shared.Physics.Shapes;
 using Robust.Shared.Physics.Systems;
 using Robust.Shared.Serialization;
 using Robust.Shared.Serialization.Manager.Attributes;
@@ -55,7 +56,7 @@ namespace Robust.Shared.Physics.Dynamics
         public int ProxyCount = 0;
 
         [DataField("shape")]
-        public IPhysShape Shape { get; private set; } = new PhysShapeAabb();
+        public IPhysShape Shape { get; private set; } = new Polygon(Box2.UnitCentered);
 
         [NonSerialized]
         public EntityUid Owner;
@@ -121,13 +122,7 @@ namespace Robust.Shared.Physics.Dynamics
             if (Shape is PhysShapeAabb aabb)
             {
                 var bounds = aabb.LocalBounds;
-                var poly = new PolygonShape();
-                Span<Vector2> verts = stackalloc Vector2[4];
-                verts[0] = bounds.BottomLeft;
-                verts[1] = bounds.BottomRight;
-                verts[2] = bounds.TopRight;
-                verts[3] = bounds.TopLeft;
-                poly.Set(verts, 4);
+                var poly = new Polygon(bounds);
                 Shape = poly;
             }
         }

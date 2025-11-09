@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics.Collision.Shapes;
+using Robust.Shared.Serialization;
 using Robust.Shared.Serialization.Manager.Attributes;
 using Robust.Shared.Utility;
 
@@ -12,18 +13,20 @@ namespace Robust.Shared.Physics.Shapes;
 /// Polygon backed by FixedArray4 to be smaller.
 /// Useful for internal ops where the inputs are boxes to avoid the additional padding.
 /// </summary>
-internal record struct SlimPolygon : IPhysShape
+[Serializable, NetSerializable]
+[DataDefinition]
+public partial record struct SlimPolygon : IPhysShape
 {
     public Vector2[] Vertices => _vertices.AsSpan[..VertexCount].ToArray();
 
     public Vector2[] Normals => _normals.AsSpan[..VertexCount].ToArray();
 
     [DataField]
-    public FixedArray4<Vector2> _vertices;
+    internal FixedArray4<Vector2> _vertices;
 
-    public FixedArray4<Vector2> _normals;
+    internal FixedArray4<Vector2> _normals;
 
-    public Vector2 Centroid;
+    public Vector2 Centroid { get; internal set; }
 
     public byte VertexCount => 4;
 
@@ -45,6 +48,7 @@ internal record struct SlimPolygon : IPhysShape
         _normals._01 = new Vector2(1.0f, 0.0f);
         _normals._02 = new Vector2(0.0f, 1.0f);
         _normals._03 = new Vector2(-1.0f, 0.0f);
+        Centroid = Vector2.Zero;
     }
 
     public SlimPolygon(Box2Rotated bounds)
