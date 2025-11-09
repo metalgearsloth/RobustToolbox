@@ -87,14 +87,14 @@ public abstract partial class SharedPhysicsSystem
        }
    };
 
-    private int ContactCount => _activeContacts.Count;
+    private int ContactCount => _contacts.Count;
 
     private const int ContactPoolInitialSize = 128;
     private const int ContactsPerThread = 32;
 
     private ObjectPool<Contact> _contactPool = default!;
 
-    private readonly LinkedList<Contact> _activeContacts = new();
+    private readonly List<Contact> _contacts = new();
 
     private sealed class ContactPoolPolicy : IPooledObjectPolicy<Contact>
     {
@@ -121,6 +121,7 @@ public abstract partial class SharedPhysicsSystem
         public bool Return(Contact obj)
         {
             DebugTools.Assert(obj.Flags is ContactFlags.None or ContactFlags.Deleted);
+            obj.Id = 0;
             SetContact(obj,
                 false,
                 new Entity<PhysicsComponent?, TransformComponent?>(EntityUid.Invalid, null, null),
@@ -287,7 +288,8 @@ public abstract partial class SharedPhysicsSystem
         _pairKeys.Add(pairKey);
 
         // Insert into world
-        _activeContacts.AddLast(contact.MapNode);
+        _contacts.Add(contact);
+        contact.Id = _contacts.Count;
 
         // Connect to body A
         DebugTools.Assert(!fixA.Contacts.ContainsKey(fixB));
@@ -365,8 +367,8 @@ public abstract partial class SharedPhysicsSystem
         {
             var ev1 = new EndCollideEvent(aUid, bUid, contact.FixtureAId, contact.FixtureBId, fixtureA, fixtureB, bodyA, bodyB);
             var ev2 = new EndCollideEvent(bUid, aUid, contact.FixtureBId, contact.FixtureAId, fixtureB, fixtureA, bodyB, bodyA);
-            RaiseLocalEvent(aUid, ref ev1);
-            RaiseLocalEvent(bUid, ref ev2);
+            _endCollideEvents[1 - _endEventIndex].Add(ev1);
+            _endCollideEvents[1 - _endEventIndex].Add(ev2);
         }
 
         if (contact.Manifold.PointCount > 0 && contact.FixtureA?.Hard == true && contact.FixtureB?.Hard == true)
@@ -384,7 +386,17 @@ public abstract partial class SharedPhysicsSystem
         next = node?.Next;
 
         // Remove from the world
-        _activeContacts.Remove(contact.MapNode);
+        // - Remove from end
+        if (contact.Id == _contacts.Count)
+        {
+            _contacts.RemoveAt(contact.Id - 1);
+        }
+        // - Update swapped contact
+        else if (_contacts.Count > 0 )
+        {
+            var swapped = _contacts[contact.Id - 1];
+            swapped.Id = contact.Id;
+        }
 
         DebugTools.Assert(_pairKeys.Contains(pairKey));
         _pairKeys.Remove(pairKey);
@@ -412,15 +424,11 @@ public abstract partial class SharedPhysicsSystem
         var contacts = ArrayPool<Contact>.Shared.Rent(ContactCount);
         var index = 0;
 
-        // Can be changed while enumerating
-        // TODO: check for null instead?
-        // Work out which contacts are still valid before we decide to update manifolds.
-        var node = _activeContacts.First;
-
-        while (node != null)
+        // Updating this while enumerating is fine because we're swapping contacts we've already iterated into that slot.
+        // And because events are buffered nothing should be mutating the contacts ahead of us.
+        for (var i = _contacts.Count - 1; i >= 0; i--)
         {
-            var contact = node.Value;
-            node = node.Next;
+            var contact = _contacts[i];
 
             // It's possible the contact was destroyed by content in which case we just skip it.
             if (!contact.Enabled)
@@ -610,6 +618,9 @@ public abstract partial class SharedPhysicsSystem
                     var ev1 = new StartCollideEvent(uidA, uidB, contact.FixtureAId, contact.FixtureBId, fixtureA, fixtureB, bodyA, bodyB, points, contact.Manifold.PointCount, worldNormal);
                     var ev2 = new StartCollideEvent(uidB, uidA, contact.FixtureBId, contact.FixtureAId, fixtureB, fixtureA, bodyB, bodyA, points, contact.Manifold.PointCount, worldNormal);
 
+                    _startCollideEvents.Add(ev1);
+                    _startCollideEvents.Add(ev2);
+
                     RaiseLocalEvent(uidA, ref ev1, true);
                     RaiseLocalEvent(uidB, ref ev2, true);
                     break;
@@ -632,9 +643,8 @@ public abstract partial class SharedPhysicsSystem
 
                     var ev1 = new EndCollideEvent(uidA, uidB, contact.FixtureAId, contact.FixtureBId, fixtureA, fixtureB, bodyA, bodyB);
                     var ev2 = new EndCollideEvent(uidB, uidA, contact.FixtureBId, contact.FixtureAId, fixtureB, fixtureA, bodyB, bodyA);
-
-                    RaiseLocalEvent(uidA, ref ev1);
-                    RaiseLocalEvent(uidB, ref ev2);
+                    _endCollideEvents[1 - _endEventIndex].Add(ev1);
+                    _endCollideEvents[1 - _endEventIndex].Add(ev2);
                     break;
                 }
                 case ContactStatus.NoContact:
