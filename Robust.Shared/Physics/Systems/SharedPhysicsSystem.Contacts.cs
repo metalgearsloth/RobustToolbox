@@ -367,8 +367,8 @@ public abstract partial class SharedPhysicsSystem
         {
             var ev1 = new EndCollideEvent(aUid, bUid, contact.FixtureAId, contact.FixtureBId, fixtureA, fixtureB, bodyA, bodyB);
             var ev2 = new EndCollideEvent(bUid, aUid, contact.FixtureBId, contact.FixtureAId, fixtureB, fixtureA, bodyB, bodyA);
-            _endCollideEvents[1 - _endEventIndex].Add(ev1);
-            _endCollideEvents[1 - _endEventIndex].Add(ev2);
+            _endCollideEvents[_endEventIndex].Add(ev1);
+            _endCollideEvents[_endEventIndex].Add(ev2);
         }
 
         if (contact.Manifold.PointCount > 0 && contact.FixtureA?.Hard == true && contact.FixtureB?.Hard == true)
@@ -651,8 +651,8 @@ public abstract partial class SharedPhysicsSystem
                 var ev1 = new EndCollideEvent(uidA, uidB, contact.FixtureAId, contact.FixtureBId, fixtureA, fixtureB, bodyA, bodyB);
                 var ev2 = new EndCollideEvent(uidB, uidA, contact.FixtureBId, contact.FixtureAId, fixtureB, fixtureA, bodyB, bodyA);
 
-                _endCollideEvents[1 - _endEventIndex].Add(ev1);
-                _endCollideEvents[1 - _endEventIndex].Add(ev2);
+                _endCollideEvents[_endEventIndex].Add(ev1);
+                _endCollideEvents[_endEventIndex].Add(ev2);
                 break;
             }
             case ContactStatus.NoContact:

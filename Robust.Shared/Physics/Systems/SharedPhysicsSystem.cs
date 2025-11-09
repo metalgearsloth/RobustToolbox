@@ -310,7 +310,6 @@ namespace Robust.Shared.Physics.Systems
             EffectiveCurTime = _gameTiming.CurTime;
             for (int i = 0; i < _substeps; i++)
             {
-                ClearEvents();
                 var updateBeforeSolve = new PhysicsUpdateBeforeSolveEvent(prediction, frameTime);
                 RaiseLocalEvent(ref updateBeforeSolve);
 
