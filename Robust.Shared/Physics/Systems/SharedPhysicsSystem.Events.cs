@@ -2,13 +2,13 @@ namespace Robust.Shared.Physics.Systems;
 
 public abstract partial class SharedPhysicsSystem
 {
-    private void ClearEvents()
+    protected void ClearEvents()
     {
         _startCollideEvents.Clear();
         _endCollideEvents[1 - _endEventIndex].Clear();
     }
 
-    private void DispatchEvents()
+    protected void DispatchEvents()
     {
         // Raises all the buffered events once physics step is done.
         foreach (var ev in _startCollideEvents)

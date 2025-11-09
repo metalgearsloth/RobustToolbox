@@ -105,7 +105,10 @@ public sealed partial class PhysicsSystem
             contacts.AddRange(physics.Contacts);
         }
 
+        // Just in case
+        ClearEvents();
         UpdateIsTouching(contacts);
+        DispatchEvents();
     }
 
     /// <summary>
