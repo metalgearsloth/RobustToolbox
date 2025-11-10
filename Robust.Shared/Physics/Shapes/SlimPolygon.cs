@@ -194,4 +194,9 @@ public partial record struct SlimPolygon : IPhysShape
 
         return other is SlimPolygon slim && Equals(slim);
     }
+
+    public static explicit operator Polygon(SlimPolygon slim)
+    {
+        return new Polygon(slim);
+    }
 }

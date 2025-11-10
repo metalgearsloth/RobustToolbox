@@ -175,11 +175,6 @@ public partial record struct Polygon : IPhysShape
         Centroid = ComputeCentroid(vertSpan);
     }
 
-    public static explicit operator Polygon(SlimPolygon slim)
-    {
-        return new Polygon(slim);
-    }
-
     public static explicit operator Polygon(PolygonShape polyShape)
     {
         return new Polygon(polyShape);
