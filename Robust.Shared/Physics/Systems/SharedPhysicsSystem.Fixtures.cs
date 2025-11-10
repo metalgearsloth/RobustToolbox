@@ -5,6 +5,7 @@ using Robust.Shared.IoC;
 using Robust.Shared.Physics.Collision.Shapes;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Physics.Dynamics;
+using Robust.Shared.Physics.Shapes;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.Physics.Systems;
@@ -161,7 +162,34 @@ public abstract partial class SharedPhysicsSystem
                 case PhysShapeCircle circle:
                     SetPositionRadius(ent, id, fixture, circle, circle.Position * factor, circle.Radius * factor, ent.Comp);
                     break;
+                case SlimPolygon slim:
+                {
+                    var verts = slim._vertices.AsSpan;
+
+                    for (var i = 0; i < slim.VertexCount; i++)
+                    {
+                        verts[i] *= factor;
+                    }
+
+                    var hull = new InternalPhysicsHull(verts, slim.VertexCount);
+                    SetVertices(ent, id, fixture, slim, hull, ent.Comp);
+                    break;
+                }
+                case Polygon poly:
+                {
+                    var verts = poly._vertices.AsSpan;
+
+                    for (var i = 0; i < poly.VertexCount; i++)
+                    {
+                        verts[i] *= factor;
+                    }
+
+                    var hull = new InternalPhysicsHull(verts, poly.VertexCount);
+                    SetVertices(ent, id, fixture, poly, hull, ent.Comp);
+                    break;
+                }
                 case PolygonShape poly:
+                {
                     var verts = poly.Vertices;
 
                     for (var i = 0; i < poly.VertexCount; i++)
@@ -169,8 +197,10 @@ public abstract partial class SharedPhysicsSystem
                         verts[i] *= factor;
                     }
 
-                    SetVertices(ent, id, fixture, poly, verts, ent.Comp);
+                    var hull = new InternalPhysicsHull(verts, poly.VertexCount);
+                    SetVertices(ent, id, fixture, poly, hull, ent.Comp);
                     break;
+                }
                 default:
                     throw new NotImplementedException();
             }

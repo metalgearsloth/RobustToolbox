@@ -64,7 +64,10 @@ public partial record struct Polygon : IPhysShape
 
     }
 
-    public Polygon(PhysShapeAabb aabb) : this(aabb.LocalBounds) {}
+    public Polygon(PhysShapeAabb aabb) : this(aabb.LocalBounds)
+    {
+
+    }
 
     public Polygon(Polygon other)
     {
@@ -170,6 +173,11 @@ public partial record struct Polygon : IPhysShape
         vertices.AsSpan().CopyTo(vertSpan);
         Set(hull);
         Centroid = ComputeCentroid(vertSpan);
+    }
+
+    public static explicit operator Polygon(SlimPolygon slim)
+    {
+        return new Polygon(slim);
     }
 
     public static explicit operator Polygon(PolygonShape polyShape)

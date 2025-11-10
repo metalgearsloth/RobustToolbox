@@ -57,7 +57,7 @@ namespace Robust.Shared.Physics.Dynamics
         public int ProxyCount = 0;
 
         [DataField("shape")]
-        public IPhysShape Shape { get; private set; } = new Polygon(Box2.UnitCentered);
+        public IPhysShape Shape { get; internal set; } = new Polygon(Box2.UnitCentered);
 
         [NonSerialized]
         public EntityUid Owner;

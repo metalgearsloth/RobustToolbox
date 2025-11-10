@@ -394,6 +394,9 @@ public sealed partial class RayCastSystem
             case PolygonShape pShape:
                 output = ShapeCastPolygon(localInput, (Polygon) pShape);
                 break;
+            case SlimPolygon slim:
+                output = ShapeCastPolygon(localInput, new Polygon(slim));
+                break;
             case Polygon poly:
                 output = ShapeCastPolygon(localInput, poly);
                 break;
@@ -475,15 +478,14 @@ public sealed partial class RayCastSystem
 	    float maxFraction = input.MaxFraction;
 
 	    // Initial simplex
-	    Simplex simplex;
-        simplex = new()
+        Simplex simplex = new()
         {
             Count = 0,
             V = new FixedArray4<SimplexVertex>()
         };
 
-	    // Get an initial point in A - B
-	    int indexA = FindSupport(proxyA, -r);
+        // Get an initial point in A - B
+        int indexA = FindSupport(proxyA, -r);
 	    var wA = proxyA.Vertices[indexA];
 	    int indexB = FindSupport(proxyB, r);
 	    var wB = proxyB.Vertices[indexB];

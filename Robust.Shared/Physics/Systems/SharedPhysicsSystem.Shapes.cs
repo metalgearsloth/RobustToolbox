@@ -5,6 +5,7 @@ using Robust.Shared.Maths;
 using Robust.Shared.Physics.Collision.Shapes;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Physics.Dynamics;
+using Robust.Shared.Physics.Shapes;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.Physics.Systems;
@@ -130,23 +131,85 @@ public abstract partial class SharedPhysicsSystem
 
     #region Polygon
 
-    public void SetVertices(
+    internal void SetVertices<T>(
         EntityUid uid,
         string fixtureId,
         Fixture fixture,
-        PolygonShape poly,
+        T shape,
         Vector2[] vertices,
         FixturesComponent? manager = null,
         PhysicsComponent? body = null,
-        TransformComponent? xform = null)
+        TransformComponent? xform = null) where T : IPhysShape
     {
         if (!Resolve(uid, ref manager, ref body, ref xform))
             return;
 
-        poly.Set(vertices, vertices.Length);
+        switch (shape)
+        {
+            case Polygon:
+            case SlimPolygon:
+            case PolygonShape:
+                break;
+            default:
+                DebugTools.Assert("Tried to set polygons for non-polygon shape?");
+                return;
+        }
 
-        if (body.CanCollide &&
-            TryComp<BroadphaseComponent>(xform.Broadphase?.Uid, out var broadphase))
+        var poly = new Polygon(shape);
+        var hull = new InternalPhysicsHull(vertices, poly.VertexCount);
+        SetVertices(uid, fixtureId, fixture, shape, hull, manager, body, xform);
+    }
+
+    internal void SetVertices<T>(
+        EntityUid uid,
+        string fixtureId,
+        Fixture fixture,
+        T shape,
+        InternalPhysicsHull hull,
+        FixturesComponent? manager = null,
+        PhysicsComponent? body = null,
+        TransformComponent? xform = null) where T : IPhysShape
+    {
+        if (!Resolve(uid, ref manager, ref body, ref xform))
+            return;
+
+        switch (shape)
+        {
+            case PolygonShape polyShape:
+                polyShape.Set(hull);
+                break;
+            case Polygon poly:
+                var polyVerts = poly._vertices.AsSpan;
+                var polyNorms = poly._normals.AsSpan;
+                polyVerts.Clear();
+                polyNorms.Clear();
+                hull.Points.CopyTo(polyVerts);
+                Polygon.CalculateNormals(polyVerts, polyNorms, hull.Count);
+                poly.VertexCount = (byte) hull.Count;
+                break;
+            case SlimPolygon slim:
+                // Count changed so set it to a normal poly.
+                if (slim.VertexCount != hull.Count)
+                {
+                    SetVertices(uid, fixtureId, fixture, (Polygon) slim, hull, manager, body, xform);
+                    return;
+                }
+
+                var slimVerts = slim._vertices.AsSpan;
+                var slimNorms = slim._normals.AsSpan;
+                slimVerts.Clear();
+                slimNorms.Clear();
+                hull.Points.CopyTo(slimVerts);
+                Polygon.CalculateNormals(slimVerts, slimNorms, hull.Count);
+                break;
+            default:
+                DebugTools.Assert("Tried to set polygons for non-polygon shape?");
+                return;
+        }
+
+        fixture.Shape = shape;
+
+        if (TryComp<BroadphaseComponent>(xform.Broadphase?.Uid, out var broadphase))
         {
             _lookup.DestroyProxies(uid, fixtureId, fixture, xform, broadphase);
             _lookup.CreateProxies(uid, fixtureId, fixture, xform, body);
