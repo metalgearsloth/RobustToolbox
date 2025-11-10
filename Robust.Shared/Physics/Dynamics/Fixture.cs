@@ -122,7 +122,7 @@ namespace Robust.Shared.Physics.Dynamics
             if (Shape is PhysShapeAabb aabb)
             {
                 var bounds = aabb.LocalBounds;
-                var poly = new Polygon(bounds);
+                var poly = new SlimPolygon(bounds);
                 Shape = poly;
             }
         }

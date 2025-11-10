@@ -22,9 +22,9 @@ public partial record struct SlimPolygon : IPhysShape
     public Vector2[] Normals => _normals.AsSpan[..VertexCount].ToArray();
 
     [DataField]
-    internal FixedArray4<Vector2> _vertices;
+    internal FixedVertArray4 _vertices;
 
-    internal FixedArray4<Vector2> _normals;
+    internal FixedVertArray4 _normals;
 
     public Vector2 Centroid { get; internal set; }
 

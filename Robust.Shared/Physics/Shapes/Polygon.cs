@@ -9,7 +9,6 @@ using Robust.Shared.Utility;
 
 namespace Robust.Shared.Physics.Shapes;
 
-// Internal so people don't use it when it will have breaking changes very soon.
 [Serializable, NetSerializable]
 [DataDefinition]
 public partial record struct Polygon : IPhysShape
@@ -28,9 +27,9 @@ public partial record struct Polygon : IPhysShape
     public Vector2[] Normals => _normals.AsSpan[..VertexCount].ToArray();
 
     [DataField]
-    internal FixedArray8<Vector2> _vertices;
+    internal FixedVertArray8 _vertices;
 
-    internal FixedArray8<Vector2> _normals;
+    internal FixedVertArray8 _normals;
 
     public Vector2 Centroid;
 
@@ -42,6 +41,24 @@ public partial record struct Polygon : IPhysShape
     public Polygon(IPhysShape shape) : this((PolygonShape) shape)
     {
 
+    }
+
+    public Polygon(SlimPolygon slim)
+    {
+        Unsafe.SkipInit(out this);
+        Radius = slim.Radius;
+        VertexCount = slim.VertexCount;
+
+        _vertices._00 = slim._vertices._00;
+        _vertices._01 = slim._vertices._01;
+        _vertices._02 = slim._vertices._02;
+        _vertices._03 = slim._vertices._03;
+
+        _normals._00 = slim._normals._00;
+        _normals._01 = slim._normals._01;
+        _normals._02 = slim._normals._02;
+        _normals._03 = slim._normals._03;
+        Centroid = slim.Centroid;
     }
 
     public Polygon(PolygonShape polyShape)
@@ -70,6 +87,7 @@ public partial record struct Polygon : IPhysShape
         _normals._01 = new Vector2(1.0f, 0.0f);
         _normals._02 = new Vector2(0.0f, 1.0f);
         _normals._03 = new Vector2(-1.0f, 0.0f);
+        Centroid = Vector2.Zero;
     }
 
     public Polygon(Box2Rotated bounds)
