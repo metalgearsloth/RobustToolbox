@@ -65,7 +65,7 @@ public partial record struct Polygon : IPhysShape
     }
 
     public Polygon(PhysShapeAabb aabb) : this(aabb.LocalBounds) {}
-    
+
     public Polygon(Polygon other)
     {
         Unsafe.SkipInit(out this);
@@ -75,17 +75,6 @@ public partial record struct Polygon : IPhysShape
         other._vertices.AsSpan.CopyTo(_vertices.AsSpan);
         other._normals.AsSpan.CopyTo(_normals.AsSpan);
         Centroid = other.Centroid;
-    }
-
-    public Polygon(SlimPolygon slim)
-    {
-        Unsafe.SkipInit(out this);
-        Radius = slim.Radius;
-        VertexCount = slim.VertexCount;
-
-        slim._vertices.AsSpan.CopyTo(_vertices.AsSpan);
-        slim._normals.AsSpan.CopyTo(_normals.AsSpan);
-        Centroid = slim.Centroid;
     }
 
     public Polygon(PolygonShape polyShape)

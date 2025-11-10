@@ -36,6 +36,7 @@ using Robust.Shared.ViewVariables;
 
 namespace Robust.Shared.Physics.Collision.Shapes
 {
+    [Obsolete("Use Polygon instead")]
     [Serializable, NetSerializable]
     [DataDefinition]
     public sealed partial class PolygonShape : IPhysShape, ISerializationHooks, IEquatable<PolygonShape>, IApproxEquatable<PolygonShape>
