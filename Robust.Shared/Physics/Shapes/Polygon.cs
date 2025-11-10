@@ -12,6 +12,9 @@ namespace Robust.Shared.Physics.Shapes;
 [Serializable, NetSerializable]
 [DataDefinition]
 public partial record struct Polygon : IPhysShape
+#if DEBUG
+    , ISerializationHooks
+#endif
 {
     [DataField]
     public byte VertexCount { get; internal set; }
@@ -29,18 +32,47 @@ public partial record struct Polygon : IPhysShape
     [DataField]
     internal FixedVertArray8 _vertices;
 
+    [DataField]
     internal FixedVertArray8 _normals;
 
-    public Vector2 Centroid;
+    [DataField]
+    public Vector2 Centroid { get; internal set; }
 
     public int ChildCount => 1;
     public float Radius { get; set; } = PhysicsConstants.PolygonRadius;
     public ShapeType ShapeType => ShapeType.Polygon;
 
+#if DEBUG
+    void ISerializationHooks.AfterDeserialization()
+    {
+        Validate(this);
+    }
+
+    internal static void Validate(Polygon poly)
+    {
+        Span<Vector2> normalsCopy = stackalloc Vector2[poly.VertexCount];
+        DebugTools.Assert(poly.VertexCount <= PhysicsConstants.MaxPolygonVertices);
+
+        CalculateNormals(poly._vertices.AsSpan, normalsCopy, poly.VertexCount);
+        DebugTools.Assert(normalsCopy.SequenceEqual(poly._normals.AsSpan[..poly.VertexCount]));
+    }
+#endif
+
     // Hopefully this one is short-lived for a few months
-    public Polygon(IPhysShape shape) : this((PolygonShape) shape)
+    public Polygon(IPhysShape shape) : this((Polygon) shape)
     {
 
+    }
+
+    public Polygon(Polygon other)
+    {
+        Unsafe.SkipInit(out this);
+        Radius = other.Radius;
+        VertexCount = other.VertexCount;
+
+        other._vertices.AsSpan.CopyTo(_vertices.AsSpan);
+        other._normals.AsSpan.CopyTo(_normals.AsSpan);
+        Centroid = other.Centroid;
     }
 
     public Polygon(SlimPolygon slim)
@@ -49,15 +81,8 @@ public partial record struct Polygon : IPhysShape
         Radius = slim.Radius;
         VertexCount = slim.VertexCount;
 
-        _vertices._00 = slim._vertices._00;
-        _vertices._01 = slim._vertices._01;
-        _vertices._02 = slim._vertices._02;
-        _vertices._03 = slim._vertices._03;
-
-        _normals._00 = slim._normals._00;
-        _normals._01 = slim._normals._01;
-        _normals._02 = slim._normals._02;
-        _normals._03 = slim._normals._03;
+        slim._vertices.AsSpan.CopyTo(_vertices.AsSpan);
+        slim._normals.AsSpan.CopyTo(_normals.AsSpan);
         Centroid = slim.Centroid;
     }
 

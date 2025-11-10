@@ -33,6 +33,7 @@ using Robust.Shared.Physics.Systems;
 using Robust.Shared.Serialization;
 using Robust.Shared.Serialization.Manager.Attributes;
 using Robust.Shared.Serialization.TypeSerializers.Implementations.Custom;
+using Robust.Shared.Utility;
 using Robust.Shared.ViewVariables;
 
 namespace Robust.Shared.Physics.Dynamics
@@ -122,6 +123,7 @@ namespace Robust.Shared.Physics.Dynamics
             if (Shape is PhysShapeAabb aabb)
             {
                 var bounds = aabb.LocalBounds;
+                DebugTools.Assert(bounds.IsValid());
                 var poly = new SlimPolygon(bounds);
                 Shape = poly;
             }

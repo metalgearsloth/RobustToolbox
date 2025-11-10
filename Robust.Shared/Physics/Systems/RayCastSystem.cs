@@ -276,13 +276,13 @@ public sealed partial class RayCastSystem : EntitySystem
                 CastCircle(entity, ref result, circle, originTransform, translation, filter, callback);
                 break;
             case SlimPolygon slim:
-                CastPolygon(entity, ref result, new PolygonShape(slim), originTransform, translation, filter, callback);
+                CastPolygon(entity, ref result, new Polygon(slim), originTransform, translation, filter, callback);
                 break;
             case Polygon poly:
-                CastPolygon(entity, ref result, new PolygonShape(poly), originTransform, translation, filter, callback);
+                CastPolygon(entity, ref result, poly, originTransform, translation, filter, callback);
                 break;
             case PolygonShape polygon:
-                CastPolygon(entity, ref result, polygon, originTransform, translation, filter, callback);
+                CastPolygon(entity, ref result, new Polygon(polygon), originTransform, translation, filter, callback);
                 break;
             default:
                 Log.Error("Tried to shapecast for shape not implemented.");
@@ -333,7 +333,7 @@ public sealed partial class RayCastSystem : EntitySystem
     public void CastPolygon(
         Entity<BroadphaseComponent?> entity,
         ref RayResult result,
-        PolygonShape polygon,
+        Polygon polygon,
         Transform originTransform,
         Vector2 translation,
         QueryFilter filter,

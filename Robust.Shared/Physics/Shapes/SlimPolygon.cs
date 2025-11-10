@@ -16,6 +16,9 @@ namespace Robust.Shared.Physics.Shapes;
 [Serializable, NetSerializable]
 [DataDefinition]
 public partial record struct SlimPolygon : IPhysShape
+#if DEBUG
+    , ISerializationHooks
+#endif
 {
     public Vector2[] Vertices => _vertices.AsSpan[..VertexCount].ToArray();
 
@@ -24,8 +27,10 @@ public partial record struct SlimPolygon : IPhysShape
     [DataField]
     internal FixedVertArray4 _vertices;
 
+    [DataField]
     internal FixedVertArray4 _normals;
 
+    [DataField]
     public Vector2 Centroid { get; internal set; }
 
     public byte VertexCount => 4;
@@ -33,6 +38,13 @@ public partial record struct SlimPolygon : IPhysShape
     public int ChildCount => 1;
     public float Radius { get; set; } = PhysicsConstants.PolygonRadius;
     public ShapeType ShapeType => ShapeType.Polygon;
+
+    #if DEBUG
+    void ISerializationHooks.AfterDeserialization()
+    {
+        Polygon.Validate(new Polygon(this));
+    }
+    #endif
 
     public SlimPolygon(Box2 box)
     {

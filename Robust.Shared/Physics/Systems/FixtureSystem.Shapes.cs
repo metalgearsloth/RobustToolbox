@@ -22,7 +22,7 @@ namespace Robust.Shared.Physics.Systems
                     return false;
                 case PhysShapeAabb aabb:
                     // TODO: When we get actual AABBs it will be a stupid ez check,
-                    var polygon = (PolygonShape) aabb;
+                    var polygon = new Polygon(aabb.LocalBounds);
                     return TestPoint(polygon, xform, worldPoint);
                 case PhysShapeCircle circle:
                     var center = xform.Position + Physics.Transform.Mul(xform.Quaternion2D, circle.Position);
@@ -30,15 +30,8 @@ namespace Robust.Shared.Physics.Systems
                     return Vector2.Dot(distance, distance) <= circle.Radius * circle.Radius;
                 case PolygonShape poly:
                 {
-                    var pLocal = Physics.Transform.MulT(xform.Quaternion2D, worldPoint - xform.Position);
-
-                    for (var i = 0; i < poly.VertexCount; i++)
-                    {
-                        var dot = Vector2.Dot(poly.Normals[i], pLocal - poly.Vertices[i]);
-                        if (dot > 0f) return false;
-                    }
-
-                    return true;
+                    var slimPoly = new Polygon(poly);
+                    return TestPoint(slimPoly, xform, worldPoint);
                 }
                 case SlimPolygon slim:
                 {

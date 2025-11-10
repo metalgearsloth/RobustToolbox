@@ -2,6 +2,7 @@ using System;
 using System.Numerics;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics.Collision.Shapes;
+using Robust.Shared.Physics.Shapes;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.Physics.Collision;
@@ -17,8 +18,8 @@ internal sealed partial class CollisionManager
     /// <param name="poly2">The poly2.</param>
     /// <param name="xf2">The XF2.</param>
     /// <returns></returns>
-    private static float FindMaxSeparation(out int edgeIndex, PolygonShape poly1, in Transform xf1,
-        PolygonShape poly2, in Transform xf2)
+    private static float FindMaxSeparation(out int edgeIndex, Polygon poly1, in Transform xf1,
+        Polygon poly2, in Transform xf2)
     {
         // MIT License
 
@@ -42,9 +43,9 @@ internal sealed partial class CollisionManager
         // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
         // SOFTWARE.
 
-        var n1s = poly1.Normals;
-        var v1s = poly1.Vertices;
-        var v2s = poly2.Vertices;
+        var n1s = poly1._normals.AsSpan;
+        var v1s = poly1._vertices.AsSpan;
+        var v2s = poly2._vertices.AsSpan;
         var count1 = poly1.VertexCount;
         var count2 = poly2.VertexCount;
         var xf = Transform.MulT(xf2, xf1);
@@ -80,13 +81,13 @@ internal sealed partial class CollisionManager
         return maxSeparation;
     }
 
-    private static void FindIncidentEdge(Span<ClipVertex> c, PolygonShape poly1, in Transform xf1, int edge1, PolygonShape poly2, in Transform xf2)
+    private static void FindIncidentEdge(Span<ClipVertex> c, Polygon poly1, in Transform xf1, int edge1, Polygon poly2, in Transform xf2)
     {
-        var normals1 = poly1.Normals;
+        var normals1 = poly1._normals.AsSpan;
 
         var count2 = poly2.VertexCount;
-        var vertices2 = poly2.Vertices;
-        var normals2 = poly2.Normals;
+        var vertices2 = poly2._vertices.AsSpan;
+        var normals2 = poly2._normals.AsSpan;
 
         DebugTools.Assert(0 <= edge1 && edge1 < poly1.VertexCount);
 
@@ -136,8 +137,8 @@ internal sealed partial class CollisionManager
     /// <param name="transformA">The transform A.</param>
     /// <param name="polyB">The poly B.</param>
     /// <param name="transformB">The transform B.</param>
-    public void CollidePolygons(ref Manifold manifold, PolygonShape polyA, in Transform transformA,
-        PolygonShape polyB, in Transform transformB)
+    public void CollidePolygons(ref Manifold manifold, Polygon polyA, in Transform transformA,
+        Polygon polyB, in Transform transformB)
     {
         manifold.PointCount = 0;
         var totalRadius = polyA.Radius + polyB.Radius;
@@ -153,8 +154,8 @@ internal sealed partial class CollisionManager
         if (separationB > totalRadius)
             return;
 
-        PolygonShape poly1; // reference polygon
-        PolygonShape poly2; // incident polygon
+        Polygon poly1; // reference polygon
+        Polygon poly2; // incident polygon
         Transform xf1, xf2;
         int edge1; // reference edge
         bool flip;
@@ -191,8 +192,8 @@ internal sealed partial class CollisionManager
         int iv1 = edge1;
         int iv2 = edge1 + 1 < count1 ? edge1 + 1 : 0;
 
-        Vector2 v11 = poly1.Vertices[iv1];
-        Vector2 v12 = poly1.Vertices[iv2];
+        Vector2 v11 = poly1._vertices.AsSpan[iv1];
+        Vector2 v12 = poly1._vertices.AsSpan[iv2];
 
         Vector2 localTangent = v12 - v11;
         localTangent = localTangent.Normalized();
