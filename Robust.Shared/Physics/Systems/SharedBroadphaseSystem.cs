@@ -202,7 +202,7 @@ namespace Robust.Shared.Physics.Systems
 
             for (var i = _contactJob.Pairs.Count; i < batches; i++)
             {
-                _contactJob.Pairs.Add(new List<(FixtureProxy, FixtureProxy, PairFlag)>());
+                _contactJob.Pairs.Add(new List<(FixtureProxy, FixtureProxy, PairFlag)>(_contactJob.BatchSize));
             }
 
             // Sanity check that they got cleared below.
@@ -614,7 +614,7 @@ namespace Robust.Shared.Physics.Systems
             /// <summary>
             /// Stored by batch -> fixture proxies to avoid locks.
             /// </summary>
-            public readonly List<List<(FixtureProxy, FixtureProxy, PairFlag)>> Pairs = new(64);
+            public readonly List<List<(FixtureProxy, FixtureProxy, PairFlag)>> Pairs = new(4);
 
             public float FrameTime;
 
