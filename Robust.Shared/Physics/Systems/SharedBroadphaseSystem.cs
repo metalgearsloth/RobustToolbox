@@ -213,9 +213,7 @@ namespace Robust.Shared.Physics.Systems
             }
 #endif
 
-            var count = moveBuffer.Count;
-
-            _parallel.ProcessNow(_contactJob, count);
+            _parallel.ProcessNow(_contactJob, moveBuffer.Count);
 
             // Single-threaded pair due to affecting the sim
             for (var i = 0; i < batches; i++)
@@ -620,7 +618,7 @@ namespace Robust.Shared.Physics.Systems
 
             // Box2D uses 64 but we have to do grid queries for each fixtureproxy which will add a fair bit of overhead.
             // Plus we also run events + trycomp for joints on top.
-            public int BatchSize => 16;
+            public int BatchSize => 32;
 
             public void Execute(int index)
             {
