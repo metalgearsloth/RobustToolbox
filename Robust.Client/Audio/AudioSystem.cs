@@ -44,6 +44,8 @@ public sealed partial class AudioSystem : SharedAudioSystem
     [Dependency] private SharedTransformSystem _xformSys = default!;
     [Dependency] private SharedPhysicsSystem _physics = default!;
 
+    private const float AudioPlaybackPositionTolerance = 0.1f;
+
     /// <summary>
     /// An optional method that, if provided, will override the behavior of <see cref="ProcessStream"/>.
     /// Contains the same parameters in the same order as the method it overrides.
@@ -179,6 +181,9 @@ public sealed partial class AudioSystem : SharedAudioSystem
                 return;
         }
 
+        if (component.Params.StartMode == AudioStartMode.Immediate)
+            return;
+
         // If playback position changed then update it.
         var totalLen = GetAudioLengthImpl(entity.Comp.FileName).TotalSeconds;
         var position = CalculateAudioPosition(entity, (float) totalLen);
@@ -197,7 +202,7 @@ public sealed partial class AudioSystem : SharedAudioSystem
         }
 
         // If the difference is minor then we'll just keep playing it.
-        if (diff > 0.1f)
+        if (diff > AudioPlaybackPositionTolerance)
         {
             entity.Comp.PlaybackPosition = position;
         }
@@ -250,8 +255,11 @@ public sealed partial class AudioSystem : SharedAudioSystem
         var component = entity.Comp;
         length ??= GetAudioLength(component.FileName);
 
-        // If audio came into range then start playback at the correct position.
-        var offset = CalculateAudioPosition(entity, (float) length.Value.TotalSeconds);
+        // If audio came into range then start playback at the correct position
+        // (unless it's immediate in which case just play from the designated offset).
+        var offset = component.Params.StartMode == AudioStartMode.Immediate
+            ? component.Params.PlayOffsetSeconds
+            : CalculateAudioPosition(entity, (float) length.Value.TotalSeconds, component.Params.PlayOffsetSeconds);
 
         if (TryAudioLimit(component.FileName))
         {
@@ -276,11 +284,11 @@ public sealed partial class AudioSystem : SharedAudioSystem
         component.Gain = 0f;
 
         // If the offset < buffer than just play it from the start.
-        if (offset < AudioDespawnBuffer)
+        if (offset < _audioEndBuffer)
         {
             offset = 0;
         }
-        // Not enough audio to play
+        // Not enough audio to play, don't play a short sound.
         else if (offset > length.Value.TotalSeconds - _audioEndBuffer)
         {
             component.StopPlaying();

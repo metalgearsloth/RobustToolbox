@@ -25,6 +25,26 @@ namespace Robust.Shared.Audio
         ExponentDistanceClamped = 1 << 6,
     }
 
+    [Serializable, NetSerializable]
+    public enum AudioStartMode : byte
+    {
+        /// <summary>
+        ///     Start from the configured play offset when the client starts the sound.
+        /// </summary>
+        /// <remarks>
+        ///     Useful for short audio where you just want the full sound to be played and don't care about playback precision.
+        /// </remarks>
+        Immediate,
+
+        /// <summary>
+        ///     Start from the current timeline position based on when the sound entity was created.
+        /// </summary>
+        /// <remarks>
+        ///     Useful for long-running audio where you want its playback to match between clients.
+        /// </remarks>
+        Synchronized,
+    }
+
     /// <summary>
     ///     Contains common audio parameters for audio playback on the client.
     /// </summary>
@@ -88,6 +108,9 @@ namespace Robust.Shared.Audio
 
         [DataField]
         public float PlayOffsetSeconds { get; set; } = Default.PlayOffsetSeconds;
+
+        [DataField]
+        public AudioStartMode StartMode { get; set; } = Default.StartMode;
 
         /// <summary>
         ///     If not null, this will randomly modify the pitch scale by adding a number drawn from a normal distribution with this deviation.
@@ -229,6 +252,14 @@ namespace Robust.Shared.Audio
         {
             var me = this;
             me.PlayOffsetSeconds = offset;
+            return me;
+        }
+
+        [Pure]
+        public readonly AudioParams WithStartMode(AudioStartMode startMode)
+        {
+            var me = this;
+            me.StartMode = startMode;
             return me;
         }
     }
