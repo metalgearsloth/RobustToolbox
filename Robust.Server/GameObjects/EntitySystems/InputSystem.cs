@@ -60,9 +60,12 @@ namespace Robust.Server.GameObjects
 
             // route the cmdMessage to the proper bind
             //Client Sanitization: unbound command, just ignore
-            foreach (var handler in BindRegistry.GetHandlers(function))
+            using (EntityManager.PushPredictedSpawnContext(session, msg.Tick, msg.SubTick, msg.InputFunctionId))
             {
-                if (handler.HandleCmdMessage(EntityManager, session, msg)) return;
+                foreach (var handler in BindRegistry.GetHandlers(function))
+                {
+                    if (handler.HandleCmdMessage(EntityManager, session, msg)) return;
+                }
             }
         }
 

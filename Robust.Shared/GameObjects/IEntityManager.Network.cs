@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using Robust.Shared.Map;
+using Robust.Shared.Player;
 
 namespace Robust.Shared.GameObjects;
 
@@ -25,6 +26,11 @@ public partial interface IEntityManager
     /// TryGet version of <see cref="GetEntity"/>
     /// </summary>
     public bool TryGetEntity(NetEntity? nEntity, [NotNullWhen(true)] out EntityUid? entity);
+
+    /// <summary>
+    /// TryGet version of <see cref="GetEntity(EntityNetReference, ICommonSession?)"/>.
+    /// </summary>
+    public bool TryGetEntity(EntityNetReference reference, ICommonSession? session, out EntityUid entity);
 
     /// <summary>
     /// Tries to returns the corresponding local <see cref="EntityUid"/> along with the metdata component.
@@ -72,6 +78,12 @@ public partial interface IEntityManager
     public EntityUid? GetEntity(NetEntity? nEntity);
 
     /// <summary>
+    /// Returns the corresponding local <see cref="EntityUid"/> for a normal or predicted network reference.
+    /// Predicted references are scoped to the supplied session on the server.
+    /// </summary>
+    public EntityUid GetEntity(EntityNetReference reference, ICommonSession? session = null);
+
+    /// <summary>
     /// Returns the corresponding <see cref="NetEntity"/> for the local entity.
     /// </summary>
     public NetEntity GetNetEntity(EntityUid uid, MetaDataComponent? metadata = null);
@@ -80,6 +92,16 @@ public partial interface IEntityManager
     /// Returns the corresponding <see cref="NetEntity"/> for the local entity.
     /// </summary>
     public NetEntity? GetNetEntity(EntityUid? uid, MetaDataComponent? metadata = null);
+
+    /// <summary>
+    /// Returns a network reference for an entity, preserving predicted-spawn identity when present.
+    /// </summary>
+    public EntityNetReference GetNetEntityReference(EntityUid uid, MetaDataComponent? metadata = null);
+
+    /// <summary>
+    /// Returns a network reference for an entity, preserving predicted-spawn identity when present.
+    /// </summary>
+    public EntityNetReference? GetNetEntityReference(EntityUid? uid, MetaDataComponent? metadata = null);
 
     /// <summary>
     /// HashSet version of <see cref="GetEntity"/>

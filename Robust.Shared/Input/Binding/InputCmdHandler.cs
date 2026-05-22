@@ -125,7 +125,7 @@ namespace Robust.Shared.Input.Binding
                 case FullInputCmdMessage fullInput:
                 {
                     var handled = _callback?.Invoke(new PointerInputCmdArgs(session, entManager.GetCoordinates(fullInput.Coordinates),
-                        fullInput.ScreenCoordinates, entManager.GetEntity(fullInput.Uid), fullInput.State, message));
+                        fullInput.ScreenCoordinates, entManager.GetEntity(fullInput.Uid, session), fullInput.State, message));
                     return handled.HasValue && handled.Value;
                 }
                 default:
@@ -187,9 +187,9 @@ namespace Robust.Shared.Input.Binding
                     switch (fullInput.State)
                     {
                         case BoundKeyState.Up:
-                            return _disabled?.Invoke(session, entManager.GetCoordinates(fullInput.Coordinates), entManager.GetEntity(fullInput.Uid)) == true;
+                            return _disabled?.Invoke(session, entManager.GetCoordinates(fullInput.Coordinates), entManager.GetEntity(fullInput.Uid, session)) == true;
                         case BoundKeyState.Down:
-                            return _enabled?.Invoke(session, entManager.GetCoordinates(fullInput.Coordinates), entManager.GetEntity(fullInput.Uid)) == true;
+                            return _enabled?.Invoke(session, entManager.GetCoordinates(fullInput.Coordinates), entManager.GetEntity(fullInput.Uid, session)) == true;
                     }
                     break;
             }

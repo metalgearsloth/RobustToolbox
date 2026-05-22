@@ -70,15 +70,18 @@ namespace Robust.Client.GameObjects
             }
 
             // handle local binds before sending off
-            foreach (var handler in BindRegistry.GetHandlers(function))
+            using (EntityManager.PushPredictedSpawnContext(session, message.Tick, message.SubTick, message.InputFunctionId))
             {
-                if (!_stateManager.IsPredictionEnabled && !handler.FireOutsidePrediction)
-                    continue;
-
-                // local handlers can block sending over the network.
-                if (handler.HandleCmdMessage(EntityManager, session, message))
+                foreach (var handler in BindRegistry.GetHandlers(function))
                 {
-                    return true;
+                    if (!_stateManager.IsPredictionEnabled && !handler.FireOutsidePrediction)
+                        continue;
+
+                    // local handlers can block sending over the network.
+                    if (handler.HandleCmdMessage(EntityManager, session, message))
+                    {
+                        return true;
+                    }
                 }
             }
 
@@ -92,7 +95,7 @@ namespace Robust.Client.GameObjects
                     GetCoordinates(fullInput.Coordinates),
                     fullInput.ScreenCoordinates,
                     fullInput.State,
-                    GetEntity(fullInput.Uid)),
+                    EntityManager.GetEntity(fullInput.Uid)),
 
                 _ => throw new ArgumentOutOfRangeException()
             };
@@ -107,7 +110,7 @@ namespace Robust.Client.GameObjects
                     clientMsg.State,
                     GetNetCoordinates(client.Coordinates),
                     clientMsg.ScreenCoordinates,
-                    GetNetEntity(clientMsg.Uid)
+                    EntityManager.GetNetEntityReference(clientMsg.Uid)
                     ),
 
                 _ => throw new ArgumentOutOfRangeException()
@@ -127,10 +130,13 @@ namespace Robust.Client.GameObjects
 
             Predicted = true;
             var session = _playerManager.LocalSession;
-            foreach (var handler in BindRegistry.GetHandlers(keyFunc))
+            using (EntityManager.PushPredictedSpawnContext(session, inputCmd.Tick, inputCmd.SubTick, inputCmd.InputFunctionId))
             {
-                if (handler.HandleCmdMessage(EntityManager, session, inputCmd))
-                    break;
+                foreach (var handler in BindRegistry.GetHandlers(keyFunc))
+                {
+                    if (handler.HandleCmdMessage(EntityManager, session, inputCmd))
+                        break;
+                }
             }
             Predicted = false;
 

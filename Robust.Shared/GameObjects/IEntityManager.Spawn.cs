@@ -1,15 +1,25 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using Robust.Shared.Collections;
 using Robust.Shared.Containers;
+using Robust.Shared.Input;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
+using Robust.Shared.Player;
 using Robust.Shared.Prototypes;
+using Robust.Shared.Timing;
 
 namespace Robust.Shared.GameObjects;
 
 public partial interface IEntityManager
 {
+    IDisposable PushPredictedSpawnContext(
+        ICommonSession? session,
+        GameTick tick,
+        ushort subTick,
+        KeyFunctionId inputFunctionId);
+
     // This method will soon be marked as obsolete.
     EntityUid[] SpawnEntities(EntityCoordinates coordinates, List<string?> protoNames)
         => SpawnEntitiesAttachedTo(coordinates, protoNames);
@@ -104,4 +114,6 @@ public partial interface IEntityManager
         EntityUid target,
         TransformComponent? xform = null,
         ComponentRegistry? overrides = null);
+
+    EntityUid PredictedSpawn(string? protoName = null, ComponentRegistry? overrides = null, bool doMapInit = true);
 }

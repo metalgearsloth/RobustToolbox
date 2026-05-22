@@ -116,7 +116,8 @@ public sealed partial class ClientEntityManager
             return;
 
         DebugTools.Assert(IsClientSide(ent.Owner, ent.Comp));
-        EnsureComponent<PredictedSpawnComponent>(ent.Owner);
+        var predicted = EnsureComponent<PredictedSpawnComponent>(ent.Owner);
+        RegisterPredictedSpawn(ent.Owner, predicted);
 
         // TODO: Need to map call site or something, needs to be consistent between client and server.
     }

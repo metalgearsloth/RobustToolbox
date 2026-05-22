@@ -118,7 +118,7 @@ namespace Robust.Shared.Input
         /// <summary>
         ///     Entity that was under the pointer when the command was created (if any).
         /// </summary>
-        public NetEntity Uid { get; }
+        public EntityNetReference Uid { get; }
 
         /// <summary>
         ///     Creates an instance of <see cref="PointerInputCmdMessage"/>.
@@ -137,6 +137,9 @@ namespace Robust.Shared.Input
         /// <param name="coordinates">Local Coordinates of the pointer when the command was created.</param>
         /// <param name="uid">Entity that was under the pointer when the command was created.</param>
         public PointerInputCmdMessage(GameTick tick, ushort subTick, KeyFunctionId inputFunctionId, NetCoordinates coordinates, NetEntity uid)
+            : this(tick, subTick, inputFunctionId, coordinates, new EntityNetReference(uid)) { }
+
+        public PointerInputCmdMessage(GameTick tick, ushort subTick, KeyFunctionId inputFunctionId, NetCoordinates coordinates, EntityNetReference uid)
             : base(tick, subTick, inputFunctionId)
         {
             Coordinates = coordinates;
@@ -226,7 +229,7 @@ namespace Robust.Shared.Input
         /// <summary>
         ///     Entity that was under the pointer when the command was created (if any).
         /// </summary>
-        public NetEntity Uid { get; init; }
+        public EntityNetReference Uid { get; init; }
 
         /// <summary>
         ///     Creates an instance of <see cref="FullInputCmdMessage"/>.
@@ -250,6 +253,9 @@ namespace Robust.Shared.Input
         /// <param name="screenCoordinates"></param>
         /// <param name="uid">Entity that was under the pointer when the command was created.</param>
         public FullInputCmdMessage(GameTick tick, ushort subTick, KeyFunctionId inputFunctionId, BoundKeyState state, NetCoordinates coordinates, ScreenCoordinates screenCoordinates, NetEntity uid)
+            : this(tick, subTick, inputFunctionId, state, coordinates, screenCoordinates, new EntityNetReference(uid)) { }
+
+        public FullInputCmdMessage(GameTick tick, ushort subTick, KeyFunctionId inputFunctionId, BoundKeyState state, NetCoordinates coordinates, ScreenCoordinates screenCoordinates, EntityNetReference uid)
             : base(tick, subTick, inputFunctionId)
         {
             State = state;
