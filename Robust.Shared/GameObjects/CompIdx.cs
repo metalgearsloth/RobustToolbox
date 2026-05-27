@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
-using System.Linq;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Threading;
 using Arch.Core;
@@ -38,7 +38,7 @@ public readonly struct CompIdx : IEquatable<CompIdx>
         var curLength = array.Length;
         if (curLength <= idx.Value)
         {
-            var newLength = MathHelper.NextPowerOfTwo(Math.Max(8, idx.Value));
+            var newLength = MathHelper.NextPowerOfTwo(Math.Max(8, idx.Value + 1));
             Array.Resize(ref array, newLength);
         }
 

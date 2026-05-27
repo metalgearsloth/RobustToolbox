@@ -58,6 +58,7 @@ public sealed class RobustConfig : IConfig
     public string ArtifactsPath => DefaultConfig.Instance.ArtifactsPath;
     public CultureInfo CultureInfo => DefaultConfig.Instance.CultureInfo!;
     public ConfigOptions Options => DefaultConfig.Instance.Options;
-    public TimeSpan BuildTimeout => TimeSpan.FromMinutes(3);
+    public TimeSpan BuildTimeout => DefaultConfig.Instance.BuildTimeout;
+    public WakeLockType WakeLock => DefaultConfig.Instance.WakeLock;
     public IReadOnlyList<Conclusion> ConfigAnalysisConclusion => DefaultConfig.Instance.ConfigAnalysisConclusion;
 }

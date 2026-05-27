@@ -17,12 +17,15 @@ using Robust.Shared.ViewVariables;
 namespace Robust.Shared.GameObjects
 {
     /// <summary>
-    ///     Stores the position and orientation of the entity.
+    ///     Stores the relative and global position and orientation of the entity.<br/>
+    ///     This also tracks the overall transform hierarchy, which allows entities to be children of other entities
+    ///     and move when their parent moves cheaply.
     /// </summary>
+    /// <seealso cref="SharedTransformSystem"/>
     [RegisterComponent, NetworkedComponent]
     public sealed partial class TransformComponent : Component, IComponentDebug
     {
-        [Dependency] private readonly IEntityManager _entMan = default!;
+        [Dependency] private IEntityManager _entMan = default!;
 
         // Currently this field just exists for VV. In future, it might become a real field
         [ViewVariables, PublicAPI]
@@ -100,7 +103,7 @@ namespace Robust.Shared.GameObjects
 
         [ViewVariables] internal readonly HashSet<EntityUid> _children = new();
 
-        [Dependency] private readonly IMapManager _mapManager = default!;
+        [Dependency] private IMapManager _mapManager = default!;
 
         /// <summary>
         ///     Returns the index of the map which this object is on
@@ -167,7 +170,7 @@ namespace Robust.Shared.GameObjects
                 if (!Initialized)
                     return;
 
-                _entMan.System<SharedTransformSystem>().RaiseMoveEvent((Owner, this, meta), _parent, _localPosition, oldRotation, MapUid);
+                _entMan.System<SharedTransformSystem>().RaiseMoveEvent((Owner, this, meta), _parent, _localPosition, oldRotation, MapUid, checkTraversal: false);
             }
         }
 
@@ -402,32 +405,6 @@ namespace Robust.Shared.GameObjects
             _entMan.EntitySysManager.GetEntitySystem<SharedTransformSystem>().AttachToGridOrMap(Owner, this);
         }
 
-        internal void UpdateChildMapIdsRecursive(
-            MapId newMapId,
-            EntityUid? newUid,
-            bool mapPaused,
-            EntityQuery<TransformComponent> xformQuery,
-            EntityQuery<MetaDataComponent> metaQuery,
-            MetaDataSystem system)
-        {
-            foreach (var child in _children)
-            {
-                //Set Paused state
-                var metaData = metaQuery.GetComponent(child);
-                system.SetEntityPaused(child, mapPaused, metaData);
-
-                var concrete = xformQuery.GetComponent(child);
-
-                concrete.MapUid = newUid;
-                concrete.MapID = newMapId;
-
-                if (concrete.ChildCount != 0)
-                {
-                    concrete.UpdateChildMapIdsRecursive(newMapId, newUid, mapPaused, xformQuery, metaQuery, system);
-                }
-            }
-        }
-
         [Obsolete("Use TransformSystem.SetParent() instead")]
         public void AttachParent(EntityUid parent)
         {
@@ -659,7 +636,7 @@ namespace Robust.Shared.GameObjects
     ///     An invalid entity UID indicates that this entity has intentionally been removed from broadphases and should
     ///     not automatically be re-added by movement events.
     /// </remarks>
-    internal record struct BroadphaseData(EntityUid Uid, EntityUid PhysicsMap, bool CanCollide, bool Static)
+    internal record struct BroadphaseData(EntityUid Uid, bool CanCollide, bool Static)
     {
         public bool IsValid() => Uid.IsValid();
         public bool Valid => IsValid();

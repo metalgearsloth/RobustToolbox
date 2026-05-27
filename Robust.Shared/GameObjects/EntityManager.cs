@@ -36,25 +36,24 @@ namespace Robust.Shared.GameObjects
     public delegate void ComponentQueryCallback<T>(EntityUid uid, T component) where T : IComponent;
 
     /// <inheritdoc />
-    [Virtual]
     public abstract partial class EntityManager : IEntityManager
     {
         #region Dependencies
 
-        [IoC.Dependency] protected readonly IPrototypeManager PrototypeManager = default!;
-        [IoC.Dependency] protected readonly ILogManager LogManager = default!;
-        [IoC.Dependency] private readonly IEntitySystemManager _entitySystemManager = default!;
-        [IoC.Dependency] private readonly IMapManager _mapManager = default!;
-        [IoC.Dependency] private readonly IGameTiming _gameTiming = default!;
-        [IoC.Dependency] private readonly ISerializationManager _serManager = default!;
-        [IoC.Dependency] private readonly ProfManager _prof = default!;
-        [IoC.Dependency] private readonly INetManager _netMan = default!;
-        [IoC.Dependency] private readonly IReflectionManager _reflection = default!;
-        [IoC.Dependency] private readonly EntityConsoleHost _entityConsoleHost = default!;
+        [IoC.Dependency] protected IPrototypeManager PrototypeManager = default!;
+        [IoC.Dependency] protected ILogManager LogManager = default!;
+        [IoC.Dependency] private IEntitySystemManager _entitySystemManager = default!;
+        [IoC.Dependency] private IMapManager _mapManager = default!;
+        [IoC.Dependency] private IGameTiming _gameTiming = default!;
+        [IoC.Dependency] private ISerializationManager _serManager = default!;
+        [IoC.Dependency] private ProfManager _prof = default!;
+        [IoC.Dependency] private INetManager _netMan = default!;
+        [IoC.Dependency] private IReflectionManager _reflection = default!;
+        [IoC.Dependency] private EntityConsoleHost _entityConsoleHost = default!;
 
         // I feel like PJB might shed me for putting a system dependency here, but its required for setting entity
         // positions on spawn....
-        private SharedTransformSystem _xforms = default!;
+        protected SharedTransformSystem _xforms = default!;
         private SharedContainerSystem _containers = default!;
 
         private QueryDescription _archMetaQuery = new QueryDescription().WithAll<MetaDataComponent>();
@@ -84,12 +83,12 @@ namespace Robust.Shared.GameObjects
 
         private EntityDiffContext _context = new();
 
-        private EntityEventBus _eventBus = null!;
+        internal EntityEventBus EventBusInternal = null!;
 
         protected int NextNetworkId = (int) NetEntity.First;
 
         /// <inheritdoc />
-        public IEventBus EventBus => _eventBus;
+        public IEventBus EventBus => EventBusInternal;
 
         public event Action<Entity<MetaDataComponent>>? EntityAdded;
         public event Action<Entity<MetaDataComponent>>? EntityInitialized;
@@ -119,7 +118,7 @@ namespace Robust.Shared.GameObjects
         private SharedMapSystem _mapSystem = default!;
 
         private ISawmill _sawmill = default!;
-        private ISawmill _resolveSawmill = default!;
+        internal ISawmill ResolveSawmill = default!;
 
         public bool Started { get; protected set; }
 
@@ -143,7 +142,7 @@ namespace Robust.Shared.GameObjects
             if (Initialized)
                 throw new InvalidOperationException("Initialize() called multiple times");
 
-            _eventBus = new EntityEventBus(this, _reflection);
+            EventBusInternal = new EntityEventBus(this, _reflection);
 
             InitializeArch();
             InitializeComponents();
@@ -151,7 +150,7 @@ namespace Robust.Shared.GameObjects
             _xformReg = _componentFactory.GetRegistration(typeof(TransformComponent));
             _xformName = _xformReg.Name;
             _sawmill = LogManager.GetSawmill("entity");
-            _resolveSawmill = LogManager.GetSawmill("resolve");
+            ResolveSawmill = LogManager.GetSawmill("resolve");
 
 #if DEBUG
             _mainThreadId = Environment.CurrentManagedThreadId;
@@ -163,7 +162,7 @@ namespace Robust.Shared.GameObjects
         /// <summary>
         /// Returns true if the entity's data (apart from transform) is default.
         /// </summary>
-        public bool IsDefault(EntityUid uid)
+        public bool IsDefault(EntityUid uid, ICollection<string>? ignoredComps = null)
         {
             if (!MetaQuery.TryGetComponent(uid, out var metadata) || metadata.EntityPrototype == null)
                 return false;
@@ -199,6 +198,9 @@ namespace Robust.Shared.GameObjects
 
                 var compName = _componentFactory.GetComponentName(compType);
 
+                if (ignoredComps?.Contains(compName) == true)
+                    continue;
+
                 // If the component isn't on the prototype then it's custom.
                 if (!protoData.TryGetValue(compName, out var protoMapping))
                     return false;
@@ -211,7 +213,11 @@ namespace Robust.Shared.GameObjects
                 catch (Exception e)
                 {
                     _sawmill.Error($"Failed to serialize {compName} component of entity prototype {prototype.ID}. Exception: {e.Message}");
+#if !EXCEPTION_TOLERANCE
+                    throw;
+#else
                     return false;
+#endif
                 }
 
                 if (compMapping.AnyExcept(protoMapping))
@@ -231,7 +237,7 @@ namespace Robust.Shared.GameObjects
             // TODO: Probably better to call this on its own given it's so infrequent.
             _entitySystemManager.Initialize();
             Started = true;
-            _eventBus.LockSubscriptions();
+            EventBusInternal.LockSubscriptions();
             _mapSystem = System<SharedMapSystem>();
             _xforms = System<SharedTransformSystem>();
             _containers = System<SharedContainerSystem>();
@@ -246,7 +252,7 @@ namespace Robust.Shared.GameObjects
         {
             ShuttingDown = true;
             FlushEntities();
-            _eventBus.ClearSubscriptions();
+            EventBusInternal.ClearSubscriptions();
             _entitySystemManager.Shutdown();
             ShutdownArch();
             ClearComponents();
@@ -260,8 +266,8 @@ namespace Robust.Shared.GameObjects
             ShuttingDown = true;
             FlushEntities();
             _entitySystemManager.Clear();
-            _eventBus.Dispose();
-            _eventBus = null!;
+            EventBusInternal.Dispose();
+            EventBusInternal = null!;
             ShutdownArch();
             ClearComponents();
 
@@ -281,18 +287,13 @@ namespace Robust.Shared.GameObjects
             using (histogram?.WithLabels("EntityEventBus").NewTimer())
             using (_prof.Group("Events"))
             {
-                _eventBus.ProcessEventQueue();
+                EventBusInternal.ProcessEventQueue();
             }
 
             using (histogram?.WithLabels("QueuedDeletion").NewTimer())
             using (_prof.Group("QueueDel"))
             {
-                while (QueuedDeletions.TryDequeue(out var uid))
-                {
-                    DeleteEntity(uid);
-                }
-
-                QueuedDeletionsSet.Clear();
+                ProcessQueueudDeletions();
             }
 
             using (histogram?.WithLabels("ComponentCull").NewTimer())
@@ -300,6 +301,16 @@ namespace Robust.Shared.GameObjects
             {
                 CullRemovedComponents();
             }
+        }
+
+        internal virtual void ProcessQueueudDeletions()
+        {
+            while (QueuedDeletions.TryDequeue(out var uid))
+            {
+                DeleteEntity(uid);
+            }
+
+            QueuedDeletionsSet.Clear();
         }
 
         public virtual void FrameUpdate(float frameTime)
@@ -352,10 +363,13 @@ namespace Robust.Shared.GameObjects
                 throw new ArgumentException($"Attempted to spawn entity on an invalid map. Coordinates: {coordinates}");
 
             EntityCoordinates coords;
-            if (transform.Anchored && _mapManager.TryFindGridAt(coordinates, out var gridUid, out var grid))
+            if (_mapManager.TryFindGridAt(coordinates, out var gridUid, out var grid)
+                && MetaQuery.TryGetComponentInternal(gridUid, out var meta)
+                && meta.EntityLifeStage < EntityLifeStage.Terminating)
             {
                 coords = new EntityCoordinates(gridUid, _mapSystem.WorldToLocal(gridUid, grid, coordinates.Position));
-                _xforms.SetCoordinates(newEntity, transform, coords, rotation, unanchor: false);
+                var relativeRotation = rotation - _xforms.GetWorldRotation(gridUid);
+                _xforms.SetCoordinates(newEntity, transform, coords, relativeRotation, unanchor: false);
             }
             else
             {
@@ -510,7 +524,7 @@ namespace Robust.Shared.GameObjects
             if (Deleted(uid.Value))
                 return false;
 
-            if (!QueuedDeletionsSet.Add(uid.Value))
+            if (QueuedDeletionsSet.Contains(uid.Value))
                 return false;
 
             QueueDeleteEntity(uid);
@@ -603,11 +617,14 @@ namespace Robust.Shared.GameObjects
             {
                 var ev = new EntityTerminatingEvent((uid, metadata));
                 BeforeEntityTerminating?.Invoke(ref ev);
-                EventBus.RaiseLocalEvent(uid, ref ev, true);
+                EventBusInternal.RaiseLocalEvent(uid, ref ev, true);
             }
             catch (Exception e)
             {
                 _sawmill.Error($"Caught exception while raising event {nameof(EntityTerminatingEvent)} on entity {ToPrettyString(uid, metadata)}\n{e}");
+#if !EXCEPTION_TOLERANCE
+                throw;
+#endif
             }
 
             foreach (var child in xform._children)
@@ -650,6 +667,9 @@ namespace Robust.Shared.GameObjects
                 catch(Exception e)
                 {
                     _sawmill.Error($"Caught exception while trying to recursively delete child entity '{ToPrettyString(child)}' of '{ToPrettyString(uid, metadata)}'\n{e}");
+#if !EXCEPTION_TOLERANCE
+                    throw;
+#endif
                 }
             }
 
@@ -672,6 +692,9 @@ namespace Robust.Shared.GameObjects
                     catch (Exception e)
                     {
                         _sawmill.Error($"Caught exception while trying to call shutdown on component of entity '{ToPrettyString(uid, metadata)}'\n{e}");
+#if !EXCEPTION_TOLERANCE
+                        throw;
+#endif
                     }
                 }
             }
@@ -687,9 +710,12 @@ namespace Robust.Shared.GameObjects
             catch (Exception e)
             {
                 _sawmill.Error($"Caught exception while invoking event {nameof(EntityDeleted)} on '{ToPrettyString(uid, metadata)}'\n{e}");
+#if !EXCEPTION_TOLERANCE
+                throw;
+#endif
             }
 
-            _eventBus.OnEntityDeleted(uid);
+            EventBusInternal.OnEntityDeleted(uid);
             DestroyArch(uid);
             // Need to get the ID above before MetadataComponent shutdown but only remove it after everything else is done.
             NetEntityLookup.Remove(metadata.NetEntity);
@@ -707,7 +733,63 @@ namespace Robust.Shared.GameObjects
             EntityQueueDeleted?.Invoke(uid.Value);
         }
 
-        public bool IsQueuedForDeletion(EntityUid uid) => QueuedDeletionsSet.Contains(uid);
+        public virtual bool IsQueuedForDeletion(EntityUid uid) => QueuedDeletionsSet.Contains(uid);
+
+        /// <inheritdoc />
+        public virtual void PredictedDeleteEntity(Entity<MetaDataComponent?, TransformComponent?> ent)
+        {
+            DeleteEntity(ent.Owner);
+        }
+
+        /// <inheritdoc />
+        public void PredictedDeleteEntity(Entity<MetaDataComponent?, TransformComponent?>? ent)
+        {
+            if (ent == null)
+                return;
+
+            PredictedDeleteEntity(ent.Value);
+        }
+
+        /// <inheritdoc />
+        public virtual void PredictedQueueDeleteEntity(Entity<MetaDataComponent?> ent)
+        {
+            QueueDeleteEntity(ent);
+        }
+
+        /// <inheritdoc />
+        public void PredictedQueueDeleteEntity(Entity<MetaDataComponent?>? ent)
+        {
+            if (ent != null)
+                PredictedQueueDeleteEntity(ent.Value);
+        }
+
+        /// <inheritdoc />
+        [Obsolete("use variant without TransformComponent")]
+        public void PredictedQueueDeleteEntity(Entity<MetaDataComponent?, TransformComponent?> ent)
+        {
+            PredictedQueueDeleteEntity(new Entity<MetaDataComponent?>(ent.Owner, ent.Comp1));
+        }
+
+        /// <inheritdoc />
+        [Obsolete("use variant without TransformComponent")]
+        public void PredictedQueueDeleteEntity(Entity<MetaDataComponent?, TransformComponent?>? ent)
+        {
+            if (ent != null)
+                PredictedQueueDeleteEntity(new Entity<MetaDataComponent?>(ent.Value.Owner, ent.Value.Comp1));
+        }
+
+        /// <inheritdoc />
+        public void PredictedQueueDeleteEntity(EntityUid uid)
+        {
+            PredictedQueueDeleteEntity(new Entity<MetaDataComponent?>(uid, null));
+        }
+
+        /// <inheritdoc />
+        public void PredictedQueueDeleteEntity(EntityUid? uid)
+        {
+            if (uid != null)
+                PredictedQueueDeleteEntity(new Entity<MetaDataComponent?>(uid.Value, null));
+        }
 
         public bool EntityExists(EntityUid uid)
         {
@@ -886,7 +968,7 @@ namespace Robust.Shared.GameObjects
 
             // we want this called before adding components
             EntityAdded?.Invoke((uid, metadata));
-            _eventBus.OnEntityAdded(uid);
+            EventBusInternal.OnEntityAdded(uid);
 
             // add the required MetaDataComponent directly.
             AddComponentInternal(uid, metadata, _metaReg, skipInit: true, overwrite: false, metadata);
@@ -1002,7 +1084,7 @@ namespace Robust.Shared.GameObjects
             DebugTools.Assert(meta.EntityLifeStage == EntityLifeStage.Initialized, $"Expected entity {ToPrettyString(entity)} to be initialized, was {meta.EntityLifeStage}");
             SetLifeStage(meta, EntityLifeStage.MapInitialized);
 
-            EventBus.RaiseLocalEvent(entity, MapInitEventInstance);
+            EventBusInternal.RaiseLocalEvent(entity, MapInitEventInstance);
         }
 
         /// <inheritdoc />

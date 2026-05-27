@@ -145,19 +145,19 @@ namespace Robust.Shared.Prototypes
         /// </summary>
         [ViewVariables]
         [ParentDataFieldAttribute(typeof(AbstractPrototypeIdArraySerializer<EntityPrototype>))]
-        public string[]? Parents { get; }
+        public string[]? Parents { get; private set; }
 
         [ViewVariables]
         [NeverPushInheritance]
         [AbstractDataField]
-        public bool Abstract { get; }
+        public bool Abstract { get; private set; }
 
         /// <summary>
         /// A dictionary mapping the component type list to the YAML mapping containing their settings.
         /// </summary>
         [DataField("components")]
         [AlwaysPushInheritance]
-        public ComponentRegistry Components { get; } = new();
+        public ComponentRegistry Components = new();
 
         public EntityPrototype()
         {
@@ -174,9 +174,9 @@ namespace Robust.Shared.Prototypes
 
         [Obsolete("Pass in IComponentFactory")]
         public bool TryGetComponent<T>([NotNullWhen(true)] out T? component)
-            where T : IComponent
+            where T : IComponent, new()
         {
-            var compName = IoCManager.Resolve<IComponentFactory>().GetComponentName(typeof(T));
+            var compName = IoCManager.Resolve<IComponentFactory>().GetComponentName<T>();
             return TryGetComponent(compName, out component);
         }
 
@@ -186,9 +186,9 @@ namespace Robust.Shared.Prototypes
             return TryGetComponent(compName, out component);
         }
 
-        public bool TryGetComponent<T>(string name, [NotNullWhen(true)] out T? component) where T : IComponent
+        public bool TryGetComponent<T>(string name, [NotNullWhen(true)] out T? component) where T : IComponent, new()
         {
-            DebugTools.AssertEqual(IoCManager.Resolve<IComponentFactory>().GetComponentName(typeof(T)), name);
+            DebugTools.AssertEqual(IoCManager.Resolve<IComponentFactory>().GetComponentName<T>(), name);
 
             if (!Components.TryGetValue(name, out var componentUnCast))
             {
@@ -324,7 +324,7 @@ namespace Robust.Shared.Prototypes
         }
 
         [DataRecord]
-        public record ComponentRegistryEntry(IComponent Component, MappingDataNode Mapping);
+        public partial record ComponentRegistryEntry(IComponent Component, MappingDataNode Mapping);
 
         [DataDefinition]
         public sealed partial class EntityPlacementProperties
@@ -472,11 +472,30 @@ namespace Robust.Shared.Prototypes
             return success;
         }
 
+        /// <inheritdoc />
+        public bool TryGetComponent<TComponent>(
+            IComponentFactory componentFactory,
+            [NotNullWhen(true)] out TComponent? component
+        ) where TComponent : class, IComponent, new()
+        {
+            component = null;
+            var componentName = componentFactory.GetComponentName<TComponent>();
+            if (TryGetComponent(componentName, out var foundComponent))
+            {
+                component = (TComponent)foundComponent;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <inheritdoc />
         public IEnumerable<string> GetExtraComponentTypes()
         {
             return Keys;
         }
 
+        /// <inheritdoc />
         public bool ShouldSkipComponent(string compName)
         {
             return false; //Registries cannot represent the "remove this component" state.

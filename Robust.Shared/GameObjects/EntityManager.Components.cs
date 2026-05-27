@@ -27,10 +27,9 @@ using Robust.Shared.Exceptions;
 
 namespace Robust.Shared.GameObjects
 {
-    /// <inheritdoc />
     public partial class EntityManager
     {
-        [IoC.Dependency] private readonly IComponentFactory _componentFactory = default!;
+        [IoC.Dependency] private IComponentFactory _componentFactory = default!;
 
 #if EXCEPTION_TOLERANCE
         [IoC.Dependency] private readonly IRuntimeLog _runtimeLog = default!;
@@ -355,7 +354,7 @@ namespace Robust.Shared.GameObjects
         {
             var eventArgs = new AddedComponentEventArgs(new ComponentEventArgs(component, uid), reg);
             ComponentAdded?.Invoke(eventArgs);
-            _eventBus.OnComponentAdded(eventArgs);
+            EventBusInternal.OnComponentAdded(eventArgs);
 
             LifeAddToEntity(uid, component, reg.Idx);
 
@@ -377,7 +376,7 @@ namespace Robust.Shared.GameObjects
                 LifeStartup(uid, component, reg.Idx);
 
             if (metadata.EntityLifeStage >= EntityLifeStage.MapInitialized)
-                EventBus.RaiseComponentEvent(uid, component, reg.Idx, MapInitEventInstance);
+                EventBusInternal.RaiseComponentEvent(uid, component, reg.Idx, MapInitEventInstance);
         }
 
         internal void AddComponentInternal<T>(EntityUid uid, T component, ComponentRegistration reg, bool skipInit, bool overwrite = false, MetaDataComponent? metadata = null) where T : IComponent
@@ -553,25 +552,12 @@ namespace Robust.Shared.GameObjects
 #endif
         }
 
-        /// <summary>
-        /// WARNING: Do not call this unless you're sure of what you're doing!
-        /// </summary>
-        internal void RemoveComponentInternal(EntityUid uid, IComponent component, bool terminating, bool archetypeChange, MetaDataComponent? metadata = null)
+        private void ThrowPreAddRemovalException(EntityUid target, IComponent component)
         {
-            // I hate this but also didn't want the MetaQuery.GetComponent overhead.
-            // and with archetypes we want to avoid moves at all costs.
-            RemoveComponentImmediate(uid, component, _componentFactory.GetIndex(component.GetType()), terminating: terminating, archetypeChange: archetypeChange, metadata);
+            throw new InvalidOperationException(
+                $"Removing a component, {component.GetType()} before it has been added is probably not what you wanted to do. Target entity was {ToPrettyString(target)}.");
         }
 
-        /// <summary>
-        /// Removes a component.
-        /// </summary>
-        /// <param name="uid"></param>
-        /// <param name="component"></param>
-        /// <param name="idx"></param>
-        /// <param name="terminating">Is the entity terminating.</param>
-        /// <param name="archetypeChange">Should we handle the archetype change or is it being handled externally.</param>
-        /// <param name="meta"></param>
         private void RemoveComponentImmediate(
             EntityUid uid,
             IComponent component,
@@ -582,6 +568,11 @@ namespace Robust.Shared.GameObjects
         {
             ThreadCheck();
             DebugTools.AssertOwner(uid, component);
+
+            if (component.LifeStage == ComponentLifeStage.PreAdd)
+            {
+                ThrowPreAddRemovalException(uid, component);
+            }
 
             if (component.Deleted)
             {
@@ -663,7 +654,7 @@ namespace Robust.Shared.GameObjects
 
             var eventArgs = new RemovedComponentEventArgs(new ComponentEventArgs(component, entityUid), false, metadata, idx);
             ComponentRemoved?.Invoke(eventArgs);
-            _eventBus.OnComponentRemoved(eventArgs);
+            EventBusInternal.OnComponentRemoved(eventArgs);
 
             if (!terminating)
             {
@@ -781,18 +772,16 @@ namespace Robust.Shared.GameObjects
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool EnsureComponent<T>(ref Entity<T?> entity) where T : IComponent, new()
         {
-            if (entity.Comp != null)
-            {
-                // Check for deferred component removal.
-                if (entity.Comp.LifeStage <= ComponentLifeStage.Running)
-                {
-                    DebugTools.AssertOwner(entity, entity.Comp);
-                    return true;
-                }
+            if (entity.Comp == null)
+                return EnsureComponent<T>(entity.Owner, out entity.Comp);
 
-                RemoveComponent(entity, entity.Comp);
-            }
+            DebugTools.AssertOwner(entity, entity.Comp);
 
+            // Check for deferred component removal.
+            if (entity.Comp.LifeStage <= ComponentLifeStage.Running)
+                return true;
+
+            RemoveComponent(entity, entity.Comp);
             entity.Comp = AddComponent<T>(entity);
             return false;
         }
@@ -1501,9 +1490,12 @@ namespace Robust.Shared.GameObjects
         }
 
         public bool CanGetComponentState(IEventBus eventBus, IComponent component, ICommonSession player)
+            => CanGetComponentState(component, player);
+
+        public bool CanGetComponentState(IComponent component, ICommonSession player)
         {
             var attempt = new ComponentGetStateAttemptEvent(player);
-            eventBus.RaiseComponentEvent(component.Owner, component, ref attempt);
+            EventBusInternal.RaiseComponentEvent(component.Owner, component, ref attempt);
             return !attempt.Cancelled;
         }
 
@@ -1544,6 +1536,38 @@ namespace Robust.Shared.GameObjects
         }
     }
 
+    /// <summary>
+    ///     An index of all entities with a given component, avoiding looking up the component's storage every time.
+    ///     Using these saves on dictionary lookups, making your code slightly more efficient, and ties in nicely with
+    ///     <see cref="Entity{T}"/>.
+    /// </summary>
+    /// <typeparam name="TComp1">Any component type.</typeparam>
+    /// <example>
+    ///     <code>
+    ///         public sealed class MySystem : EntitySystem
+    ///         {
+    ///             private EntityQuery&lt;TransformComponent&gt; _transforms = default!;
+    ///             <br/>
+    ///             public override void Initialize()
+    ///             {
+    ///                 _transforms = GetEntityQuery&lt;TransformComponent&gt;();
+    ///             }
+    ///             <br/>
+    ///             public void DoThings(EntityUid myEnt)
+    ///             {
+    ///                 var ent = _transforms.Get(myEnt);
+    ///                 // ...
+    ///             }
+    ///         }
+    ///     </code>
+    /// </example>
+    /// <remarks>
+    ///     Queries hold references to <see cref="IEntityManager"/> internals, and are always up to date with the world.
+    ///     They can not however perform mutation, if you need to add or remove components you must use
+    ///     <see cref="EntitySystem"/> or <see cref="IEntityManager"/> methods.
+    /// </remarks>
+    /// <seealso cref="M:Robust.Shared.GameObjects.EntitySystem.GetEntityQuery``1">EntitySystem.GetEntityQuery()</seealso>
+    /// <seealso cref="M:Robust.Shared.GameObjects.EntityManager.GetEntityQuery``1">EntityManager.GetEntityQuery()</seealso>
     public readonly struct EntityQuery<TComp1> where TComp1 : IComponent
     {
         private readonly EntityManager _entManager;
@@ -1557,6 +1581,18 @@ namespace Robust.Shared.GameObjects
             _sawmill = sawmill;
         }
 
+        /// <summary>
+        ///     Gets <typeparamref name="TComp1"/> for an entity, throwing if it can't find it.
+        /// </summary>
+        /// <param name="uid">The entity to do a lookup for.</param>
+        /// <returns>The located component.</returns>
+        /// <exception cref="KeyNotFoundException">Thrown if the entity does not have a component of type <typeparamref name="TComp1"/>.</exception>
+        /// <seealso cref="M:Robust.Shared.GameObjects.IEntityManager.GetComponent``1(Robust.Shared.GameObjects.EntityUid)">
+        ///     IEntityManager.GetComponent&lt;T&gt;(EntityUid)
+        /// </seealso>
+        /// <seealso cref="M:Robust.Shared.GameObjects.EntitySystem.Comp``1(Robust.Shared.GameObjects.EntityUid)">
+        ///     EntitySystem.Comp&lt;T&gt;(EntityUid)
+        /// </seealso>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [Pure]
         public TComp1 GetComponent(EntityUid uid)
@@ -1567,6 +1603,7 @@ namespace Robust.Shared.GameObjects
             throw new KeyNotFoundException($"Entity {uid} does not have a component of type {typeof(TComp1)}");
         }
 
+        /// <inheritdoc cref="GetComponent"/>
         [MethodImpl(MethodImplOptions.AggressiveInlining), Pure]
         public Entity<TComp1> Get(EntityUid uid)
         {
@@ -1576,6 +1613,22 @@ namespace Robust.Shared.GameObjects
             throw new KeyNotFoundException($"Entity {uid} does not have a component of type {typeof(TComp1)}");
         }
 
+        /// <summary>
+        ///     Gets <typeparamref name="TComp1"/> for an entity, if it's present.
+        /// </summary>
+        /// <remarks>
+        ///     If it is strictly errorenous for a component to not be present, you may want to use
+        ///     <see cref="Resolve(Robust.Shared.GameObjects.EntityUid,ref TComp1?,bool)"/> instead.
+        /// </remarks>
+        /// <param name="uid">The entity to do a lookup for.</param>
+        /// <param name="component">The located component, if any.</param>
+        /// <returns>Whether the component was found.</returns>
+        /// <seealso cref="M:Robust.Shared.GameObjects.IEntityManager.TryGetComponent``1(Robust.Shared.GameObjects.EntityUid,``0@)">
+        ///     IEntityManager.TryGetComponent&lt;T&gt;(EntityUid, out T?)
+        /// </seealso>
+        /// <seealso cref="M:Robust.Shared.GameObjects.EntitySystem.TryComp``1(Robust.Shared.GameObjects.EntityUid,``0@)">
+        ///     EntitySystem.TryComp&lt;T&gt;(EntityUid, out T?)
+        /// </seealso>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [Pure]
         public bool TryGetComponent([NotNullWhen(true)] EntityUid? uid, [NotNullWhen(true)] out TComp1? component)
@@ -1589,6 +1642,7 @@ namespace Robust.Shared.GameObjects
             return TryGetComponent(uid.Value, out component);
         }
 
+        /// <inheritdoc cref="TryGetComponent(Robust.Shared.GameObjects.EntityUid?,out TComp1?)"/>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [Pure]
         public bool TryGetComponent(EntityUid uid, [NotNullWhen(true)] out TComp1? component)
@@ -1603,24 +1657,40 @@ namespace Robust.Shared.GameObjects
             return false;
         }
 
+        /// <inheritdoc cref="TryGetComponent(Robust.Shared.GameObjects.EntityUid?,out TComp1?)"/>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [Pure]
         public bool TryComp(EntityUid uid, [NotNullWhen(true)] out TComp1? component)
             => TryGetComponent(uid, out component);
 
+        /// <inheritdoc cref="TryGetComponent(Robust.Shared.GameObjects.EntityUid?,out TComp1?)"/>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [Pure]
         public bool TryComp([NotNullWhen(true)] EntityUid? uid, [NotNullWhen(true)] out TComp1? component)
             => TryGetComponent(uid, out component);
 
+        /// <summary>
+        ///     Tests if the given entity has <typeparamref name="TComp1"/>.
+        /// </summary>
+        /// <param name="uid">The entity to do a lookup for.</param>
+        /// <returns>Whether the component exists for that entity.</returns>
+        /// <remarks>If you immediately need to then look up that component, it's more efficient to use <see cref="TryComp(Robust.Shared.GameObjects.EntityUid,out TComp1?)"/>.</remarks>
+        /// <seealso cref="M:Robust.Shared.GameObjects.IEntityManager.HasComponent``1(Robust.Shared.GameObjects.EntityUid)">
+        ///     IEntityManager.HasComponent&lt;T&gt;(EntityUid)
+        /// </seealso>
+        /// <seealso cref="M:Robust.Shared.GameObjects.EntitySystem.HasComp``1(Robust.Shared.GameObjects.EntityUid)">
+        ///     EntitySystem.HasComp&lt;T&gt;(EntityUid)
+        /// </seealso>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [Pure]
         public bool HasComp(EntityUid uid) => HasComponent(uid);
 
+        /// <inheritdoc cref="HasComp(Robust.Shared.GameObjects.EntityUid)"/>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [Pure]
         public bool HasComp([NotNullWhen(true)] EntityUid? uid) => HasComponent(uid);
 
+        /// <inheritdoc cref="HasComp(Robust.Shared.GameObjects.EntityUid)"/>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [Pure]
         public bool HasComponent(EntityUid uid)
@@ -1628,6 +1698,7 @@ namespace Robust.Shared.GameObjects
             return _entManager.TryGetComponent(uid, _type, out var comp) && !comp.Deleted;
         }
 
+        /// <inheritdoc cref="HasComp(Robust.Shared.GameObjects.EntityUid)"/>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [Pure]
         public bool HasComponent([NotNullWhen(true)] EntityUid? uid)
@@ -1635,6 +1706,14 @@ namespace Robust.Shared.GameObjects
             return uid != null && HasComponent(uid.Value);
         }
 
+        /// <include file='Docs.xml' path='entries/entry[@name="EntityQueryResolve"]/*'/>
+        /// <param name="uid">The entity to do a lookup for.</param>
+        /// <param name="component">The space to write the component into if found.</param>
+        /// <param name="logMissing">Whether to log if the component is missing, for diagnostics.</param>
+        /// <returns>Whether the component was found.</returns>
+        /// <seealso cref="M:Robust.Shared.GameObjects.EntitySystem.Resolve``1(Robust.Shared.GameObjects.EntityUid,``0@,System.Boolean)">
+        ///     EntitySystem.Resolve&lt;T&gt;(EntityUid, out T?)
+        /// </seealso>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Resolve(EntityUid uid, [NotNullWhen(true)] ref TComp1? component, bool logMissing = true)
         {
@@ -1651,19 +1730,29 @@ namespace Robust.Shared.GameObjects
             }
 
             if (logMissing)
-            {
-                _sawmill.Error($"Can't resolve \"{typeof(TComp1)}\" on entity {uid}!\n{Environment.StackTrace}");
-            }
+                _entMan.ResolveSawmill.Error($"Can't resolve \"{typeof(TComp1)}\" on entity {_entMan.ToPrettyString(uid)}!\n{Environment.StackTrace}");
 
             return false;
         }
 
+        /// <include file='Docs.xml' path='entries/entry[@name="EntityQueryResolve"]/*'/>
+        /// <param name="entity">The space to write the component into if found.</param>
+        /// <param name="logMissing">Whether to log if the component is missing, for diagnostics.</param>
+        /// <returns>Whether the component was found.</returns>
+        /// <seealso cref="M:Robust.Shared.GameObjects.EntitySystem.Resolve``1(Robust.Shared.GameObjects.EntityUid,``0@,System.Boolean)">
+        ///     EntitySystem.Resolve&lt;T&gt;(EntityUid, out T?)
+        /// </seealso>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Resolve(ref Entity<TComp1?> entity, bool logMissing = true)
         {
             return Resolve(entity.Owner, ref entity.Comp, logMissing);
         }
 
+        /// <summary>
+        ///     Gets <typeparamref name="TComp1"/> for an entity if it's present, or null if it's not.
+        /// </summary>
+        /// <param name="uid">The entity to do the lookup on.</param>
+        /// <returns>The component, if it exists.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [Pure]
         public TComp1? CompOrNull(EntityUid uid)
@@ -1674,6 +1763,7 @@ namespace Robust.Shared.GameObjects
             return default;
         }
 
+        /// <inheritdoc cref="GetComponent"/>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         [Pure]
         public TComp1 Comp(EntityUid uid)
@@ -1759,7 +1849,7 @@ namespace Robust.Shared.GameObjects
             }
 
             if (logMissing)
-                _sawmill.Error($"Can't resolve \"{typeof(TComp1)}\" on entity {uid}!\n{new StackTrace(1, true)}");
+                _entMan.ResolveSawmill.Error($"Can't resolve \"{typeof(TComp1)}\" on entity {_entMan.ToPrettyString(uid)}!\n{new StackTrace(1, true)}");
 
             return false;
         }
@@ -1835,7 +1925,8 @@ namespace Robust.Shared.GameObjects
     #region Query
 
     /// <summary>
-    /// Returns all matching unpaused components.
+    ///     Iterates all entities that have the given components, including the components themselves, but only if
+    ///     the entity they're on is not <see cref="EntitySystem.Paused">Paused</see>.
     /// </summary>
     public struct EntityQueryEnumerator<TComp1>
         where TComp1 : IComponent
@@ -1865,6 +1956,12 @@ namespace Robust.Shared.GameObjects
             }
         }
 
+        /// <summary>
+        ///     Provides the next entity and component in the enumerator, if there are still more to iterate through.
+        /// </summary>
+        /// <param name="uid">The found entity, if any.</param>
+        /// <param name="comp1">A component on the found entity.</param>
+        /// <returns>Whether the enumerator was empty (and as such no entity nor component were returned)</returns>
         public bool MoveNext(out EntityUid uid, [NotNullWhen(true)] out TComp1? comp1)
         {
             if (MoveNext(out comp1))
@@ -1930,6 +2027,8 @@ namespace Robust.Shared.GameObjects
             }
         }
 
+        /// <inheritdoc cref="M:Robust.Shared.GameObjects.EntityQueryEnumerator`1.MoveNext(Robust.Shared.GameObjects.EntityUid@,`0@)"/>
+        /// <param name="comp2">A component on the found entity.</param>
         public bool MoveNext(out EntityUid uid, [NotNullWhen(true)] out TComp1? comp1, [NotNullWhen(true)] out TComp2? comp2)
         {
             if (MoveNext(out comp1, out comp2))
@@ -2142,7 +2241,8 @@ namespace Robust.Shared.GameObjects
     #region All query
 
     /// <summary>
-    /// Returns all matching components, paused or not.
+    ///     Iterates all entities that have the given components, including the components themselves, regardless
+    ///     of if the entity is <see cref="EntitySystem.Paused">Paused</see>.
     /// </summary>
     public struct AllEntityQueryEnumerator<TComp1>
         where TComp1 : IComponent
