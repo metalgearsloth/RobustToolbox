@@ -175,7 +175,7 @@ namespace Robust.Shared.Utility
 #pragma warning disable CS0618 // Type or member is obsolete
             if (component.Owner != uid)
 #pragma warning restore CS0618 // Type or member is obsolete
-                throw new DebugAssertException($"Entity {uid} is not the owner of the component. Component: {component.GetType().Name}");
+                throw new DebugAssertException($"Entity {uid} is not the owner of the component. Component: {component.GetType().Name} owner is {component.Owner}");
         }
 
         /// <summary>

@@ -640,7 +640,7 @@ namespace Robust.Shared.GameObjects
     {
         public bool IsValid() => Uid.IsValid();
         public bool Valid => IsValid();
-        public static readonly BroadphaseData Invalid = new(EntityUid.Invalid, EntityUid.Invalid, false, false);
+        public static readonly BroadphaseData Invalid = new(EntityUid.Invalid, false, false);
 
         // TODO include MapId if ever grids are allowed to enter null-space (leave PVS).
     }

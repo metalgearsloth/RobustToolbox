@@ -1,17 +1,10 @@
 using System;
-using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using System.Threading;
 using Arch.Core;
-using Arch.Core.Extensions.Dangerous;
 using Arch.Core.Utils;
-using Collections.Pooled;
-using CommunityToolkit.HighPerformance.Helpers;
 using JetBrains.Annotations;
 using Robust.Shared.GameStates;
 using Robust.Shared.Log;
@@ -81,7 +74,7 @@ namespace Robust.Shared.GameObjects
         /// <inheritdoc />
         public int Count<T>() where T : IComponent
         {
-            return _world.CountEntities(new QueryDescription().WithAll<T>());
+            return _world.CountEntities(AllEntityQueryDescription<T>.Value);
         }
 
         /// <inheritdoc />
@@ -292,7 +285,7 @@ namespace Robust.Shared.GameObjects
             AddComponentInternal(uid, component, compReg, false, overwrite: false, metadata);
         }
 
-        private void AddComponentInternalOnly<T>(
+        internal void AddComponentInternalOnly<T>(
             EntityUid uid, T component,
             ComponentRegistration reg,
             bool overwrite = false,
@@ -300,6 +293,78 @@ namespace Robust.Shared.GameObjects
         {
             ThreadCheck();
 
+            NormalizeComponentOwner(uid, component);
+            AssertCanAddComponent(uid, component, reg, metadata);
+
+            var archUid = ToArch(uid);
+            if (overwrite && _world.Has(archUid, reg.ArchType))
+            {
+                RemoveExistingComponentForOverwrite(uid, archUid, reg, metadata);
+                SetComponentInternalOnly(uid, component, reg, metadata);
+                return;
+            }
+
+            DebugTools.Assert(!_world.Has(archUid, reg.ArchType));
+            if (_world.Has(archUid, reg.ArchType))
+                return;
+
+            _world.Add(archUid, (object)component);
+
+            metadata ??= MetaQuery.GetComponentInternal(uid);
+            FinishComponentStorage(component, reg, metadata);
+        }
+
+        internal void SetComponentInternalOnly<T>(
+            EntityUid uid, T component,
+            ComponentRegistration reg,
+            MetaDataComponent? metadata = null) where T : IComponent
+        {
+            ThreadCheck();
+
+            NormalizeComponentOwner(uid, component);
+            AssertCanAddComponent(uid, component, reg, metadata);
+
+            var archUid = ToArch(uid);
+            DebugTools.Assert(_world.Has(archUid, reg.ArchType));
+            _world.Set(archUid, (object)component);
+
+            metadata ??= MetaQuery.GetComponentInternal(uid);
+            FinishComponentStorage(component, reg, metadata);
+        }
+
+        private void RemoveExistingComponentForOverwrite(
+            EntityUid uid,
+            Entity archUid,
+            ComponentRegistration reg,
+            MetaDataComponent? metadata)
+        {
+            if (!_world.TryGet(archUid, reg.ArchType, out var existing) || existing is not IComponent existingComp)
+                return;
+
+            var existingOwnerMatches = false;
+#pragma warning disable CS0618
+            existingOwnerMatches = existingComp.Owner == uid;
+#pragma warning restore CS0618
+
+            if (existingOwnerMatches && existingComp.LifeStage != ComponentLifeStage.PreAdd)
+            {
+                DebugTools.AssertOwner(uid, existingComp);
+                RemoveComponentImmediate(uid, existingComp, reg.Idx, false, false, meta: metadata);
+            }
+        }
+
+        private void NormalizeComponentOwner<T>(EntityUid uid, T component)
+            where T : IComponent
+        {
+#pragma warning disable CS0618
+            component.Owner = uid;
+#pragma warning restore CS0618
+            DebugTools.AssertOwner(uid, component);
+        }
+
+        private void AssertCanAddComponent<T>(EntityUid uid, T component, ComponentRegistration reg, MetaDataComponent? metadata)
+            where T : IComponent
+        {
             // We can't use typeof(T) here in case T is just Component
             DebugTools.Assert(component is MetaDataComponent ||
                               (metadata ?? MetaQuery.GetComponent(uid)).EntityLifeStage < EntityLifeStage.Terminating,
@@ -309,35 +374,14 @@ namespace Robust.Shared.GameObjects
             DebugTools.Assert(component is MetaDataComponent ||
                               (metadata ?? MetaQuery.GetComponent(uid)).EntityLifeStage < EntityLifeStage.Terminating,
                 $"Attempted to add a {reg.Name} component to an entity ({ToPrettyString(uid)}) while it is terminating");
+        }
 
-            if (overwrite)
-            {
-                if (_world.TryGet(uid, reg.ArchType, out var existing) && existing is IComponent existingComp)
-                {
-                    DebugTools.AssertOwner(uid, existingComp);
-                    RemoveComponentImmediate(uid, existingComp, reg.Idx, false, false, meta: metadata);
-                }
-            }
-
-            // TODO optimize this
-            // Need multi-comp adds so we can remove this call probably.
-            if (!_world.Has(uid, reg.ArchType))
-                _world.Add(uid, (object)component);
-            else
-            {
-                // Overwrite doesn't trigger archetype change so the ref is stale, but we'll bulldoze it anyway here so doesn't matter if it's not-null.
-                DebugTools.Assert(overwrite || (!_world.TryGet(uid, reg.ArchType, out var existing) || existing == null));
-                _world.Set(uid, (object)component);
-            }
-
+        private void FinishComponentStorage<T>(T component, ComponentRegistration reg, MetaDataComponent metadata)
+            where T : IComponent
+        {
             // add the component to the netId grid
             if (reg.NetID != null && component.NetSyncEnabled)
-            {
-                // the main comp grid keeps this in sync
-                var netId = reg.NetID.Value;
-                metadata ??= MetaQuery.GetComponentInternal(uid);
-                metadata.NetComponents.Add(netId, component);
-            }
+                metadata.NetComponents.Add(reg.NetID.Value, component);
 
             if (component is IComponentDelta delta)
             {
@@ -381,7 +425,6 @@ namespace Robust.Shared.GameObjects
 
         internal void AddComponentInternal<T>(EntityUid uid, T component, ComponentRegistration reg, bool skipInit, bool overwrite = false, MetaDataComponent? metadata = null) where T : IComponent
         {
-            DebugTools.AssertOwner(uid, component);
             AddComponentInternalOnly(uid, component, reg, overwrite: overwrite, metadata);
             AddComponentEvents(uid, component, reg, skipInit, metadata);
         }
@@ -469,7 +512,7 @@ namespace Robust.Shared.GameObjects
         /// <inheritdoc />
         public void RemoveComponents(EntityUid uid, MetaDataComponent? meta = null)
         {
-            var objComps = _world.GetAllComponents(uid);
+            var objComps = _world.GetAllComponents(ToArch(uid));
             // Reverse order
             for (var i = objComps.Length - 1; i >= 0; i--)
             {
@@ -481,7 +524,7 @@ namespace Robust.Shared.GameObjects
         /// <inheritdoc />
         public void DisposeComponents(EntityUid uid, MetaDataComponent? meta = null)
         {
-            var objComps = _world.GetAllComponents(uid);
+            var objComps = _world.GetAllComponents(ToArch(uid));
 
             // Reverse order
             for (var i = objComps.Length - 1; i >= 0; i--)
@@ -490,6 +533,9 @@ namespace Robust.Shared.GameObjects
 
                 try
                 {
+#pragma warning disable CS0618
+                    comp.Owner = uid;
+#pragma warning restore CS0618
                     RemoveComponentImmediate(uid, comp, _componentFactory.GetIndex(comp.GetType()), terminating: true, archetypeChange: false, meta);
                 }
                 catch (Exception exc)
@@ -675,9 +721,10 @@ namespace Robust.Shared.GameObjects
 
             if (archetypeChange)
             {
-                DebugTools.Assert(_world.Has(entityUid, idx.Type));
-                if (_world.Has(entityUid, idx.Type))
-                    _world.Remove(entityUid, idx.Type);
+                var archUid = ToArch(entityUid);
+                DebugTools.Assert(_world.Has(archUid, idx.Type));
+                if (_world.Has(archUid, idx.Type))
+                    _world.Remove(archUid, idx.Type);
             }
 
             DebugTools.Assert(_netMan.IsClient // Client side prediction can set LastComponentRemoved to some future tick,
@@ -689,7 +736,7 @@ namespace Robust.Shared.GameObjects
         [Pure]
         public bool HasComponent<T>(EntityUid uid) where T : IComponent
         {
-            return uid.Valid && _world.TryGet(uid, out T? comp) && comp != null && !comp.Deleted;
+            return TryAlive(uid, out var archUid) && _world.TryGet(archUid, out T? comp) && comp != null && !comp.Deleted;
         }
 
         /// <inheritdoc />
@@ -704,7 +751,7 @@ namespace Robust.Shared.GameObjects
         [Pure]
         public bool HasComponent(EntityUid uid, ComponentRegistration reg)
         {
-            return uid.Valid && _world.TryGet(uid, reg.ArchType, out var comp) && comp != null && !((IComponent) comp).Deleted;
+            return TryAlive(uid, out var archUid) && _world.TryGet(archUid, reg.ArchType, out var comp) && comp != null && !((IComponent) comp).Deleted;
         }
 
         /// <inheritdoc />
@@ -712,7 +759,7 @@ namespace Robust.Shared.GameObjects
         [Pure]
         public bool HasComponent(EntityUid uid, Type type)
         {
-            return uid.Valid && _world.TryGet(uid, type, out var comp) && comp != null && !((IComponent) comp).Deleted;
+            return TryAlive(uid, out var archUid) && _world.TryGet(archUid, type, out var comp) && comp != null && !((IComponent) comp).Deleted;
         }
 
         /// <inheritdoc />
@@ -811,7 +858,7 @@ namespace Robust.Shared.GameObjects
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public T GetComponent<T>(EntityUid uid) where T : IComponent
         {
-            if (!uid.Valid || !_world.TryGet(uid, out T? comp) || comp == null)
+            if (!uid.Valid || !_world.TryGet(ToArch(uid), out T? comp) || comp == null)
             {
                 throw new KeyNotFoundException($"Entity {uid} does not have a component of type {typeof(T)}");
             }
@@ -822,7 +869,7 @@ namespace Robust.Shared.GameObjects
         [Pure]
         public IComponent GetComponent(EntityUid uid, CompIdx type)
         {
-            if (!uid.Valid || !_world.TryGet(uid, type.Type, out var comp) || comp == null)
+            if (!uid.Valid || !_world.TryGet(ToArch(uid), type.Type, out var comp) || comp == null)
             {
                 throw new KeyNotFoundException($"Entity {uid} does not have a component of type {type.Type}");
             }
@@ -834,7 +881,7 @@ namespace Robust.Shared.GameObjects
         [Pure]
         public IComponent GetComponent(EntityUid uid, Type type)
         {
-            if (!uid.Valid || !_world.TryGet(uid, type, out var comp) || comp == null)
+            if (!uid.Valid || !_world.TryGet(ToArch(uid), type, out var comp) || comp == null)
             {
                 throw new KeyNotFoundException($"Entity {uid} does not have a component of type {type}");
             }
@@ -868,7 +915,7 @@ namespace Robust.Shared.GameObjects
                 return false;
             }
 
-            if (_world.TryGet(uid, out component) && component != null)
+            if (_world.TryGet(ToArch(uid), out component) && component != null)
             {
                 if (!component.Deleted)
                 {
@@ -910,7 +957,7 @@ namespace Robust.Shared.GameObjects
 
         internal bool TryGetComponent<T>(EntityUid uid, ComponentType type, [NotNullWhen(true)] out IComponent? component)
         {
-            if (uid.Valid && _world.TryGet(uid, type, out var comp) && comp != null)
+            if (TryAlive(uid, out var archUid) && _world.TryGet(archUid, type, out var comp))
             {
                 component = (IComponent) comp;
 
@@ -926,7 +973,7 @@ namespace Robust.Shared.GameObjects
 
         internal bool TryGetComponent<T>(EntityUid uid, ComponentType type, [NotNullWhen(true)] out T? component) where T : IComponent?
         {
-            if (uid.Valid && _world.TryGet(uid, type, out var comp) && comp != null)
+            if (TryAlive(uid, out var archUid) && _world.TryGet(archUid, type, out var comp))
             {
                 component = (T) comp;
 
@@ -937,6 +984,28 @@ namespace Robust.Shared.GameObjects
             }
 
             component = default;
+            return false;
+        }
+
+        internal bool HasComponentWithoutLifeCheck(EntityUid uid, ComponentRegistration reg)
+        {
+            return _world.TryGet(ToArch(uid), reg.ArchType, out var comp)
+                   && comp is IComponent component
+                   && !component.Deleted;
+        }
+
+        internal bool TryGetComponentWithoutLifeCheck(
+            EntityUid uid,
+            CompIdx idx,
+            [NotNullWhen(true)] out IComponent? component)
+        {
+            if (_world.TryGet(ToArch(uid), idx.Type, out var comp) && comp is IComponent value)
+            {
+                component = value;
+                return !component.Deleted;
+            }
+
+            component = null;
             return false;
         }
 
@@ -1091,18 +1160,18 @@ namespace Robust.Shared.GameObjects
 
         public EntityQuery<TComp1> GetEntityQuery<TComp1>() where TComp1 : IComponent
         {
-            return new EntityQuery<TComp1>(this, _resolveSawmill);
+            return new EntityQuery<TComp1>(this, ResolveSawmill);
         }
 
         public EntityQuery<IComponent> GetEntityQuery(Type type)
         {
-            return new EntityQuery<IComponent>(this, _resolveSawmill);
+            return new EntityQuery<IComponent>(this, ResolveSawmill);
         }
 
         /// <inheritdoc />
         public IEnumerable<IComponent> GetComponents(EntityUid uid)
         {
-            foreach (var obj in _world.GetAllComponents(uid))
+            foreach (var obj in _world.GetAllComponents(ToArch(uid)))
             {
                 var comp = (IComponent)obj!;
 
@@ -1115,7 +1184,7 @@ namespace Robust.Shared.GameObjects
         /// <inheritdoc />
         public int ComponentCount(EntityUid uid)
         {
-            return _world.GetArchetype(uid).Signature.Count;
+            return _world.GetArchetype(ToArch(uid)).Signature.Count;
         }
 
         /// <summary>
@@ -1124,11 +1193,11 @@ namespace Robust.Shared.GameObjects
         /// </summary>
         private void CopyComponentsInto(ref Span<IComponent?> comps, EntityUid uid)
         {
-            var set = _world.GetAllComponents(uid);
+            var set = _world.GetAllComponents(ToArch(uid));
 
             if (set.Length > comps.Length)
             {
-                comps = new IComponent[set.Length];
+                comps = new IComponent?[set.Length];
             }
 
             var i = 0;
@@ -1141,7 +1210,7 @@ namespace Robust.Shared.GameObjects
         /// <inheritdoc />
         public IEnumerable<T> GetComponents<T>(EntityUid uid)
         {
-            var comps = _world.GetAllComponents(uid);
+            var comps = _world.GetAllComponents(ToArch(uid));
 
             foreach (var comp in comps)
             {
@@ -1459,7 +1528,7 @@ namespace Robust.Shared.GameObjects
                 query = new(new ComponentType[] { type, typeof(MetaDataComponent) });
             }
 
-            foreach (var chunk in _world.Query(query).ChunkIterator(_world))
+            foreach (var chunk in _world.ChunkIterator(query))
             {
                 var components = chunk.GetArray(type);
                 var metas = includePaused ? default : chunk.GetArray<MetaDataComponent>();
@@ -1730,7 +1799,7 @@ namespace Robust.Shared.GameObjects
             }
 
             if (logMissing)
-                _entMan.ResolveSawmill.Error($"Can't resolve \"{typeof(TComp1)}\" on entity {_entMan.ToPrettyString(uid)}!\n{Environment.StackTrace}");
+                _sawmill.Error($"Can't resolve \"{typeof(TComp1)}\" on entity {_entManager.ToPrettyString(uid)}!\n{Environment.StackTrace}");
 
             return false;
         }
@@ -1849,7 +1918,7 @@ namespace Robust.Shared.GameObjects
             }
 
             if (logMissing)
-                _entMan.ResolveSawmill.Error($"Can't resolve \"{typeof(TComp1)}\" on entity {_entMan.ToPrettyString(uid)}!\n{new StackTrace(1, true)}");
+                _sawmill.Error($"Can't resolve \"{typeof(TComp1)}\" on entity {_entManager.ToPrettyString(uid)}!\n{new StackTrace(1, true)}");
 
             return false;
         }
@@ -1869,6 +1938,66 @@ namespace Robust.Shared.GameObjects
         #endregion
     }
 
+    internal static class EntityQueryDescription<TComp1>
+        where TComp1 : IComponent
+    {
+        public static readonly QueryDescription Value = new QueryDescription().WithAll<TComp1, MetaDataComponent>();
+    }
+
+    internal static class EntityQueryDescription<TComp1, TComp2>
+        where TComp1 : IComponent
+        where TComp2 : IComponent
+    {
+        public static readonly QueryDescription Value = new QueryDescription().WithAll<TComp1, TComp2, MetaDataComponent>();
+    }
+
+    internal static class EntityQueryDescription<TComp1, TComp2, TComp3>
+        where TComp1 : IComponent
+        where TComp2 : IComponent
+        where TComp3 : IComponent
+    {
+        public static readonly QueryDescription Value = new QueryDescription().WithAll<TComp1, TComp2, TComp3, MetaDataComponent>();
+    }
+
+    internal static class EntityQueryDescription<TComp1, TComp2, TComp3, TComp4>
+        where TComp1 : IComponent
+        where TComp2 : IComponent
+        where TComp3 : IComponent
+        where TComp4 : IComponent
+    {
+        public static readonly QueryDescription Value = new QueryDescription().WithAll<TComp1, TComp2, TComp3, TComp4, MetaDataComponent>();
+    }
+
+    internal static class AllEntityQueryDescription<TComp1>
+        where TComp1 : IComponent
+    {
+        public static readonly QueryDescription Value = new QueryDescription().WithAll<TComp1>();
+    }
+
+    internal static class AllEntityQueryDescription<TComp1, TComp2>
+        where TComp1 : IComponent
+        where TComp2 : IComponent
+    {
+        public static readonly QueryDescription Value = new QueryDescription().WithAll<TComp1, TComp2>();
+    }
+
+    internal static class AllEntityQueryDescription<TComp1, TComp2, TComp3>
+        where TComp1 : IComponent
+        where TComp2 : IComponent
+        where TComp3 : IComponent
+    {
+        public static readonly QueryDescription Value = new QueryDescription().WithAll<TComp1, TComp2, TComp3>();
+    }
+
+    internal static class AllEntityQueryDescription<TComp1, TComp2, TComp3, TComp4>
+        where TComp1 : IComponent
+        where TComp2 : IComponent
+        where TComp3 : IComponent
+        where TComp4 : IComponent
+    {
+        public static readonly QueryDescription Value = new QueryDescription().WithAll<TComp1, TComp2, TComp3, TComp4>();
+    }
+
     #region ComponentRegistry Query
 
     /// <summary>
@@ -1885,8 +2014,7 @@ namespace Robust.Shared.GameObjects
             QueryDescription desc)
         {
             _desc = desc;
-            var query = world.Query(desc);
-            _chunkEnumerator = query.ChunkIterator(world).GetEnumerator();
+            _chunkEnumerator = world.ChunkIterator(desc).GetEnumerator();
             if (_chunkEnumerator.MoveNext())
             {
                 _index = _chunkEnumerator.Current.Count;
@@ -1942,13 +2070,13 @@ namespace Robust.Shared.GameObjects
         public EntityQueryEnumerator(World world)
         {
             _world = world;
-            _query = world.Query(new QueryDescription().WithAll<TComp1, MetaDataComponent>());
+            _query = world.Query(EntityQueryDescription<TComp1>.Value);
             Reset();
         }
 
         public void Reset()
         {
-            _chunkEnumerator = _query.ChunkIterator(_world).GetEnumerator();
+            _chunkEnumerator = _world.ChunkIterator(EntityQueryDescription<TComp1>.Value).GetEnumerator();
             if (_chunkEnumerator.MoveNext())
             {
                 _index = _chunkEnumerator.Current.Count;
@@ -2019,7 +2147,7 @@ namespace Robust.Shared.GameObjects
         public EntityQueryEnumerator(World world)
         {
             Unsafe.SkipInit(out this);
-            _chunkEnumerator = world.Query(new QueryDescription().WithAll<TComp1, TComp2, MetaDataComponent>()).ChunkIterator(world).GetEnumerator();
+            _chunkEnumerator = world.ChunkIterator(EntityQueryDescription<TComp1, TComp2>.Value).GetEnumerator();
             if (_chunkEnumerator.MoveNext())
             {
                 _index = _chunkEnumerator.Current.Count;
@@ -2090,7 +2218,7 @@ namespace Robust.Shared.GameObjects
 
         public EntityQueryEnumerator(World world)
         {
-            _chunkEnumerator = world.Query(new QueryDescription().WithAll<TComp1, TComp2, TComp3, MetaDataComponent>()).ChunkIterator(world).GetEnumerator();
+            _chunkEnumerator = world.ChunkIterator(EntityQueryDescription<TComp1, TComp2, TComp3>.Value).GetEnumerator();
             if (_chunkEnumerator.MoveNext())
             {
                 _index = _chunkEnumerator.Current.Count;
@@ -2170,7 +2298,7 @@ namespace Robust.Shared.GameObjects
 
         public EntityQueryEnumerator(World world)
         {
-            _chunkEnumerator = world.Query(new QueryDescription().WithAll<TComp1, TComp2, TComp3, TComp4, MetaDataComponent>()).ChunkIterator(world).GetEnumerator();
+            _chunkEnumerator = world.ChunkIterator(EntityQueryDescription<TComp1, TComp2, TComp3, TComp4>.Value).GetEnumerator();
             if (_chunkEnumerator.MoveNext())
             {
                 _index = _chunkEnumerator.Current.Count;
@@ -2254,7 +2382,7 @@ namespace Robust.Shared.GameObjects
         internal AllEntityQueryEnumerator(World world)
         {
             Unsafe.SkipInit(out this);
-            _chunkEnumerator = world.Query(new QueryDescription().WithAll<TComp1>()).ChunkIterator(world).GetEnumerator();
+            _chunkEnumerator = world.ChunkIterator(AllEntityQueryDescription<TComp1>.Value).GetEnumerator();
             if (_chunkEnumerator.MoveNext())
             {
                 _index = _chunkEnumerator.Current.Count;
@@ -2322,7 +2450,7 @@ namespace Robust.Shared.GameObjects
         public AllEntityQueryEnumerator(World world)
         {
             Unsafe.SkipInit(out this);
-            _chunkEnumerator = world.Query(new QueryDescription().WithAll<TComp1, TComp2>()).ChunkIterator(world).GetEnumerator();
+            _chunkEnumerator = world.ChunkIterator(AllEntityQueryDescription<TComp1, TComp2>.Value).GetEnumerator();
             if (_chunkEnumerator.MoveNext())
             {
                 _index = _chunkEnumerator.Current.Count;
@@ -2398,7 +2526,7 @@ namespace Robust.Shared.GameObjects
 
         public AllEntityQueryEnumerator(World world)
         {
-            _chunkEnumerator = world.Query(new QueryDescription().WithAll<TComp1, TComp2, TComp3>()).ChunkIterator(world).GetEnumerator();
+            _chunkEnumerator = world.ChunkIterator(AllEntityQueryDescription<TComp1, TComp2, TComp3>.Value).GetEnumerator();
             if (_chunkEnumerator.MoveNext())
             {
                 _index = _chunkEnumerator.Current.Count;
@@ -2476,7 +2604,7 @@ namespace Robust.Shared.GameObjects
 
         public AllEntityQueryEnumerator(World world)
         {
-            _chunkEnumerator = world.Query(new QueryDescription().WithAll<TComp1, TComp2, TComp3, TComp4>()).ChunkIterator(world).GetEnumerator();
+            _chunkEnumerator = world.ChunkIterator(AllEntityQueryDescription<TComp1, TComp2, TComp3, TComp4>.Value).GetEnumerator();
             if (_chunkEnumerator.MoveNext())
             {
                 _index = _chunkEnumerator.Current.Count;

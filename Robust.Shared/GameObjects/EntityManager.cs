@@ -177,7 +177,7 @@ namespace Robust.Shared.GameObjects
             }
 
             var protoData = PrototypeManager.GetPrototypeData(prototype);
-            var comps = _world.GetAllComponents(uid);
+            var comps = _world.GetAllComponents(ToArch(uid));
 
             // Fast check if the component counts match.
             // Note that transform and metadata are not included in the prototype data.
@@ -386,7 +386,7 @@ namespace Robust.Shared.GameObjects
         /// <inheritdoc />
         public IEnumerable<EntityUid> GetEntities()
         {
-            using var ents = new PooledList<Entity>(_world.Size);
+            var ents = new Entity[_world.CountEntities(_archMetaQuery)];
             _world.GetEntities(_archMetaQuery, ents);
 
             foreach (var entity in ents)
@@ -646,6 +646,8 @@ namespace Robust.Shared.GameObjects
             TransformComponent transform,
             TransformComponent? parentXform)
         {
+            ThreadCheck();
+            var archUid = ToArch(uid);
             DebugTools.Assert(transform.ParentUid.IsValid() == (parentXform != null));
             DebugTools.Assert(parentXform == null || parentXform._children.Contains(uid));
 
@@ -677,7 +679,7 @@ namespace Robust.Shared.GameObjects
                 _sawmill.Error($"Failed to delete all children of entity: {ToPrettyString(uid)}");
 
             // Shut down all components.
-            var objComps = _world.GetAllComponents(uid);
+            var objComps = _world.GetAllComponents(archUid);
 
             foreach (var comp in objComps)
             {
@@ -716,7 +718,7 @@ namespace Robust.Shared.GameObjects
             }
 
             EventBusInternal.OnEntityDeleted(uid);
-            DestroyArch(uid);
+            _world.Destroy(archUid);
             // Need to get the ID above before MetadataComponent shutdown but only remove it after everything else is done.
             NetEntityLookup.Remove(metadata.NetEntity);
         }
@@ -812,7 +814,13 @@ namespace Robust.Shared.GameObjects
 
         public bool Deleted(EntityUid uid)
         {
-            return !uid.Valid || !_world.TryGet(uid, out MetaDataComponent? comp) || comp!.EntityLifeStage > EntityLifeStage.Terminating;
+            if (!uid.Valid)
+                return true;
+
+            var archUid = ToArch(uid);
+            return !_world.IsAlive(archUid) ||
+                   !_world.TryGet(archUid, out MetaDataComponent? comp) ||
+                   comp!.EntityLifeStage > EntityLifeStage.Terminating;
         }
 
         /// <summary>
@@ -821,12 +829,12 @@ namespace Robust.Shared.GameObjects
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal bool IsAlive(EntityUid uid)
         {
-            return _world.IsAlive(uid);
+            return _world.IsAlive(ToArch(uid));
         }
 
         internal bool TryAlive(EntityUid uid, out Entity entity)
         {
-            entity = uid;
+            entity = ToArch(uid);
             return _world.IsAlive(entity);
         }
 
@@ -953,32 +961,36 @@ namespace Robust.Shared.GameObjects
         {
             ThreadCheck();
 
-            SpawnEntityArch(out var uid);
-
             metadata = new MetaDataComponent
             {
 #pragma warning disable CS0618
-                Owner = uid,
+                Owner = EntityUid.Invalid,
 #pragma warning restore CS0618
                 EntityLastModifiedTick = _gameTiming.CurTick
             };
 
+            // allocate the required TransformComponent
+            xform = Unsafe.As<TransformComponent>(_componentFactory.GetComponent(_xformReg));
+
+            var archEnt = _world.Create(metadata, xform);
+            var uid = new EntityUid(archEnt);
+
+#pragma warning disable CS0618
+            metadata.Owner = uid;
+            xform.Owner = uid;
+#pragma warning restore CS0618
+
             var netEntity = GenerateNetEntity();
             SetNetEntity(uid, netEntity, metadata);
+            FinishComponentStorage(metadata, _metaReg, metadata);
+            FinishComponentStorage(xform, _xformReg, metadata);
 
             // we want this called before adding components
             EntityAdded?.Invoke((uid, metadata));
             EventBusInternal.OnEntityAdded(uid);
 
-            // add the required MetaDataComponent directly.
-            AddComponentInternal(uid, metadata, _metaReg, skipInit: true, overwrite: false, metadata);
-
-            // allocate the required TransformComponent
-            xform = Unsafe.As<TransformComponent>(_componentFactory.GetComponent(_xformReg));
-#pragma warning disable CS0618 // Type or member is obsolete
-            xform.Owner = uid;
-#pragma warning restore CS0618 // Type or member is obsolete
-            AddComponentInternal(uid, xform, _xformReg, skipInit: true, overwrite: false, metadata);
+            AddComponentEvents(uid, metadata, _metaReg, skipInit: true, metadata);
+            AddComponentEvents(uid, xform, _xformReg, skipInit: true, metadata);
 
             return uid;
         }

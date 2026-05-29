@@ -9,6 +9,7 @@
       <IsTestingPlatformApplication>false</IsTestingPlatformApplication>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Arch\Arch\src\Arch\Arch.csproj" />
     <ProjectReference Include="..\Robust.Server.Testing\Robust.Server.Testing.csproj" />
     <ProjectReference Include="..\Robust.Server\Robust.Server.csproj" />
     <ProjectReference Include="..\Robust.Shared.Maths\Robust.Shared.Maths.csproj" />
@@ -23,6 +24,7 @@
 
     <PackageReference Include="JetBrains.Annotations" />
 
+    <PackageReference Include="ZeroAllocJobScheduler" />
     <PackageReference Include="System.Numerics.Tensors" />
     <PackageReference Include="YamlDotNet" />
     <PackageReference Include="prometheus-net" />

@@ -147,6 +147,28 @@ namespace Robust.UnitTesting.Shared.GameObjects
         }
 
         [Test]
+        public void PrototypeComponentsOwnSpawnedEntityTest()
+        {
+            var sim = RobustServerSimulation
+                .NewSimulation()
+                .RegisterPrototypes(fac => fac.LoadString(DummyLoad))
+                .InitializeInstance();
+
+            var entMan = sim.Resolve<IEntityManager>();
+
+            var map = sim.CreateMap().Uid;
+            var coords = new EntityCoordinates(map, default);
+            var entity = entMan.SpawnEntity(DummyLoadId, coords);
+            var physics = entMan.GetComponent<PhysicsComponent>(entity);
+
+#pragma warning disable CS0618
+            Assert.That(physics.Owner, Is.EqualTo(entity));
+#pragma warning restore CS0618
+
+            Assert.DoesNotThrow(() => entMan.DeleteEntity(entity));
+        }
+
+        [Test]
         public void AddComponentTest()
         {
             // Arrange

@@ -1418,7 +1418,14 @@ namespace Robust.Client.GameStates
                         var comp = addComps[i];
                         var compReg = compRegs[i];
                         // Need to overwrite because 1 comp may suddenly add a bunch more comps
-                        _entities.AddComponentInternal(data.Uid, comp, compReg, skipInit: false, overwrite: true, metadata: data.Meta);
+                        _entities.SetComponentInternalOnly(data.Uid, comp, compReg, metadata: data.Meta);
+                    }
+
+                    for (var i = 0; i < addComps.Count; i++)
+                    {
+                        var comp = addComps[i];
+                        var compReg = compRegs[i];
+                        _entities.AddComponentEvents(data.Uid, comp, compReg, skipInit: false, metadata: data.Meta);
                     }
                 }
             }
@@ -1457,7 +1464,14 @@ namespace Robust.Client.GameStates
                         var comp = addComps[i];
                         var compReg = compRegs[i];
                         // Need to overwrite because 1 comp may suddenly add a bunch more comps
-                        _entities.AddComponentInternal(data.Uid, comp, compReg, skipInit: false, overwrite: true, metadata: data.Meta);
+                        _entities.SetComponentInternalOnly(data.Uid, comp, compReg, metadata: data.Meta);
+                    }
+
+                    for (var i = 0; i < addComps.Count; i++)
+                    {
+                        var comp = addComps[i];
+                        var compReg = compRegs[i];
+                        _entities.AddComponentEvents(data.Uid, comp, compReg, skipInit: false, metadata: data.Meta);
                     }
                 }
             }

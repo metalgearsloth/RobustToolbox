@@ -23,10 +23,25 @@ internal sealed partial class EntityTypeParser : TypeParser<EntityUid>
         if (ctx.EatMatch('e'))
         {
             word = ctx.GetWord(ParserContext.IsToken);
+            var versionStart = ctx.Save();
             var version = ctx.GetWord(ParserContext.IsToken);
 
             if (EntityUid.TryParse(word, version, out result))
                 return true;
+
+            ctx.Restore(versionStart);
+
+            if (int.TryParse(word, out var id))
+            {
+                foreach (var entity in entMan.GetEntities())
+                {
+                    if (entity.Id != id)
+                        continue;
+
+                    result = entity;
+                    return true;
+                }
+            }
 
             ctx.Error = word is not null ? new InvalidEntity($"e{word}") : new OutOfInputError();
             ctx.Error.Contextualize(ctx.Input, (start, ctx.Index));
@@ -36,6 +51,13 @@ internal sealed partial class EntityTypeParser : TypeParser<EntityUid>
         // Optional 'n' prefix for differentiating whether an integer represents a NetEntity or EntityUid
         ctx.EatMatch('n');
         word = ctx.GetWord(ParserContext.IsToken);
+
+        var entityVersionStart = ctx.Save();
+        var entityVersion = ctx.GetWord(ParserContext.IsToken);
+        if (EntityUid.TryParse(word, entityVersion, out result))
+            return true;
+
+        ctx.Restore(entityVersionStart);
 
         if (NetEntity.TryParse(word, out var ent))
         {

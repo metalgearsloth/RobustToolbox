@@ -97,6 +97,13 @@ namespace Robust.Shared.Serialization.Manager
             SerializationHookContext hookCtx,
             ISerializationContext? context = null,
             bool notNullableOverride = false);
+        public object? ReadInto(
+            Type type,
+            DataNode node,
+            object target,
+            ISerializationContext? context = null,
+            bool skipHook = false,
+            bool notNullableOverride = false);
 
         /// <summary>
         ///     Deserializes a node into a populated object of the given generic type <see cref="T"/>

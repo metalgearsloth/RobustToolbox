@@ -281,8 +281,9 @@ namespace Robust.Shared.Prototypes
                 for (var i = 0; i < addComps.Count; i++)
                 {
                     var comp = addComps[i];
-                    var oldArc = entityManager._world.GetArchetype(ent.Owner);
-                    entityManager.AddComponentInternal(ent.Owner, (IComponent) comp, compRegs[i], skipInit: false, overwrite: false, ent.Comp);
+                    var compReg = compRegs[i];
+                    entityManager.SetComponentInternalOnly(ent.Owner, (IComponent) comp, compReg, ent.Comp);
+                    entityManager.AddComponentEvents(ent.Owner, (IComponent) comp, compReg, skipInit: false, ent.Comp);
                 }
             }
         }
@@ -298,7 +299,11 @@ namespace Robust.Shared.Prototypes
         {
             bool add = false;
 
-            if (!entityManager.TryGetComponent(entity, compReg.Idx, out var component))
+            var hasComponent = entityManager is EntityManager manager
+                ? manager.TryGetComponentWithoutLifeCheck(entity.Owner, compReg.Idx, out var component)
+                : entityManager.TryGetComponent(entity, compReg.Idx, out component);
+
+            if (!hasComponent)
             {
                 var newComponent = factory.GetComponent(compName);
                 newComponent.Owner = entity;
@@ -306,16 +311,32 @@ namespace Robust.Shared.Prototypes
                 add = true;
             }
 
+            var target = component!;
             if (context is not EntityDeserializer map)
             {
-                serManager.CopyTo(data, ref component, context, notNullableOverride: true);
-                return (component, add);
+                CopyToOwned(serManager, data, ref target, entity, context);
+                return (target, add);
             }
 
             map.CurrentComponent = compName;
-            serManager.CopyTo(data, ref component, context, notNullableOverride: true);
+            CopyToOwned(serManager, data, ref target, entity, context);
             map.CurrentComponent = null;
-            return (component, add);
+            return (target, add);
+        }
+
+        private static void CopyToOwned(
+            ISerializationManager serManager,
+            IComponent data,
+            ref IComponent component,
+            EntityUid entity,
+            ISerializationContext? context)
+        {
+            serManager.CopyTo(data, ref component, context, skipHook: true, notNullableOverride: true);
+#pragma warning disable CS0618
+            component.Owner = entity;
+#pragma warning restore CS0618
+            if (component is ISerializationHooks hooks)
+                hooks.AfterDeserialization();
         }
 
         public override string ToString()

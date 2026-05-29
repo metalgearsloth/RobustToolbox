@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using Arch.Core;
 using Arch.Core.Extensions;
+using Arch.Core.Extensions.Dangerous;
 using Arch.Core.Utils;
 using Collections.Pooled;
 using Robust.Shared.Prototypes;
@@ -18,37 +19,21 @@ public partial class EntityManager
      * - Our invalid EntityUid is different to arch's because we treat "default" (i.e. uid of 0,0) as the bad one so we can easily know if an entity is bad.
      */
 
-    internal World _world = default!;
+    private World _world = default!;
 
-    private static readonly ComponentType[] DefaultArchetype = new ComponentType[]
-    {
-        typeof(MetaDataComponent),
-        typeof(TransformComponent),
-    };
-
-    protected void InitializeArch()
+    private void InitializeArch()
     {
         _world = World.Create();
     }
 
-    protected void ShutdownArch()
+    private void ShutdownArch()
     {
         World.Destroy(_world);
     }
 
-    protected void DestroyArch(EntityUid uid)
-    {
-        _world.Destroy(uid);
-    }
-
-    private void SpawnEntityArch(out EntityUid entity)
-    {
-        var archEnt = _world.Create(DefaultArchetype);
-        entity = new EntityUid(archEnt);
-    }
-
     public void CleanupArch()
     {
+        ThreadCheck();
         var sw = new Stopwatch();
         sw.Start();
         var arc = _world.Archetypes.Count;
@@ -92,15 +77,45 @@ public partial class EntityManager
     /// </summary>
     internal void AddComponentRange(EntityUid uid, PooledList<ComponentType> compTypes)
     {
+        ThreadCheck();
         DebugTools.Assert(compTypes.Count > 0);
-        _world.AddRange(uid, compTypes.Span);
+        var archUid = ToArch(uid);
+
+        for (var i = compTypes.Count - 1; i >= 0; i--)
+        {
+            if (_world.Has(archUid, compTypes[i]))
+                compTypes.RemoveAt(i);
+        }
+
+        if (compTypes.Count == 0)
+            return;
+
+        _world.AddRange(archUid, compTypes.Span);
     }
 
     internal void RemoveComponentRange(EntityUid uid, PooledList<ComponentType> compTypes)
     {
+        ThreadCheck();
         DebugTools.Assert(compTypes.Count > 0);
-        _world.RemoveRange(uid, compTypes.Span);
+        var archUid = ToArch(uid);
+
+        for (var i = compTypes.Count - 1; i >= 0; i--)
+        {
+            if (!_world.Has(archUid, compTypes[i]))
+                compTypes.RemoveAt(i);
+        }
+
+        if (compTypes.Count == 0)
+            return;
+
+        _world.RemoveRange(archUid, compTypes.Span);
     }
 
-    public World GetWorld() => _world;
+    internal Entity ToArch(EntityUid uid)
+    {
+        return DangerousEntityExtensions.CreateEntityStruct(
+            uid.Id - EntityUid.ArchUidOffset,
+            _world.Id,
+            uid.Version - EntityUid.ArchVersionOffset);
+    }
 }

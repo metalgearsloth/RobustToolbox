@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using Arch.Core;
+using Collections.Pooled;
 using Robust.Shared.EntitySerialization.Components;
 using Robust.Shared.EntitySerialization.Systems;
 using Robust.Shared.GameObjects;
@@ -591,7 +593,12 @@ public sealed partial class EntityDeserializer :
         _log.Debug($"Loaded {Entities.Count} entities in {_stopwatch.Elapsed}");
     }
 
-    private Dictionary<string, EntityPrototype.ComponentRegistryEntry> _loadComps = new();
+    private readonly Dictionary<EntityPrototype, PrototypeLoadPlanEntry[]> _prototypeLoadPlans = new();
+
+    private readonly record struct PrototypeLoadPlanEntry(
+        string Name,
+        EntityPrototype.ComponentRegistryEntry Entry,
+        ComponentRegistration Registration);
 
     private void LoadEntity(
         EntityUid uid,
@@ -628,99 +635,152 @@ public sealed partial class EntityDeserializer :
 
         using var compRegs = new PooledList<ComponentRegistration>();
         using var compTypes = new PooledList<ComponentType>();
+        using var compExisted = new PooledList<bool>();
+        using var loadComps = new PooledList<PrototypeLoadPlanEntry>();
 
         // Iterate over the prototype's components, and add them to the entity unless the entity has data relevant to
         // that component from the map file
         if (proto != null)
         {
-            _loadComps.Clear();
-
-            foreach (var (name, entry) in proto.Components)
+            foreach (var plan in GetPrototypeLoadPlan(proto))
             {
+                var name = plan.Name;
                 if (missingComps != null && missingComps.Contains(name))
                     continue;
 
                 if (_components.ContainsKey(name))
                     continue;
 
-                _loadComps.Add(name, entry);
-                var compReg = _factory.GetRegistration(name);
+                var compReg = plan.Registration;
+                loadComps.Add(plan);
                 compRegs.Add(compReg);
                 compTypes.Add(compReg.ArchType);
+                compExisted.Add(EntMan.HasComponentWithoutLifeCheck(uid, compReg));
             }
 
-            EntMan._world.AddRange(uid, compTypes.Span);
+            if (compTypes.Count > 0)
+                EntMan.AddComponentRange(uid, compTypes);
 
             var idx = 0;
-            foreach (var (name, entry) in _loadComps)
+            foreach (var (name, entry, _) in loadComps)
             {
                 CurrentComponent = name;
                 var compReg = compRegs[idx++];
 
-                if (!EntMan.TryGetComponent(uid, compReg.ArchType, out var component))
+                if (compExisted[idx - 1])
                 {
-                    var newComponent = _factory.GetComponent(compReg);
-                    newComponent.Owner = uid;
-                    EntMan.AddComponentInternal(uid, newComponent, compReg, skipInit: false, overwrite: false, meta);
-                    component = newComponent;
+                    var existing = EntMan.GetComponentInternal(uid, compReg.Idx);
+                    CopyToOwned(entry.Component, ref existing, uid);
                 }
-
-                _seriMan.CopyTo(entry.Component, ref component, this, notNullableOverride: true);
+                else
+                {
+                    var component = _factory.GetComponent(compReg);
+                    CopyToOwned(entry.Component, ref component, uid);
+                    EntMan.SetComponentInternalOnly(uid, component, compReg, meta);
+                    EntMan.AddComponentEvents(uid, component, compReg, skipInit: false, meta);
+                }
 
                 if (!entry.Component.NetSyncEnabled && compReg.NetID is { } netId)
                     meta.NetComponents.Remove(netId);
             }
         }
 
-        _loadComps.Clear();
+        loadComps.Clear();
         compRegs.Clear();
         compTypes.Clear();
+        compExisted.Clear();
 
-        // TODO: Avoid archetype changes
-        // Finally, copy over the entity specific information
+        using var missingCompNames = new PooledList<string>();
+        using var missingCompData = new PooledList<MappingDataNode>();
+        using var missingComponents = new PooledList<IComponent>();
+
+        // Finally, copy over the entity specific information.
+        // Missing components are applied in one archetype transition before populating their component slots.
         foreach (var (name, data) in _components)
         {
             CurrentComponent = name;
 
             var compReg = _factory.GetRegistration(name);
-            if (!EntMan.TryGetComponent(uid, compReg.Idx, out var existing))
+            if (EntMan.TryGetComponentWithoutLifeCheck(uid, compReg.Idx, out var existing))
             {
-                // New component not present in the prototype.
-                var newComponent = (IComponent) _seriMan.Read(compReg.Type, data, this)!;
+                ReadIntoOwned(compReg.Type, data, ref existing, uid);
+                continue;
+            }
 
-                // TODO ECS remove this when everything has been ECSd
-                if (newComponent is ISerializationHooks)
-                {
-                    // Some components depend on Component.Owner being correctly set after serialization
-                    // E.g., ContainerManagerComponent
-                    // So we have this jank edge case.
-                    // I hate this.
-                    existing = _factory.GetComponent(compReg);
-                    EntMan.AddComponent(uid, existing);
-                    _seriMan.CopyTo(newComponent, ref existing, this, notNullableOverride: true);
-                    continue;
-                }
+            compRegs.Add(compReg);
+            compTypes.Add(compReg.ArchType);
+            missingCompNames.Add(name);
+            missingCompData.Add(data);
+        }
+
+        if (compTypes.Count > 0)
+        {
+            EntMan.AddComponentRange(uid, compTypes);
+
+            for (var i = 0; i < compRegs.Count; i++)
+            {
+                CurrentComponent = missingCompNames[i];
+
+                var compReg = compRegs[i];
+                var newComponent = _factory.GetComponent(compReg);
+                ReadIntoOwned(compReg.Type, missingCompData[i], ref newComponent, uid);
 
                 // TODO ECS also remove this
                 _deps.InjectDependencies(newComponent);
 
-                EntMan.AddComponent(uid, newComponent);
-                continue;
+                EntMan.SetComponentInternalOnly(uid, newComponent, compReg, meta);
+                missingComponents.Add(newComponent);
             }
 
-            // TODO ENTITY SERIALIZATION
-            // Copy directly into the existing object
-            // I'm scared turning over this rock will reveal a lot of bugs. So leaving that to a future PR.
-            // I.e., creating "temp" here just unnecessarily slows everything down.
-            var temp = (IComponent) _seriMan.Read(compReg.Type, data, this)!;
-
-            _seriMan.CopyTo(temp, ref existing, this, notNullableOverride: true);
+            for (var i = 0; i < missingComponents.Count; i++)
+            {
+                CurrentComponent = missingCompNames[i];
+                EntMan.AddComponentEvents(uid, missingComponents[i], compRegs[i], skipInit: false, meta);
+            }
         }
 
         _components.Clear();
         CurrentComponent = null;
         if (missingComps is {Count: > 0})
             meta.LastComponentRemoved = Timing.CurTick;
+    }
+
+    private void ReadIntoOwned(Type type, MappingDataNode data, ref IComponent target, EntityUid uid)
+    {
+        _seriMan.ReadInto(type, data, target, this, skipHook: true, notNullableOverride: true);
+#pragma warning disable CS0618
+        target.Owner = uid;
+#pragma warning restore CS0618
+        if (target is ISerializationHooks hooks)
+            hooks.AfterDeserialization();
+    }
+
+    private PrototypeLoadPlanEntry[] GetPrototypeLoadPlan(EntityPrototype proto)
+    {
+        if (_prototypeLoadPlans.TryGetValue(proto, out var plan))
+            return plan;
+
+        plan = new PrototypeLoadPlanEntry[proto.Components.Count];
+
+        var idx = 0;
+        foreach (var (name, entry) in proto.Components)
+        {
+            var compReg = _factory.GetRegistration(name);
+            plan[idx++] = new PrototypeLoadPlanEntry(name, entry, compReg);
+        }
+
+        _prototypeLoadPlans.Add(proto, plan);
+        return plan;
+    }
+
+    private void CopyToOwned(IComponent source, ref IComponent target, EntityUid uid)
+    {
+        _seriMan.CopyTo(source, ref target, this, skipHook: true, notNullableOverride: true);
+#pragma warning disable CS0618
+        target.Owner = uid;
+#pragma warning restore CS0618
+        if (target is ISerializationHooks hooks)
+            hooks.AfterDeserialization();
     }
 
     private void GetRootEntities()

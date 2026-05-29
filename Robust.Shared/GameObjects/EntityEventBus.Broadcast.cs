@@ -305,7 +305,7 @@ namespace Robust.Shared.GameObjects
                 && subscriptions.BroadcastRegistrations.Contains(tuple))
                 subscriptions.BroadcastRegistrations.Remove(tuple);
 
-            if (_inverseEventSubscriptions.TryGetValue(subscriber, out var inverse) && inverse.ContainsKey(eventType))
+            if (_inverseEventSubscriptions.TryGetValue(subscriber, out var inverse))
                 inverse.Remove(eventType);
         }
 

@@ -132,6 +132,13 @@ internal sealed class AlwaysPushSerializationTest : RobustIntegrationTest
         child2 = Find(nameof(child2), entMan);
         child3 = Find(nameof(child3), entMan);
 
+        AssertOwner(parent1);
+        AssertOwner(parent2);
+        AssertOwner(parent3);
+        AssertOwner(child1);
+        AssertOwner(child2);
+        AssertOwner(child3);
+
         // Verify that the entity data has not changed.
         Assert.That(parent1.Comp2.List.SequenceEqual(new[] {1, 2}));
         Assert.That(parent2.Comp2.List.SequenceEqual(new[] {1, 2, -1}));
@@ -139,5 +146,12 @@ internal sealed class AlwaysPushSerializationTest : RobustIntegrationTest
         Assert.That(child1.Comp2.List.SequenceEqual(new[] {3, 4, 1, 2}));
         Assert.That(child2.Comp2.List.SequenceEqual(new[] {3, 4, 1, 2, -1}));
         Assert.That(child3.Comp2.List.SequenceEqual(new[] {3, 1, 2}));
+    }
+
+    private static void AssertOwner(Entity<TransformComponent, EntitySaveTestComponent> entity)
+    {
+#pragma warning disable CS0618
+        Assert.That(entity.Comp2.Owner, Is.EqualTo(entity.Owner));
+#pragma warning restore CS0618
     }
 }

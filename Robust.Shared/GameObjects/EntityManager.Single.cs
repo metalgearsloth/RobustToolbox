@@ -13,22 +13,24 @@ public abstract partial class EntityManager
     public Entity<TComp1> Single<TComp1>()
         where TComp1: IComponent
     {
-        var index = _entTraitArray[CompIdx.ArrayIndex<TComp1>()];
+        var query = AllEntityQueryEnumerator<TComp1>();
 
-        if (index.Keys.FirstOrNull() is { } ent && index.Count == 1)
-        {
-            return new Entity<TComp1>(ent, (TComp1)index[ent]);
-        }
-
-        if (index.Count > 1)
-        {
-            throw new NonUniqueSingletonException(index.Keys.ToArray(), typeof(TComp1));
-        }
-        else
-        {
-            // 0.
+        if (!query.MoveNext(out var ent, out var comp1))
             throw new MatchNotFoundException(typeof(TComp1));
+
+        if (query.MoveNext(out var ent2, out _))
+        {
+            var list = new List<EntityUid> { ent, ent2 };
+
+            while (query.MoveNext(out var ent3, out _))
+            {
+                list.Add(ent3);
+            }
+
+            throw new NonUniqueSingletonException(list.ToArray(), typeof(TComp1));
         }
+
+        return new Entity<TComp1>(ent, comp1);
     }
 
     public Entity<TComp1, TComp2> Single<TComp1, TComp2>()
@@ -109,24 +111,28 @@ public abstract partial class EntityManager
     public bool TrySingle<TComp1>([NotNullWhen(true)] out Entity<TComp1>? entity)
         where TComp1: IComponent
     {
-        var index = _entTraitArray[CompIdx.ArrayIndex<TComp1>()];
+        var query = AllEntityQueryEnumerator<TComp1>();
 
-        if (index.Keys.FirstOrNull() is { } ent && index.Count == 1)
-        {
-            entity = new Entity<TComp1>(ent, (TComp1)index[ent]);
-            return true;
-        }
-        else
+        if (!query.MoveNext(out var ent, out var comp1))
         {
             entity = null;
+            return false;
         }
 
-        if (index.Count > 1)
+        if (query.MoveNext(out var ent2, out _))
         {
-            throw new NonUniqueSingletonException(index.Keys.ToArray(), typeof(TComp1));
+            var list = new List<EntityUid> { ent, ent2 };
+
+            while (query.MoveNext(out var ent3, out _))
+            {
+                list.Add(ent3);
+            }
+
+            throw new NonUniqueSingletonException(list.ToArray(), typeof(TComp1));
         }
 
-        return false;
+        entity = new Entity<TComp1>(ent, comp1);
+        return true;
     }
 
     public bool TrySingle<TComp1, TComp2>([NotNullWhen(true)] out Entity<TComp1, TComp2>? entity)

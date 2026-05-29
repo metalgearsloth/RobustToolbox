@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Linq.Expressions;
+using System.Reflection;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Serialization.Manager.Definition;
 using Robust.Shared.Serialization.Manager.Exceptions;
@@ -22,7 +23,8 @@ namespace Robust.Shared.Serialization.Manager
         private delegate object? ReadBoxingDelegate(
             DataNode node,
             SerializationHookContext hookCtx,
-            ISerializationContext? context = null);
+            ISerializationContext? context = null,
+            ISerializationManager.InstantiationDelegate<object>? instanceProvider = null);
 
         private delegate T ReadGenericDelegate<T>(
             DataNode node,
@@ -158,6 +160,21 @@ namespace Robust.Shared.Serialization.Manager
             return GetOrCreateBoxingReadDelegate(type, notNullableOverride)(node, hookCtx, context);
         }
 
+        public object? ReadInto(
+            Type type,
+            DataNode node,
+            object target,
+            ISerializationContext? context = null,
+            bool skipHook = false,
+            bool notNullableOverride = false)
+        {
+            return GetOrCreateBoxingReadDelegate(type, notNullableOverride)(
+                node,
+                SerializationHookContext.ForSkipHooks(skipHook),
+                context,
+                () => target);
+        }
+
         private ReadBoxingDelegate GetOrCreateBoxingReadDelegate(Type type, bool notNullableOverride = false)
         {
             return _readBoxingDelegates.GetOrAdd((type, notNullableOverride), static (tuple, manager) =>
@@ -168,6 +185,7 @@ namespace Robust.Shared.Serialization.Manager
                 var nodeParam = Expression.Variable(typeof(DataNode));
                 var contextParam = Expression.Variable(typeof(ISerializationContext));
                 var hookCtxParam = Expression.Variable(typeof(SerializationHookContext));
+                var instantiatorParam = Expression.Variable(typeof(ISerializationManager.InstantiationDelegate<object>));
 
                 var call = Expression.Convert(Expression.Call(
                     managerConst,
@@ -176,15 +194,29 @@ namespace Robust.Shared.Serialization.Manager
                     nodeParam,
                     hookCtxParam,
                     contextParam,
-                    Expression.Constant(null, typeof(ISerializationManager.InstantiationDelegate<>).MakeGenericType(type)),
+                    Expression.Call(
+                        typeof(SerializationManager).GetMethod(
+                            nameof(WrapObjectInstantiationDelegate),
+                            BindingFlags.NonPublic | BindingFlags.Static)!.MakeGenericMethod(type),
+                        instantiatorParam),
                     Expression.Constant(tuple.notNullableOverride)), typeof(object));
 
                 return Expression.Lambda<ReadBoxingDelegate>(
                     call,
                     nodeParam,
                     hookCtxParam,
-                    contextParam).Compile();
+                    contextParam,
+                    instantiatorParam).Compile();
             }, this);
+        }
+
+        private static ISerializationManager.InstantiationDelegate<T>? WrapObjectInstantiationDelegate<T>(
+            ISerializationManager.InstantiationDelegate<object>? instanceProvider)
+        {
+            if (instanceProvider == null)
+                return null;
+
+            return () => (T) instanceProvider();
         }
 
         private static object ReadDelegateValueFactory(Type baseType, Type actualType, Type nodeType, bool notNullableOverride, SerializationManager manager)

@@ -626,7 +626,7 @@ public sealed partial class EntitySerializer : ISerializationContext,
 
     private void SerializeComponents(EntityUid uid, Dictionary<string, MappingDataNode>? cache, SequenceDataNode components)
     {
-        foreach (var component in EntMan.GetComponentsInternal(uid))
+        foreach (var component in EntMan.GetComponents(uid))
         {
             var compType = component.GetType();
 
