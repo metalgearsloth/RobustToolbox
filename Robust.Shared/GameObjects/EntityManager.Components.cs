@@ -2129,6 +2129,28 @@ namespace Robust.Shared.GameObjects
                 return true;
             }
         }
+
+        public Enumerator GetEnumerator()
+        {
+            return new Enumerator(this);
+        }
+
+        public struct Enumerator(EntityQueryEnumerator<TComp1> enumerator)
+        {
+            private EntityQueryEnumerator<TComp1> _enumerator = enumerator;
+
+            public Entity<TComp1> Current { get; private set; }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public bool MoveNext()
+            {
+                if (!_enumerator.MoveNext(out var id, out var comp))
+                    return false;
+
+                Current = (id, comp);
+                return true;
+            }
+        }
     }
 
     /// <summary>
@@ -2196,6 +2218,28 @@ namespace Robust.Shared.GameObjects
 
                 if (comp1.Deleted || comp2.Deleted || meta.EntityPaused) continue;
 
+                return true;
+            }
+        }
+
+        public Enumerator GetEnumerator()
+        {
+            return new Enumerator(this);
+        }
+
+        public struct Enumerator(EntityQueryEnumerator<TComp1, TComp2> enumerator)
+        {
+            private EntityQueryEnumerator<TComp1, TComp2> _enumerator = enumerator;
+
+            public Entity<TComp1, TComp2> Current { get; private set; }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public bool MoveNext()
+            {
+                if (!_enumerator.MoveNext(out var id, out var comp1, out var comp2))
+                    return false;
+
+                Current = (id, comp1, comp2);
                 return true;
             }
         }
@@ -2274,6 +2318,28 @@ namespace Robust.Shared.GameObjects
 
                 if (comp1.Deleted || comp2.Deleted || comp3.Deleted || meta.EntityPaused) continue;
 
+                return true;
+            }
+        }
+
+        public Enumerator GetEnumerator()
+        {
+            return new Enumerator(this);
+        }
+
+        public struct Enumerator(EntityQueryEnumerator<TComp1, TComp2, TComp3> enumerator)
+        {
+            private EntityQueryEnumerator<TComp1, TComp2, TComp3> _enumerator = enumerator;
+
+            public Entity<TComp1, TComp2, TComp3> Current { get; private set; }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public bool MoveNext()
+            {
+                if (!_enumerator.MoveNext(out var id, out var comp1, out var comp2, out var comp3))
+                    return false;
+
+                Current = (id, comp1, comp2, comp3);
                 return true;
             }
         }
@@ -2362,6 +2428,28 @@ namespace Robust.Shared.GameObjects
                 return true;
             }
         }
+
+        public Enumerator GetEnumerator()
+        {
+            return new Enumerator(this);
+        }
+
+        public struct Enumerator(EntityQueryEnumerator<TComp1, TComp2, TComp3, TComp4> enumerator)
+        {
+            private EntityQueryEnumerator<TComp1, TComp2, TComp3, TComp4> _enumerator = enumerator;
+
+            public Entity<TComp1, TComp2, TComp3, TComp4> Current { get; private set; }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public bool MoveNext()
+            {
+                if (!_enumerator.MoveNext(out var id, out var comp1, out var comp2, out var comp3, out var comp4))
+                    return false;
+
+                Current = (id, comp1, comp2, comp3, comp4);
+                return true;
+            }
+        }
     }
 
     #endregion
@@ -2430,6 +2518,28 @@ namespace Robust.Shared.GameObjects
 
                 if (comp1.Deleted) continue;
 
+                return true;
+            }
+        }
+
+        public Enumerator GetEnumerator()
+        {
+            return new Enumerator(this);
+        }
+
+        public struct Enumerator(AllEntityQueryEnumerator<TComp1> enumerator)
+        {
+            private AllEntityQueryEnumerator<TComp1> _enumerator = enumerator;
+
+            public Entity<TComp1> Current { get; private set; }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public bool MoveNext()
+            {
+                if (!_enumerator.MoveNext(out var id, out var comp))
+                    return false;
+
+                Current = (id, comp);
                 return true;
             }
         }
@@ -2508,6 +2618,28 @@ namespace Robust.Shared.GameObjects
                 return true;
             }
         }
+
+        public Enumerator GetEnumerator()
+        {
+            return new Enumerator(this);
+        }
+
+        public struct Enumerator(AllEntityQueryEnumerator<TComp1, TComp2> enumerator)
+        {
+            private AllEntityQueryEnumerator<TComp1, TComp2> _enumerator = enumerator;
+
+            public Entity<TComp1, TComp2> Current { get; private set; }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public bool MoveNext()
+            {
+                if (!_enumerator.MoveNext(out var id, out var comp1, out var comp2))
+                    return false;
+
+                Current = (id, comp1, comp2);
+                return true;
+            }
+        }
     }
 
     /// <summary>
@@ -2581,6 +2713,28 @@ namespace Robust.Shared.GameObjects
 
                 if (comp1.Deleted || comp2.Deleted || comp3.Deleted) continue;
 
+                return true;
+            }
+        }
+
+        public Enumerator GetEnumerator()
+        {
+            return new Enumerator(this);
+        }
+
+        public struct Enumerator(AllEntityQueryEnumerator<TComp1, TComp2, TComp3> enumerator)
+        {
+            private AllEntityQueryEnumerator<TComp1, TComp2, TComp3> _enumerator = enumerator;
+
+            public Entity<TComp1, TComp2, TComp3> Current { get; private set; }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public bool MoveNext()
+            {
+                if (!_enumerator.MoveNext(out var id, out var comp1, out var comp2, out var comp3))
+                    return false;
+
+                Current = (id, comp1, comp2, comp3);
                 return true;
             }
         }
@@ -2664,6 +2818,28 @@ namespace Robust.Shared.GameObjects
 
                 if (comp1.Deleted || comp2.Deleted || comp3.Deleted || comp4.Deleted) continue;
 
+                return true;
+            }
+        }
+
+        public Enumerator GetEnumerator()
+        {
+            return new Enumerator(this);
+        }
+
+        public struct Enumerator(AllEntityQueryEnumerator<TComp1, TComp2, TComp3, TComp4> enumerator)
+        {
+            private AllEntityQueryEnumerator<TComp1, TComp2, TComp3, TComp4> _enumerator = enumerator;
+
+            public Entity<TComp1, TComp2, TComp3, TComp4> Current { get; private set; }
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public bool MoveNext()
+            {
+                if (!_enumerator.MoveNext(out var id, out var comp1, out var comp2, out var comp3, out var comp4))
+                    return false;
+
+                Current = (id, comp1, comp2, comp3, comp4);
                 return true;
             }
         }
