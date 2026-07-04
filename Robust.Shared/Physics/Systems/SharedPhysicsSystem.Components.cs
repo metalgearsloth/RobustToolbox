@@ -47,23 +47,17 @@ public partial class SharedPhysicsSystem
         var xform = Transform(uid);
         var manager = EnsureComp<FixturesComponent>(uid);
 
-        if (component.CanCollide && (_containerSystem.IsEntityOrParentInContainer(uid) || xform.MapID == MapId.Nullspace))
-        {
-            SetCanCollide(uid, false, false, manager: manager, body: component);
-        }
-
-        if (component.CanCollide)
-        {
-            if (component.BodyType != BodyType.Static)
-            {
-                SetAwake((uid, component), true);
-            }
-        }
-
         // Gets added to broadphase via fixturessystem
         _fixtureSystem.OnPhysicsInit(uid, manager, component);
 
-        // We used to disable cancollide if no fixtures but that doesn't actually matter anymore.
+        if (component.CanCollide &&
+            manager.FixtureCount > 0 &&
+            component.BodyType != BodyType.Static &&
+            xform.MapID != MapId.Nullspace &&
+            !_containerSystem.IsEntityOrParentInContainer(uid))
+        {
+            SetAwake((uid, component), true);
+        }
 
         var ev = new CollisionChangeEvent(uid, component, component.CanCollide);
         RaiseLocalEvent(ref ev);
@@ -580,7 +574,12 @@ public partial class SharedPhysicsSystem
             return false;
 
         if (body.CanCollide == value)
+        {
+            if (value && body.Initialized && XformQuery.TryGetComponent(uid, out var xform))
+                _lookup.UpdatePhysicsBroadphase(uid, xform, body);
+
             return value;
+        }
 
         if (value)
         {

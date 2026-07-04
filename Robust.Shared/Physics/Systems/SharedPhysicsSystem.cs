@@ -295,7 +295,7 @@ namespace Robust.Shared.Physics.Systems
             if (_anchorQuery.TryGetComponent(uid, out var collideComp) && collideComp.Enable)
                 return;
 
-            WakeBody(uid, body: physics);
+            SetAwake((uid, physics), true);
         }
 
         /// <summary>
@@ -344,8 +344,6 @@ namespace Robust.Shared.Physics.Systems
                 CollideContacts();
 
                 Step(frameTime, prediction);
-
-                DispatchEvents();
 
                 var updateAfterSolve = new PhysicsUpdateAfterSolveEvent(prediction, frameTime);
                 RaiseLocalEvent(ref updateAfterSolve);

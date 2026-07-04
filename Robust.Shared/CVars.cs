@@ -36,6 +36,44 @@ namespace Robust.Shared
             CVarDef.Create("net.max_connections", 256, CVar.ARCHIVE | CVar.REPLICATED | CVar.SERVER);
 
         /// <summary>
+        /// How many seconds after the last message from the server or a client before we consider it timed out.
+        /// </summary>
+        public static readonly CVarDef<float> NetConnectionTimeout =
+            CVarDef.Create("net.connection_timeout", 25.0f, CVar.ARCHIVE);
+
+        /// <summary>
+        /// Hard max-cap of concurrent connections per client IP address.
+        /// Clients will always get a disconnection packet.
+        /// </summary>
+        /// <remarks>
+        /// This cannot be bypassed in any way, since it is used by Lidgren internally.
+        /// </remarks>
+        public static readonly CVarDef<int> NetMaxIpConnections =
+            CVarDef.Create("net.max_ip_connections", 8, CVar.ARCHIVE);
+
+        /// <summary>
+        /// Hard max-cap of connections a single client IP address can attempt in a window of <c>net.rapid_connection_window</c>.
+        /// Clients will only get a disconnection packet the first time, their packets are dropped afterwards.
+        /// </summary>
+        /// <remarks>
+        /// This cannot be bypassed in any way, since it is used by Lidgren internally.
+        /// </remarks>
+        public static readonly CVarDef<int> NetMaxRapidConnections =
+            CVarDef.Create("net.max_rapid_connections", 3, CVar.ARCHIVE);
+
+        /// <summary>
+        /// How many seconds until connection count decays for <c>net.max_rapid_connections</c>.
+        /// </summary>
+        public static readonly CVarDef<double> NetRapidConnectionWindow =
+            CVarDef.Create("net.rapid_connection_window", 60.0, CVar.ARCHIVE);
+
+        /// <summary>
+        /// How many connections are "forgotten" every <c>net.rapid_connection_window</c> seconds.
+        /// </summary>
+        public static readonly CVarDef<int> NetRapidConnectionDecay =
+            CVarDef.Create("net.rapid_connection_decay", 1, CVar.ARCHIVE);
+
+        /// <summary>
         /// UDP port to bind to for main game networking.
         /// Each address specified in <c>net.bindto</c> is bound with this port.
         /// </summary>
@@ -299,12 +337,6 @@ namespace Robust.Shared
             CVarDef.Create("net.time_start_offset", 0, CVar.SERVERONLY);
 
         /// <summary>
-        /// How many seconds after the last message from the server before we consider it timed out.
-        /// </summary>
-        public static readonly CVarDef<float> ConnectionTimeout =
-            CVarDef.Create("net.connection_timeout", 25.0f, CVar.ARCHIVE | CVar.CLIENTONLY);
-
-        /// <summary>
         /// When doing the connection handshake, how long to wait before initial connection attempt packets.
         /// </summary>
         public static readonly CVarDef<float> ResendHandshakeInterval =
@@ -384,6 +416,31 @@ namespace Robust.Shared
             CVarDef.Create("net.lidgren_log_error", true);
 
         /// <summary>
+        /// Controls whether repeated malformed network input logs from Lidgren are rate limited.
+        /// </summary>
+        public static readonly CVarDef<bool> NetLidgrenLogRateLimit =
+            CVarDef.Create("net.lidgren_log_rate_limit", true);
+
+        /// <summary>
+        /// Bitmask of malformed network input log categories that Lidgren should rate limit.
+        /// </summary>
+        /// <seealso cref="NetLogRateLimitTarget"/>
+        public static readonly CVarDef<int> NetLidgrenLogRateLimitTargets =
+            CVarDef.Create("net.lidgren_log_rate_limit_targets", (int) NetLogRateLimitTarget.All);
+
+        /// <summary>
+        /// How many matching Lidgren logs are emitted per endpoint and category before suppression starts.
+        /// </summary>
+        public static readonly CVarDef<int> NetLidgrenLogRateLimitBurst =
+            CVarDef.Create("net.lidgren_log_rate_limit_burst", 5);
+
+        /// <summary>
+        /// Window in seconds used by Lidgren's malformed network input log rate limiter.
+        /// </summary>
+        public static readonly CVarDef<float> NetLidgrenLogRateLimitWindow =
+            CVarDef.Create("net.lidgren_log_rate_limit_window", 10.0f);
+
+        /// <summary>
         /// If true, run network message encryption on another thread.
         /// </summary>
         public static readonly CVarDef<bool> NetEncryptionThread =
@@ -406,6 +463,46 @@ namespace Robust.Shared
         public static readonly CVarDef<bool> NetHWId =
             CVarDef.Create("net.hwid", true, CVar.SERVERONLY);
 
+        /**
+         * TRANSFER
+         */
+
+        /// <summary>
+        /// If true, enable the WebSocket-based high bandwidth transfer channel.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// If set, <see cref="TransferHttpEndpoint"/> must be set to the API address of the server,
+        /// and you must ensure your reverse proxy (if you have one) is configured to allow WebSocket connections.
+        /// </para>
+        /// <para>
+        /// The transfer channel has no additional encryption layer. Unless your API is exposed behind HTTPS,
+        /// traffic over the channel will not be encrypted, and you are discouraged from enabling it.
+        /// </para>
+        /// </remarks>
+        public static readonly CVarDef<bool> TransferHttp =
+            CVarDef.Create("transfer.http", false, CVar.SERVERONLY);
+
+        /// <summary>
+        /// The base HTTP URL of the game server, used for the high-bandwidth transfer channel.
+        /// </summary>
+        public static readonly CVarDef<string> TransferHttpEndpoint =
+            CVarDef.Create("transfer.http_endpoint", "http://localhost:1212/", CVar.SERVERONLY);
+
+        /// <summary>
+        /// Amount of concurrent client->server transfer streams allowed.
+        /// </summary>
+        /// <remarks>
+        /// Clients will be disconnected if they exceed this limit.
+        /// </remarks>
+        public static readonly CVarDef<int> TransferStreamLimit =
+            CVarDef.Create("transfer.stream_limit", 10, CVar.SERVERONLY);
+
+        /// <summary>
+        /// Artificially delay transfer operations to simulate slow network. Debug option.
+        /// </summary>
+        internal static readonly CVarDef<bool> TransferArtificialDelay =
+            CVarDef.Create("transfer.artificial_delay", false);
 
         /**
          * SUS
@@ -788,6 +885,12 @@ namespace Robust.Shared
         public static readonly CVarDef<bool> GameAutoPauseEmpty =
             CVarDef.Create("game.auto_pause_empty", true, CVar.SERVERONLY);
 
+        /// <summary>
+        /// Scales the game simulation time. Higher values make the game slower.
+        /// </summary>
+        public static readonly CVarDef<float> GameTimeScale =
+            CVarDef.Create("game.time_scale", 1f, CVar.REPLICATED | CVar.SERVER);
+
         /*
          * LOG
          */
@@ -949,6 +1052,18 @@ namespace Robust.Shared
         /// </summary>
         public static readonly CVarDef<string> AuthServer =
             CVarDef.Create("auth.server", AuthManager.DefaultAuthServer, CVar.SERVERONLY);
+
+        /// <summary>
+        /// Trust score for unauthenticated localhost connections
+        /// </summary>
+        public static readonly CVarDef<float> AuthLocalTrust =
+            CVarDef.Create("auth.localtrust", 1f, CVar.SERVERONLY);
+
+        /// <summary>
+        /// Trust score for guest connections
+        /// </summary>
+        public static readonly CVarDef<float> AuthGuestTrust =
+            CVarDef.Create("auth.guesttrust", 0f, CVar.SERVERONLY);
 
         /*
          * RENDERING
@@ -1233,10 +1348,20 @@ namespace Robust.Shared
             CVarDef.Create("audio.attenuation", (int) Attenuation.LinearDistanceClamped, CVar.REPLICATED | CVar.ARCHIVE);
 
         /// <summary>
+        /// Whether to enable HRTF (head-related transfer function) support for positional audio.
+        /// </summary>
+        /// <remarks>
+        /// This CVar being true isn't necessarily enough to actually use HRTF. Your platform must be using openal-soft,
+        /// and your device needs to actually support it (although it almost certainly does).
+        /// </remarks>
+        public static readonly CVarDef<bool> AudioHrtf =
+            CVarDef.Create("audio.hrtf", true, CVar.CLIENTONLY | CVar.ARCHIVE);
+
+        /// <summary>
         /// Audio device to try to output audio to by default.
         /// </summary>
         public static readonly CVarDef<string> AudioDevice =
-            CVarDef.Create("audio.device", string.Empty, CVar.CLIENTONLY);
+            CVarDef.Create("audio.device", string.Empty, CVar.CLIENTONLY | CVar.ARCHIVE);
 
         /// <summary>
         /// Master volume for audio output.
@@ -1684,6 +1809,16 @@ namespace Robust.Shared
         public static readonly CVarDef<bool> ProfEnabled = CVarDef.Create("prof.enabled", false);
 
         /// <summary>
+        /// Enables the Tracy profiling system. Tracing will stay enabled for the entire runtime of the program even if
+        /// you turn this cvar off.
+        /// </summary>
+        /// <remarks>
+        /// By default, this will listen for Tracy connections on all interfaces! Set the <c>TRACY_ONLY_LOCALHOST</c>
+        /// env var to 1 if you want to restrict to localhost.
+        /// </remarks>
+        public static readonly CVarDef<bool> TracyProfEnabled = CVarDef.Create("prof.tracy.enabled", false);
+
+        /// <summary>
         /// Event log buffer size for the profiling system.
         /// </summary>
         public static readonly CVarDef<int> ProfBufferSize = CVarDef.Create("prof.buffer_size", 8192);
@@ -1916,7 +2051,7 @@ namespace Robust.Shared
         ///     By default, this is Space Station 14's sln, but it can be any file at the same root level.
         /// </summary>
         public static readonly CVarDef<string> XamlHotReloadMarkerName =
-            CVarDef.Create("ui.xaml_hot_reload_marker_name", "SpaceStation14.sln", CVar.CLIENTONLY);
+            CVarDef.Create("ui.xaml_hot_reload_marker_name", "SpaceStation14.slnx", CVar.CLIENTONLY);
 
         /// <summary>
         /// If true, all XAML UIs will be JITed for hot reload on client startup.
@@ -1925,6 +2060,13 @@ namespace Robust.Shared
         public static readonly CVarDef<bool> UIXamlJitPreload =
             CVarDef.Create("ui.xaml_jit_preload", false, CVar.CLIENTONLY);
 
+        /// <summary>
+        ///     If false, the UI engine will not ever sleep updating controls.
+        ///     This should <b>never</b> be set outside of test frameworks, doing so worsens user experience by allowing
+        ///     the game to do excessive amounts of work in one frame, causing extra lag.
+        /// </summary>
+        public static readonly CVarDef<bool> UIObeyUpdateLimits =
+            CVarDef.Create("ui.obey_update_limits", true, CVar.CLIENTONLY);
         /*
          * FONT
          */

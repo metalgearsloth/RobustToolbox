@@ -30,21 +30,19 @@ namespace Robust.Shared.GameObjects
     public delegate void ComponentQueryCallback<T>(EntityUid uid, T component) where T : IComponent;
 
     /// <inheritdoc />
-    [Virtual]
     public abstract partial class EntityManager : IEntityManager
     {
         #region Dependencies
 
-        [IoC.Dependency] protected readonly IPrototypeManager PrototypeManager = default!;
-        [IoC.Dependency] protected readonly ILogManager LogManager = default!;
-        [IoC.Dependency] private readonly IEntitySystemManager _entitySystemManager = default!;
-        [IoC.Dependency] private readonly IMapManager _mapManager = default!;
-        [IoC.Dependency] private readonly IGameTiming _gameTiming = default!;
-        [IoC.Dependency] private readonly ISerializationManager _serManager = default!;
-        [IoC.Dependency] private readonly ProfManager _prof = default!;
-        [IoC.Dependency] private readonly INetManager _netMan = default!;
-        [IoC.Dependency] private readonly IReflectionManager _reflection = default!;
-        [IoC.Dependency] private readonly EntityConsoleHost _entityConsoleHost = default!;
+        [IoC.Dependency] protected IPrototypeManager PrototypeManager = default!;
+        [IoC.Dependency] protected ILogManager LogManager = default!;
+        [IoC.Dependency] private IEntitySystemManager _entitySystemManager = default!;
+        [IoC.Dependency] private IGameTiming _gameTiming = default!;
+        [IoC.Dependency] private ISerializationManager _serManager = default!;
+        [IoC.Dependency] private ProfManager _prof = default!;
+        [IoC.Dependency] private INetManager _netMan = default!;
+        [IoC.Dependency] private IReflectionManager _reflection = default!;
+        [IoC.Dependency] private EntityConsoleHost _entityConsoleHost = default!;
 
         // I feel like PJB might shed me for putting a system dependency here, but its required for setting entity
         // positions on spawn....
@@ -118,7 +116,7 @@ namespace Robust.Shared.GameObjects
         private SharedMapSystem _mapSystem = default!;
 
         private ISawmill _sawmill = default!;
-        private ISawmill _resolveSawmill = default!;
+        internal ISawmill ResolveSawmill = default!;
 
         public bool Started { get; protected set; }
 
@@ -149,7 +147,7 @@ namespace Robust.Shared.GameObjects
             _xformReg = _componentFactory.GetRegistration(typeof(TransformComponent));
             _xformName = _xformReg.Name;
             _sawmill = LogManager.GetSawmill("entity");
-            _resolveSawmill = LogManager.GetSawmill("resolve");
+            ResolveSawmill = LogManager.GetSawmill("resolve");
 
 #if DEBUG
             _mainThreadId = Environment.CurrentManagedThreadId;
@@ -212,8 +210,9 @@ namespace Robust.Shared.GameObjects
                     _sawmill.Error($"Failed to serialize {compName} component of entity prototype {prototype.ID}. Exception: {e.Message}");
 #if !EXCEPTION_TOLERANCE
                     throw;
-#endif
+#else
                     return false;
+#endif
                 }
 
                 if (compMapping.AnyExcept(protoMapping))
@@ -360,12 +359,13 @@ namespace Robust.Shared.GameObjects
                 throw new ArgumentException($"Attempted to spawn entity on an invalid map. Coordinates: {coordinates}");
 
             EntityCoordinates coords;
-            if (_mapManager.TryFindGridAt(coordinates, out var gridUid, out var grid)
+            if (_mapSystem.TryFindGridAt(coordinates, out var gridUid, out var grid)
                 && MetaQuery.TryGetComponentInternal(gridUid, out var meta)
                 && meta.EntityLifeStage < EntityLifeStage.Terminating)
             {
                 coords = new EntityCoordinates(gridUid, _mapSystem.WorldToLocal(gridUid, grid, coordinates.Position));
-                _xforms.SetCoordinates(newEntity, transform, coords, rotation, unanchor: false);
+                var relativeRotation = rotation - _xforms.GetWorldRotation(gridUid);
+                _xforms.SetCoordinates(newEntity, transform, coords, relativeRotation, unanchor: false);
             }
             else
             {

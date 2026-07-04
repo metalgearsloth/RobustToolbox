@@ -111,13 +111,6 @@ namespace Robust.Shared.Physics.Systems
             manager.Fixtures.Add(fixtureId, fixture);
             fixture.Owner = uid;
 
-            TransformComponent? broadphaseXform = null;
-
-            if (Resolve(uid, ref xform))
-            {
-                _lookup.CreateProxies(uid, fixtureId, fixture, xform, body);
-            }
-
             // Supposed to be wrapped in density but eh
             if (updates)
             {
@@ -126,6 +119,20 @@ namespace Robust.Shared.Physics.Systems
                 // Don't need to ResetMassData as FixtureUpdate already does it.
                 Dirty(uid, manager);
             }
+
+            if (body.CanCollide && Resolve(uid, ref xform))
+            {
+                if (xform.Broadphase is { Valid: true, BodyType: not null })
+                {
+                    _lookup.CreateProxies(uid, fixtureId, fixture, xform, body);
+                }
+                else
+                {
+                    _lookup.UpdatePhysicsBroadphase(uid, xform, body);
+                }
+            }
+
+            _physics.SetAwake((uid, body), true);
 
             // TODO: Set newcontacts to true.
         }
@@ -220,6 +227,9 @@ namespace Robust.Shared.Physics.Systems
                 var resetMass = fixture.Density > 0f;
                 FixtureUpdate(uid, resetMass: resetMass, manager: manager, body: body);
             }
+
+            if (manager.FixtureCount == 0 && body.CanCollide)
+                _lookup.UpdatePhysicsBroadphase(uid, xform, body);
         }
 
         #endregion
