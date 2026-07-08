@@ -9,6 +9,16 @@ namespace Robust.Shared.GameObjects
     public delegate void EntityEventHandler<in T>(T ev);
     public delegate void EntityEventRefHandler<T>(ref T ev);
     public delegate void EntitySessionEventHandler<in T>(T msg, EntitySessionEventArgs args);
+    public delegate void GeneratedDirectedEventHandler(EntityUid uid, IComponent comp, ref EntityEventBusUnit args);
+
+    /// <summary>
+    /// Erased event-reference token used by generated event bus thunks.
+    /// </summary>
+    /// <remarks>
+    /// This is not a real event type. Generated code casts this ref to the concrete event type with
+    /// <see cref="System.Runtime.CompilerServices.Unsafe.As{TFrom,TTo}(ref TFrom)"/>.
+    /// </remarks>
+    public readonly struct EntityEventBusUnit;
 
     [Serializable, NetSerializable]
     public abstract class EntityEventArgs { }

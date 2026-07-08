@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -27,9 +27,9 @@ internal sealed partial class EntityEventBus : IEventBus
     // For queued message broadcast.
     private readonly Queue<(EventSource source, object args)> _eventQueue = new();
 
-    // eUid -> EventType -> { CompType1, ... CompTypeN }
+    // eUid.Id -> EventType -> { CompType1, ... CompTypeN }
     // See EventTable declaration for layout details
-    internal Dictionary<EntityUid, EventTable> _entEventTables = new();
+    internal EntityEventTableStorage _entEventTables = new();
 
     /// <summary>
     /// Array of component events and their handlers. The array is indexed by a component's
@@ -41,11 +41,11 @@ internal sealed partial class EntityEventBus : IEventBus
     /// <summary>
     /// Variant of <see cref="_eventSubs"/> that only includes events with the <see cref="ComponentEventAttribute"/>
     /// </summary>
-    private FrozenDictionary<Type, DirectedEventHandler>[] _compEventSubs = default!;
+    private FrozenDictionary<Type, GeneratedDirectedEventHandler>[] _compEventSubs = default!;
 
     // pre-freeze event subscription data
     private Dictionary<Type, DirectedRegistration>?[] _eventSubsUnfrozen = [];
-    private Dictionary<Type, DirectedEventHandler>?[] _compEventSubsUnfrozen = [];
+    private Dictionary<Type, GeneratedDirectedEventHandler>?[] _compEventSubsUnfrozen = [];
 
     /// <summary>
     /// Inverse of <see cref="_eventSubs"/>, mapping event types to sets of components.
@@ -57,19 +57,50 @@ internal sealed partial class EntityEventBus : IEventBus
     // prevents shitcode, get your subscriptions figured out before you start spawning entities
     private bool _subscriptionLock;
 
+    private int _subscriptionVersion;
+    private int _directedEventCount;
+#if DEBUG
+    private int _directedDispatchDepth;
+#endif
+    internal Type[] _directedEventTypes = [];
+
     public bool IgnoreUnregisteredComponents;
 
     private readonly List<Type> _childrenTypesTemp = [];
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static ref Unit ExtractUnitRef(ref object obj, Type objType)
+    private void EnterDirectedDispatch()
+    {
+#if DEBUG
+        _directedDispatchDepth++;
+#endif
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void ExitDirectedDispatch()
+    {
+#if DEBUG
+        _directedDispatchDepth--;
+#endif
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void AssertNotMutatingDuringDirectedDispatch()
+    {
+#if DEBUG
+        DebugTools.Assert(_directedDispatchDepth == 0, "Cannot mutate directed event tables during directed event dispatch.");
+#endif
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ref EntityEventBusUnit ExtractUnitRef(ref object obj, Type objType)
     {
         // If it's a boxed value type we have to do some trickery to return the INTERIOR reference,
         // not the reference to the boxed object.
-        // Otherwise the unit points to the reference to the reference type.
+        // Otherwise the EntityEventBusUnit points to the reference to the reference type.
         return ref objType.IsValueType
             ? ref Unsafe.As<object, UnitBox>(ref obj).Value
-            : ref Unsafe.As<object, Unit>(ref obj);
+            : ref Unsafe.As<object, EntityEventBusUnit>(ref obj);
     }
 
     private void RegisterCommon(Type eventType, OrderingData? data, out EventData subs)
@@ -94,22 +125,77 @@ internal sealed partial class EntityEventBus : IEventBus
     /// </summary>
     private sealed class EventData
     {
+        public int DirectedEventId = -1;
         public bool IsOrdered;
         public bool OrderingUpToDate;
         public ValueList<BroadcastRegistration> BroadcastRegistrations;
     }
 
-    // This is not a real type. Whenever you see a "ref Unit" it means it's a ref to *some* kind of other type.
-
-    // It should always be cast to/from with Unsafe.As<,>
-
-    internal readonly struct Unit
+    private static class EventCache<TEvent>
+        where TEvent : notnull
     {
+        public static EntityEventBus? Bus;
+        public static int Version;
+        public static bool HasEventData;
+        public static EventData? EventData;
+        public static GeneratedDirectedEventHandler?[]? ComponentHandlers;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static EventData? GetEventData(EntityEventBus bus)
+        {
+            if (ReferenceEquals(Bus, bus) && Version == bus._subscriptionVersion)
+                return HasEventData ? EventData : null;
+
+            return UpdateEventData(bus);
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static EventData? UpdateEventData(EntityEventBus bus)
+        {
+            Bus = bus;
+            Version = bus._subscriptionVersion;
+            HasEventData = bus._eventData.TryGetValue(typeof(TEvent), out var data);
+            EventData = data;
+            ComponentHandlers = null;
+            return HasEventData ? data : null;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static GeneratedDirectedEventHandler?[] GetComponentHandlers(EntityEventBus bus)
+        {
+            if (ReferenceEquals(Bus, bus)
+                && Version == bus._subscriptionVersion
+                && ComponentHandlers is { } handlers)
+                return handlers;
+
+            return UpdateComponentHandlers(bus);
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static GeneratedDirectedEventHandler?[] UpdateComponentHandlers(EntityEventBus bus)
+        {
+            if (!ReferenceEquals(Bus, bus) || Version != bus._subscriptionVersion)
+            {
+                Bus = bus;
+                Version = bus._subscriptionVersion;
+                HasEventData = bus._eventData.TryGetValue(typeof(TEvent), out var data);
+                EventData = data;
+            }
+
+            var handlers = GC.AllocateUninitializedArray<GeneratedDirectedEventHandler?>(bus._compEventSubs.Length);
+            for (var i = 0; i < handlers.Length; i++)
+            {
+                handlers[i] = bus._compEventSubs[i]?.GetValueOrDefault(typeof(TEvent));
+            }
+
+            ComponentHandlers = handlers;
+            return handlers;
+        }
     }
 
     [StructLayout(LayoutKind.Sequential)]
     private sealed class UnitBox
     {
-        [UsedImplicitly] public Unit Value;
+        [UsedImplicitly] public EntityEventBusUnit Value;
     }
 }

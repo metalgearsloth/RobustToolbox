@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Robust.Shared.Collections;
@@ -24,7 +24,7 @@ namespace Robust.Shared.GameObjects
             EntityUid uid,
             Type eventType,
             EventData subs,
-            ref Unit unitRef,
+            ref EntityEventBusUnit unitRef,
             bool broadcast)
         {
             if (!subs.OrderingUpToDate)
@@ -43,14 +43,29 @@ namespace Robust.Shared.GameObjects
             DispatchOrderedEvents(ref unitRef, ref found);
         }
 
-        private static void DispatchOrderedEvents(ref Unit eventArgs, ref ValueList<OrderedEventDispatch> found)
+        private void DispatchOrderedEvents(ref EntityEventBusUnit eventArgs, ref ValueList<OrderedEventDispatch> found)
         {
             found.Sort(OrderedEventDispatchComparer.Instance);
 
+#if DEBUG
+            EnterDirectedDispatch();
+            try
+            {
+                foreach (var (handler, _) in found.Span)
+                {
+                    handler(ref eventArgs);
+                }
+            }
+            finally
+            {
+                ExitDirectedDispatch();
+            }
+#else
             foreach (var (handler, _) in found.Span)
             {
                 handler(ref eventArgs);
             }
+#endif
         }
 
         /// <summary>

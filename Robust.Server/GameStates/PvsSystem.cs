@@ -106,7 +106,7 @@ internal sealed partial class PvsSystem : EntitySystem
     private bool _async;
 
     private DefaultObjectPool<PvsThreadResources> _threadResourcesPool = default!;
-    private EntityEventBus.DirectedEventHandler?[]? _getStateHandlers;
+    private GeneratedDirectedEventHandler?[]? _getStateHandlers;
 
     private static readonly Histogram Histogram = Metrics.CreateHistogram("robust_game_state_update_usage",
         "Amount of time spent processing different parts of the game state update", new HistogramConfiguration

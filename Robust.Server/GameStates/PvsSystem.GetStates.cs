@@ -72,7 +72,7 @@ internal sealed partial class PvsSystem
     {
         DebugTools.Assert(comp.NetSyncEnabled, $"Attempting to get component state for an un-synced component: {comp.GetType()}");
         stateEv.State = null;
-        _getStateHandlers![netId]?.Invoke(uid, comp, ref Unsafe.As<ComponentGetState, EntityEventBus.Unit>(ref stateEv));
+        _getStateHandlers![netId]?.Invoke(uid, comp, ref Unsafe.As<ComponentGetState, EntityEventBusUnit>(ref stateEv));
         var state = stateEv.State;
         return state;
     }

@@ -106,12 +106,12 @@ namespace Robust.Shared.GameObjects
     /// </summary>
     internal sealed partial class EntityEventBus : IBroadcastEventBusInternal
     {
-        // Inside this class we pass a lot of things around as "ref Unit unitRef".
+        // Inside this class we pass a lot of things around as "ref EntityEventBusUnit unitRef".
         // The idea behind this is to avoid using type arguments in core dispatch that only needs to pass around a ref*
         // Type arguments require the JIT to compile a new method implementation for every event type,
         // which would start to weigh a LOT.
 
-        private delegate void RefEventHandler(ref Unit ev);
+        private delegate void RefEventHandler(ref EntityEventBusUnit ev);
 
         /// <inheritdoc />
         public void UnsubscribeEvents(IEntityEventSubscriber subscriber)
@@ -153,7 +153,7 @@ namespace Robust.Shared.GameObjects
                 throw new ArgumentNullException(nameof(eventHandler));
 
             SubscribeEventCommon<T>(source, subscriber,
-                (ref Unit ev) => eventHandler(Unsafe.As<Unit, T>(ref ev)), eventHandler, null, false);
+                (ref EntityEventBusUnit ev) => eventHandler(Unsafe.As<EntityEventBusUnit, T>(ref ev)), eventHandler, null, false);
         }
 
         public void SubscribeEvent<T>(
@@ -171,15 +171,15 @@ namespace Robust.Shared.GameObjects
             var order = CreateOrderingData(orderType, before, after);
 
             SubscribeEventCommon<T>(source, subscriber,
-                (ref Unit ev) => eventHandler(Unsafe.As<Unit, T>(ref ev)), eventHandler, order, false);
+                (ref EntityEventBusUnit ev) => eventHandler(Unsafe.As<EntityEventBusUnit, T>(ref ev)), eventHandler, order, false);
         }
 
         public void SubscribeEvent<T>(EventSource source, IEntityEventSubscriber subscriber,
             EntityEventRefHandler<T> eventHandler) where T : notnull
         {
-            SubscribeEventCommon<T>(source, subscriber, (ref Unit ev) =>
+            SubscribeEventCommon<T>(source, subscriber, (ref EntityEventBusUnit ev) =>
             {
-                ref var tev = ref Unsafe.As<Unit, T>(ref ev);
+                ref var tev = ref Unsafe.As<EntityEventBusUnit, T>(ref ev);
                 eventHandler(ref tev);
             }, eventHandler, null, true);
         }
@@ -190,9 +190,9 @@ namespace Robust.Shared.GameObjects
         {
             var order = CreateOrderingData(orderType, before, after);
 
-            SubscribeEventCommon<T>(source, subscriber, (ref Unit ev) =>
+            SubscribeEventCommon<T>(source, subscriber, (ref EntityEventBusUnit ev) =>
             {
-                ref var tev = ref Unsafe.As<Unit, T>(ref ev);
+                ref var tev = ref Unsafe.As<EntityEventBusUnit, T>(ref ev);
                 eventHandler(ref tev);
             }, eventHandler, order, true);
         }
@@ -273,7 +273,7 @@ namespace Robust.Shared.GameObjects
             if (source == EventSource.None)
                 throw new ArgumentOutOfRangeException(nameof(source));
 
-            ProcessSingleEvent(source, ref Unsafe.As<T, Unit>(ref toRaise), typeof(T));
+            ProcessSingleEvent(source, ref Unsafe.As<T, EntityEventBusUnit>(ref toRaise), typeof(T));
         }
 
         public void RaiseEvent<T>(EventSource source, ref T toRaise) where T : notnull
@@ -281,7 +281,7 @@ namespace Robust.Shared.GameObjects
             if (source == EventSource.None)
                 throw new ArgumentOutOfRangeException(nameof(source));
 
-            ProcessSingleEvent(source, ref Unsafe.As<T, Unit>(ref toRaise), typeof(T));
+            ProcessSingleEvent(source, ref Unsafe.As<T, EntityEventBusUnit>(ref toRaise), typeof(T));
         }
 
         /// <inheritdoc />
@@ -309,7 +309,7 @@ namespace Robust.Shared.GameObjects
                 inverse.Remove(eventType);
         }
 
-        private void ProcessSingleEvent(EventSource source, ref Unit unitRef, Type eventType)
+        private void ProcessSingleEvent(EventSource source, ref EntityEventBusUnit unitRef, Type eventType)
         {
             if (!_eventData!.TryGetValue(eventType, out var subs))
                 return;
@@ -327,7 +327,7 @@ namespace Robust.Shared.GameObjects
 
         private static void ProcessSingleEventCore(
             EventSource source,
-            ref Unit unitRef,
+            ref EntityEventBusUnit unitRef,
             EventData subs)
         {
             foreach (var handler in subs.BroadcastRegistrations.Span)

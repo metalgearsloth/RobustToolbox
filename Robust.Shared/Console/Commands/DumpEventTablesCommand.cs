@@ -29,9 +29,19 @@ internal sealed partial class DumpEventTablesCommand : LocalizedCommands
 
         var eventBus = (EntityEventBus)_entities.EventBus;
 
-        var table = eventBus._entEventTables[entity.Value];
-        foreach (var (evType, comps) in table.EventIndices)
+        if (eventBus._entEventTables.Get(entity.Value) is not { } table)
         {
+            shell.WriteError(Loc.GetString("cmd-dump_event_tables-error-entity"));
+            return;
+        }
+
+        for (var eventId = 0; eventId < table.EventIndices.Length; eventId++)
+        {
+            ref var comps = ref table.EventIndices[eventId];
+            if (comps.Start < 0)
+                continue;
+
+            var evType = eventBus._directedEventTypes[eventId];
             shell.WriteLine($"{evType}:");
 
             var idx = comps.Start;
