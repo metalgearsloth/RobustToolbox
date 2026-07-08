@@ -87,6 +87,6 @@
     <PackageVersion Include="Collections.Pooled" Version="2.0.0-preview.27" />
     <PackageVersion Include="Arch.LowLevel" Version="1.1.1" />
     <PackageVersion Include="CommunityToolkit.HighPerformance" Version="8.2.2" />
-    <PackageVersion Include="ZeroAllocJobScheduler" Version="1.1.2" />
+    <PackageVersion Include="ZeroAllocJobScheduler" Version="1.0.1" />
   </ItemGroup>
 </Project>

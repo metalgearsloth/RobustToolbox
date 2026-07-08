@@ -4,7 +4,6 @@ using Arch.Core;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Engines;
 using Robust.Shared.Analyzers;
-using Schedulers;
 using static Robust.Benchmarks.EntityManager.ArchetypeComponentAccessBenchmark;
 
 namespace Robust.Benchmarks.Arch;
@@ -21,15 +20,12 @@ public class ArchComponentAccessBenchmark
     private QueryDescription _singleQuery;
     private QueryDescription _tenQuery;
 
-    private JobScheduler _scheduler = default!;
+    private JobScheduler.JobScheduler _scheduler = default!;
 
     [GlobalSetup]
     public void GlobalSetup()
     {
-        _scheduler = new JobScheduler(new JobScheduler.Config()
-        {
-            ThreadPrefixName = "ArchBenchmark"
-        });
+        _scheduler = new JobScheduler.JobScheduler("ArchBenchmark", Environment.ProcessorCount);
 
         _world = World.Create();
 

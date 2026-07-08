@@ -57,7 +57,7 @@ public sealed class RobustConfig : IConfig
     public ConfigUnionRule UnionRule => DefaultConfig.Instance.UnionRule;
     public string ArtifactsPath => DefaultConfig.Instance.ArtifactsPath;
     public CultureInfo CultureInfo => DefaultConfig.Instance.CultureInfo!;
-    public ConfigOptions Options => DefaultConfig.Instance.Options;
+    public ConfigOptions Options => DefaultConfig.Instance.Options | ConfigOptions.DisableOptimizationsValidator;
     public TimeSpan BuildTimeout => DefaultConfig.Instance.BuildTimeout;
     public WakeLockType WakeLock => DefaultConfig.Instance.WakeLock;
     public IReadOnlyList<Conclusion> ConfigAnalysisConclusion => DefaultConfig.Instance.ConfigAnalysisConclusion;

@@ -736,7 +736,7 @@ namespace Robust.Shared.GameObjects
         [Pure]
         public bool HasComponent<T>(EntityUid uid) where T : IComponent
         {
-            return TryAlive(uid, out var archUid) && _world.TryGet(archUid, out T? comp) && comp != null && !comp.Deleted;
+            return TryGetComponentStorage<T>(uid, out _);
         }
 
         /// <inheritdoc />
@@ -751,7 +751,7 @@ namespace Robust.Shared.GameObjects
         [Pure]
         public bool HasComponent(EntityUid uid, ComponentRegistration reg)
         {
-            return TryAlive(uid, out var archUid) && _world.TryGet(archUid, reg.ArchType, out var comp) && comp != null && !((IComponent) comp).Deleted;
+            return TryGetComponentStorage(uid, reg.ArchType, out _);
         }
 
         /// <inheritdoc />
@@ -759,7 +759,7 @@ namespace Robust.Shared.GameObjects
         [Pure]
         public bool HasComponent(EntityUid uid, Type type)
         {
-            return TryAlive(uid, out var archUid) && _world.TryGet(archUid, type, out var comp) && comp != null && !((IComponent) comp).Deleted;
+            return TryGetComponentStorage(uid, (ComponentType) type, out _);
         }
 
         /// <inheritdoc />
@@ -858,7 +858,7 @@ namespace Robust.Shared.GameObjects
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public T GetComponent<T>(EntityUid uid) where T : IComponent
         {
-            if (!uid.Valid || !_world.TryGet(ToArch(uid), out T? comp) || comp == null)
+            if (!TryGetComponentStorageInternal<T>(uid, out var comp))
             {
                 throw new KeyNotFoundException($"Entity {uid} does not have a component of type {typeof(T)}");
             }
@@ -869,24 +869,24 @@ namespace Robust.Shared.GameObjects
         [Pure]
         public IComponent GetComponent(EntityUid uid, CompIdx type)
         {
-            if (!uid.Valid || !_world.TryGet(ToArch(uid), type.Type, out var comp) || comp == null)
+            if (!TryGetComponentStorageInternal(uid, type.Type, out var comp))
             {
                 throw new KeyNotFoundException($"Entity {uid} does not have a component of type {type.Type}");
             }
 
-            return (IComponent) comp;
+            return comp;
         }
 
         /// <inheritdoc />
         [Pure]
         public IComponent GetComponent(EntityUid uid, Type type)
         {
-            if (!uid.Valid || !_world.TryGet(ToArch(uid), type, out var comp) || comp == null)
+            if (!TryGetComponentStorageInternal(uid, (ComponentType) type, out var comp))
             {
                 throw new KeyNotFoundException($"Entity {uid} does not have a component of type {type}");
             }
 
-            return (IComponent) comp;
+            return comp;
         }
 
         /// <inheritdoc />
@@ -909,22 +909,7 @@ namespace Robust.Shared.GameObjects
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool TryGetComponent<T>(EntityUid uid, [NotNullWhen(true)] out T? component) where T : IComponent?
         {
-            if (!uid.Valid)
-            {
-                component = default;
-                return false;
-            }
-
-            if (_world.TryGet(ToArch(uid), out component) && component != null)
-            {
-                if (!component.Deleted)
-                {
-                    return true;
-                }
-            }
-
-            component = default;
-            return false;
+            return TryGetComponentStorage(uid, out component);
         }
 
         /// <inheritdoc />
@@ -936,62 +921,28 @@ namespace Robust.Shared.GameObjects
                 return false;
             }
 
-            if (TryGetComponent(uid.Value, typeof(T), out var comp))
-            {
-                if (!comp.Deleted)
-                {
-                    component = (T)comp;
-                    return true;
-                }
-            }
-
-            component = default;
-            return false;
+            return TryGetComponentStorage(uid.Value, out component);
         }
 
         /// <inheritdoc />
         public bool TryGetComponent(EntityUid uid, ComponentRegistration reg, [NotNullWhen(true)] out IComponent? component)
         {
-            return TryGetComponent(uid, reg.ArchType, out component);
+            return TryGetComponentStorage(uid, reg.ArchType, out component);
         }
 
         internal bool TryGetComponent<T>(EntityUid uid, ComponentType type, [NotNullWhen(true)] out IComponent? component)
         {
-            if (TryAlive(uid, out var archUid) && _world.TryGet(archUid, type, out var comp))
-            {
-                component = (IComponent) comp;
-
-                if (!component.Deleted)
-                {
-                    return true;
-                }
-            }
-
-            component = null;
-            return false;
+            return TryGetComponentStorage(uid, type, out component);
         }
 
         internal bool TryGetComponent<T>(EntityUid uid, ComponentType type, [NotNullWhen(true)] out T? component) where T : IComponent?
         {
-            if (TryAlive(uid, out var archUid) && _world.TryGet(archUid, type, out var comp))
-            {
-                component = (T) comp;
-
-                if (!component.Deleted)
-                {
-                    return true;
-                }
-            }
-
-            component = default;
-            return false;
+            return TryGetComponentStorage(uid, type, out component);
         }
 
         internal bool HasComponentWithoutLifeCheck(EntityUid uid, ComponentRegistration reg)
         {
-            return _world.TryGet(ToArch(uid), reg.ArchType, out var comp)
-                   && comp is IComponent component
-                   && !component.Deleted;
+            return TryGetComponentStorage(uid, reg.ArchType, out _);
         }
 
         internal bool TryGetComponentWithoutLifeCheck(
@@ -999,20 +950,18 @@ namespace Robust.Shared.GameObjects
             CompIdx idx,
             [NotNullWhen(true)] out IComponent? component)
         {
-            if (_world.TryGet(ToArch(uid), idx.Type, out var comp) && comp is IComponent value)
-            {
-                component = value;
-                return !component.Deleted;
-            }
-
-            component = null;
-            return false;
+            return TryGetComponentStorage(uid, idx.Type, out component);
         }
 
         /// <inheritdoc />
         public bool TryGetComponent(EntityUid uid, Type type, [NotNullWhen(true)] out IComponent? component)
         {
-            return TryGetComponent(uid, (ComponentType) type, out component);
+            return TryGetComponentStorage(uid, (ComponentType) type, out component);
+        }
+
+        internal bool TryGetComponent(EntityUid uid, ComponentType type, [NotNullWhen(true)] out IComponent? component)
+        {
+            return TryGetComponentStorage(uid, type, out component);
         }
 
         public bool TryGetComponent<T>(EntityUid uid, CompIdx type, [NotNullWhen(true)] out T? component) where T : IComponent?
@@ -1184,7 +1133,7 @@ namespace Robust.Shared.GameObjects
         /// <inheritdoc />
         public int ComponentCount(EntityUid uid)
         {
-            return _world.GetArchetype(ToArch(uid)).Signature.Count;
+            return _world.GetArchetype(ToArch(uid)).Types.Length;
         }
 
         /// <summary>
@@ -1666,8 +1615,8 @@ namespace Robust.Shared.GameObjects
         [Pure]
         public TComp1 GetComponent(EntityUid uid)
         {
-            if (_entManager.TryGetComponent(uid, _type, out var comp) && !comp.Deleted)
-                return (TComp1) comp;
+            if (_entManager.TryGetComponentStorage(uid, out TComp1? comp))
+                return comp;
 
             throw new KeyNotFoundException($"Entity {uid} does not have a component of type {typeof(TComp1)}");
         }
@@ -1676,8 +1625,8 @@ namespace Robust.Shared.GameObjects
         [MethodImpl(MethodImplOptions.AggressiveInlining), Pure]
         public Entity<TComp1> Get(EntityUid uid)
         {
-            if (_entManager.TryGetComponent(uid, _type, out var comp) && !comp.Deleted)
-                return new Entity<TComp1>(uid, (TComp1) comp);
+            if (_entManager.TryGetComponentStorage(uid, out TComp1? comp))
+                return new Entity<TComp1>(uid, comp);
 
             throw new KeyNotFoundException($"Entity {uid} does not have a component of type {typeof(TComp1)}");
         }
@@ -1716,9 +1665,9 @@ namespace Robust.Shared.GameObjects
         [Pure]
         public bool TryGetComponent(EntityUid uid, [NotNullWhen(true)] out TComp1? component)
         {
-            if (_entManager.TryGetComponent(uid, _type, out var comp) && !comp.Deleted)
+            if (_entManager.TryGetComponentStorage(uid, out TComp1? comp))
             {
-                component = (TComp1) comp;
+                component = comp;
                 return true;
             }
 
@@ -1764,7 +1713,7 @@ namespace Robust.Shared.GameObjects
         [Pure]
         public bool HasComponent(EntityUid uid)
         {
-            return _entManager.TryGetComponent(uid, _type, out var comp) && !comp.Deleted;
+            return _entManager.TryGetComponentStorage(uid, out TComp1? _);
         }
 
         /// <inheritdoc cref="HasComp(Robust.Shared.GameObjects.EntityUid)"/>
@@ -1792,9 +1741,9 @@ namespace Robust.Shared.GameObjects
                 return true;
             }
 
-            if (_entManager.TryGetComponent(uid, _type, out var comp) && !comp.Deleted)
+            if (_entManager.TryGetComponentStorage(uid, out TComp1? comp))
             {
-                component = (TComp1)comp;
+                component = comp;
                 return true;
             }
 
@@ -1849,8 +1798,8 @@ namespace Robust.Shared.GameObjects
         [Pure]
         internal TComp1 GetComponentInternal(EntityUid uid)
         {
-            if (_entManager.TryGetComponent(uid, _type, out var comp))
-                return (TComp1) comp;
+            if (_entManager.TryGetComponentStorageInternal(uid, out TComp1? comp))
+                return comp;
 
             throw new KeyNotFoundException($"Entity {uid} does not have a component of type {typeof(TComp1)}");
         }
@@ -1878,9 +1827,9 @@ namespace Robust.Shared.GameObjects
         [Pure]
         internal bool TryGetComponentInternal(EntityUid uid, [NotNullWhen(true)] out TComp1? component)
         {
-            if (_entManager.TryGetComponent(uid, _type, out var comp))
+            if (_entManager.TryGetComponentStorageInternal(uid, out TComp1? comp))
             {
-                component = (TComp1) comp;
+                component = comp;
                 return true;
             }
 
@@ -1895,7 +1844,7 @@ namespace Robust.Shared.GameObjects
         [Pure]
         internal bool HasComponentInternal(EntityUid uid)
         {
-            return uid.Valid && _entManager.HasComponent(uid, _type);
+            return uid.Valid && _entManager.TryGetComponentStorageInternal(uid, _type, out _);
         }
 
         /// <summary>
@@ -1911,9 +1860,9 @@ namespace Robust.Shared.GameObjects
                 return true;
             }
 
-            if (_entManager.TryGetComponent(uid, _type, out var comp))
+            if (_entManager.TryGetComponentStorageInternal(uid, out TComp1? comp))
             {
-                component = (TComp1)comp;
+                component = comp;
                 return true;
             }
 
