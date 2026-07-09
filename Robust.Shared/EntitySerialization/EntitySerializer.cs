@@ -322,7 +322,7 @@ public sealed partial class EntitySerializer : ISerializationContext,
         }
     }
 
-    private bool FindSavedTileMap(EntityUid root, [NotNullWhen(true)] out Dictionary<int, string>? map)
+    private bool FindSavedTileMap(EntityUid root, [NotNullWhen(true)] out IReadOnlyDictionary<int, string>? map)
     {
         // Try and fetch the mapping directly
         if (EntMan.TryGetComponent(root, out MapSaveTileMapComponent? comp))

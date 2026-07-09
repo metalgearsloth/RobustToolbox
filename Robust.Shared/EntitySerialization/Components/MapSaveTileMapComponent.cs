@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+using System.Collections.Frozen;
+using System.Collections.Generic;
 using Robust.Shared.EntitySerialization.Systems;
 using Robust.Shared.GameObjects;
 
@@ -21,5 +22,5 @@ namespace Robust.Shared.EntitySerialization.Components;
 [RegisterComponent, UnsavedComponent]
 internal sealed partial class MapSaveTileMapComponent : Component
 {
-    public Dictionary<int, string> TileMap = [];
+    public IReadOnlyDictionary<int, string> TileMap = FrozenDictionary<int, string>.Empty;
 }

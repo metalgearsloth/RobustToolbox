@@ -55,20 +55,18 @@ internal sealed class MapChunkSerializer : ITypeSerializer<MapChunk, MappingData
 
         var chunk = instantiationDelegate != null ? instantiationDelegate() : new MapChunk(ind.X, ind.Y, size);
 
-        IReadOnlyDictionary<int, string>? tileMap = null;
+        EntityDeserializer? serContext = null;
 
-        if (context is EntityDeserializer serContext)
-            tileMap = serContext.TileMap;
+        if (context is EntityDeserializer entityDeserializer)
+            serContext = entityDeserializer;
 
-        if (tileMap == null)
+        if (serContext == null)
         {
             throw new InvalidOperationException(
                 $"Someone tried deserializing a gridchunk before deserializing the tileMap.");
         }
 
         chunk.SuppressCollisionRegeneration = true;
-
-        var tileDefinitionManager = dependencies.Resolve<ITileDefinitionManager>();
 
         node.TryGetValue("version", out var versionNode);
         var version = ((ValueDataNode?) versionNode)?.AsInt() ?? 1;
@@ -85,8 +83,7 @@ internal sealed class MapChunkSerializer : ITypeSerializer<MapChunk, MappingData
                     var variant = reader.ReadByte();
                     var rotationMirroring = reader.ReadByte();
 
-                    var defName = tileMap[id];
-                    id = tileDefinitionManager[defName].TileId;
+                    id = serContext.GetTileId(id);
 
                     var tile = new Tile(id, flags, variant, rotationMirroring);
                     chunk.TrySetTile(x, y, tile, out _, out _);
@@ -103,8 +100,7 @@ internal sealed class MapChunkSerializer : ITypeSerializer<MapChunk, MappingData
                     var flags = reader.ReadByte();
                     var variant = reader.ReadByte();
 
-                    var defName = tileMap[id];
-                    id = tileDefinitionManager[defName].TileId;
+                    id = serContext.GetTileId(id);
 
                     var tile = new Tile(id, flags, variant);
                     chunk.TrySetTile(x, y, tile, out _, out _);

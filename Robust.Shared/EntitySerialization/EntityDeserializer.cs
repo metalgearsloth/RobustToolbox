@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -49,6 +50,7 @@ public sealed partial class EntityDeserializer :
     [Dependency] private ISerializationManager _seriMan = default!;
     [Dependency] private IComponentFactory _factory = default!;
     [Dependency] private IPrototypeManager _proto = default!;
+    [Dependency] private ITileDefinitionManager _tileDef = default!;
     [Dependency] private SharedMapSystem _map = default!;
     [Dependency] private ILogManager _logMan = default!;
     [Dependency] private IDependencyCollection _deps = default!;
@@ -82,21 +84,22 @@ public sealed partial class EntityDeserializer :
     public record struct EntData(
         int YamlId,
         MappingDataNode Node,
-        Dictionary<string, MappingDataNode>? Components,
+        FrozenDictionary<string, MappingDataNode>? Components,
         HashSet<string>? MissingComponents,
         bool PostInit,
         bool Paused,
         bool ToDelete);
 
     public readonly LoadResult Result = new();
-    public readonly Dictionary<int, string> TileMap = new();
+    public FrozenDictionary<int, string> TileMap = FrozenDictionary<int, string>.Empty;
+    public readonly Dictionary<int, int> TileIdMap = new();
     public readonly Dictionary<int, EntityUid> UidMap = new();
     public readonly Dictionary<int, MapId> AllocatedMapIds = new();
     public readonly List<int> MapYamlIds = new();
     public readonly List<int> GridYamlIds = new();
     public readonly List<int> OrphanYamlIds = new();
     public readonly List<int> NullspaceYamlIds = new();
-    public readonly Dictionary<string, string> RenamedPrototypes;
+    public readonly FrozenDictionary<string, string> RenamedPrototypes;
     public readonly HashSet<string> DeletedPrototypes;
 
     /// <summary>
@@ -129,7 +132,7 @@ public sealed partial class EntityDeserializer :
         SerializerProvider.RegisterSerializer(this);
         Data = data;
         Options = options;
-        RenamedPrototypes = renamedPrototypes ?? new();
+        RenamedPrototypes = renamedPrototypes?.ToFrozenDictionary() ?? FrozenDictionary<string, string>.Empty;
         DeletedPrototypes = deletedPrototypes ?? new();
 
         _mapQuery = EntMan.GetEntityQuery<MapComponent>();
@@ -444,7 +447,7 @@ public sealed partial class EntityDeserializer :
         }
     }
 
-    private (Dictionary<string, MappingDataNode>? Comps, HashSet<string>? Missing) GetComponents(MappingDataNode node)
+    private (FrozenDictionary<string, MappingDataNode>? Comps, HashSet<string>? Missing) GetComponents(MappingDataNode node)
     {
         Dictionary<string, MappingDataNode>? dict = null;
         HashSet<string>? missing = null;
@@ -471,7 +474,7 @@ public sealed partial class EntityDeserializer :
 
         node.Remove("components");
         node.Remove("missingComponents");
-        return (dict, missing);
+        return (dict?.ToFrozenDictionary(), missing);
     }
 
     private void ReadTileMap()
@@ -479,11 +482,9 @@ public sealed partial class EntityDeserializer :
         // Load tile mapping so that we can map the stored tile IDs into the ones actually used at runtime.
         _stopwatch.Restart();
         var tileMap = Data.Get<MappingDataNode>("tilemap");
-        var migrations = new Dictionary<string, string>();
-        foreach (var proto in _proto.EnumeratePrototypes<TileAliasPrototype>())
-        {
-            migrations.Add(proto.ID, proto.Target);
-        }
+        var migrations = _proto.EnumeratePrototypes<TileAliasPrototype>()
+            .ToFrozenDictionary(x => x.ID, x => x.Target);
+        var newTileMap = new Dictionary<int, string>(tileMap.Children.Count);
 
         foreach (var (key, value) in tileMap.Children)
         {
@@ -492,10 +493,22 @@ public sealed partial class EntityDeserializer :
             if (migrations.TryGetValue(tileName, out var @new))
                 tileName = @new;
 
-            TileMap.Add(yamlTileId, tileName);
+            newTileMap.Add(yamlTileId, tileName);
         }
 
+        TileMap = newTileMap.ToFrozenDictionary();
         _log.Debug($"Read tilemap in {_stopwatch.Elapsed}");
+    }
+
+    public int GetTileId(int yamlTileId)
+    {
+        if (TileIdMap.TryGetValue(yamlTileId, out var tileId))
+            return tileId;
+
+        var tileName = TileMap[yamlTileId];
+        tileId = _tileDef[tileName].TileId;
+        TileIdMap.Add(yamlTileId, tileId);
+        return tileId;
     }
 
     private void AllocateEntities()
@@ -594,7 +607,7 @@ public sealed partial class EntityDeserializer :
     private void LoadEntity(
         EntityUid uid,
         MetaDataComponent meta,
-        Dictionary<string, MappingDataNode>? comps,
+        FrozenDictionary<string, MappingDataNode>? comps,
         HashSet<string>? missingComps)
     {
         var proto = meta.EntityPrototype;
@@ -619,7 +632,7 @@ public sealed partial class EntityDeserializer :
                 var datanode = compData;
 
                 if (proto != null && _proto.GetPrototypeData(proto).TryGetValue(name, out var protoData))
-                    datanode = _seriMan.CombineMappings(compData, protoData);
+                    datanode = CombineMappingsShallow(compData, protoData);
 
                 _components.Add(name, datanode);
             }
@@ -697,6 +710,41 @@ public sealed partial class EntityDeserializer :
         CurrentComponent = null;
         if (missingComps is {Count: > 0})
             meta.LastComponentRemoved = Timing.CurTick;
+    }
+
+    private static MappingDataNode CombineMappingsShallow(MappingDataNode child, MappingDataNode parent)
+    {
+        var needsParentData = false;
+        foreach (var (key, _) in parent)
+        {
+            if (child.ContainsKey(key))
+                continue;
+
+            needsParentData = true;
+            break;
+        }
+
+        if (!needsParentData)
+            return child;
+
+        var result = new MappingDataNode(child.Count + parent.Count)
+        {
+            Tag = child.Tag,
+            Start = child.Start,
+            End = child.End,
+        };
+
+        foreach (var (key, value) in child)
+        {
+            result.Add(key, value);
+        }
+
+        foreach (var (key, value) in parent)
+        {
+            result.TryAdd(key, value);
+        }
+
+        return result;
     }
 
     private void GetRootEntities()
@@ -805,7 +853,7 @@ public sealed partial class EntityDeserializer :
 
         foreach (var entity in Result.Grids)
         {
-            EntMan.EnsureComponent<MapSaveTileMapComponent>(entity).TileMap = TileMap.ShallowClone();
+            EntMan.EnsureComponent<MapSaveTileMapComponent>(entity).TileMap = TileMap;
         }
     }
 
