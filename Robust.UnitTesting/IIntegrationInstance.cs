@@ -58,6 +58,10 @@ public interface IIntegrationInstance : IDisposable
     ///     If true, throw an exception if the server dies on an unhandled exception.
     /// </param>
     /// <param name="cancellationToken"></param>
+    /// <remarks>
+    ///     Asynchronous instances also enforce the watchdog configured by
+    ///     <see cref="RobustIntegrationTest.IntegrationOptions.WaitTimeout"/>.
+    /// </remarks>
     /// <exception cref="Exception">
     ///     Thrown if <paramref name="throwOnUnhandled"/> is true and the instance shuts down on an unhandled exception.
     /// </exception>

@@ -39,6 +39,8 @@ using Robust.Shared.Serialization;
 using Robust.Shared.Testing;
 using Robust.Shared.Timing;
 using ServerProgram = Robust.Server.Program;
+using DiagnosticsStopwatch = System.Diagnostics.Stopwatch;
+using ThreadingTimeout = System.Threading.Timeout;
 
 namespace Robust.UnitTesting
 {
@@ -391,6 +393,8 @@ namespace Robust.UnitTesting
 
             private int _currentTicksId = 1;
             private int _ackTicksId;
+            private string _pendingCommand = "initialization";
+            private long _pendingCommandTimestamp = DiagnosticsStopwatch.GetTimestamp();
 
             private bool _isSurelyIdle;
             private bool _isAlive = true;
@@ -539,18 +543,38 @@ namespace Robust.UnitTesting
 
             private async Task WaitIdleImplAsync(bool throwOnUnhandled, CancellationToken cancellationToken)
             {
+                var waitTimeout = Options?.WaitTimeout ?? IntegrationOptions.DefaultWaitTimeout;
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                if (waitTimeout != ThreadingTimeout.InfiniteTimeSpan)
+                    timeoutCts.CancelAfter(waitTimeout);
+
                 while (_isAlive && _currentTicksId != _ackTicksId)
                 {
                     object msg = default!;
                     try
                     {
-                        msg = await _fromInstanceReader.ReadAsync(cancellationToken);
+                        msg = await _fromInstanceReader.ReadAsync(timeoutCts.Token);
                     }
-                    catch(OperationCanceledException ex)
+                    catch (OperationCanceledException ex)
                     {
-                        _unhandledException = ex;
-                        _isAlive = false;
-                        break;
+                        Exception waitException;
+                        if (cancellationToken.IsCancellationRequested)
+                        {
+                            waitException = new OperationCanceledException(
+                                GetWaitFailureMessage("Waiting for the integration instance was cancelled."),
+                                ex,
+                                cancellationToken);
+                        }
+                        else
+                        {
+                            waitException = new TimeoutException(
+                                GetWaitFailureMessage($"Integration instance did not become idle within {waitTimeout}."));
+                        }
+
+                        Invalidate(waitException);
+                        TestContext.Progress.WriteLine(waitException.Message);
+                        ExceptionDispatchInfo.Capture(waitException).Throw();
+                        return;
                     }
                     switch (msg)
                     {
@@ -639,9 +663,9 @@ namespace Robust.UnitTesting
             /// <inheritdoc/>
             public void RunTicks(int ticks)
             {
-                _isSurelyIdle = false;
-                _currentTicksId += 1;
-                _toInstanceWriter.TryWrite(new RunTicksMessage(ticks, _currentTicksId));
+                var description = $"run {ticks} tick(s)";
+                var messageId = BeginCommand(description);
+                _toInstanceWriter.TryWrite(new RunTicksMessage(ticks, messageId));
             }
 
             /// <inheritdoc/>
@@ -659,6 +683,8 @@ namespace Robust.UnitTesting
                 _isSurelyIdle = false;
                 // Won't get ack'd directly but the shutdown is convincing enough.
                 _currentTicksId += 1;
+                _pendingCommand = "stop";
+                _pendingCommandTimestamp = DiagnosticsStopwatch.GetTimestamp();
                 _toInstanceWriter.TryWrite(new StopMessage());
                 _toInstanceWriter.TryComplete();
             }
@@ -666,9 +692,9 @@ namespace Robust.UnitTesting
             /// <inheritdoc/>
             public void Post(Action post)
             {
-                _isSurelyIdle = false;
-                _currentTicksId += 1;
-                _toInstanceWriter.TryWrite(new PostMessage(post, _currentTicksId));
+                var description = $"post {DescribeCallback(post)}";
+                var messageId = BeginCommand(description);
+                _toInstanceWriter.TryWrite(new PostMessage(post, messageId));
             }
 
             public async Task WaitPost(Action post)
@@ -680,9 +706,9 @@ namespace Robust.UnitTesting
             /// <inheritdoc/>
             public void Assert(Action assertion)
             {
-                _isSurelyIdle = false;
-                _currentTicksId += 1;
-                _toInstanceWriter.TryWrite(new AssertMessage(assertion, _currentTicksId));
+                var description = $"assert {DescribeCallback(assertion)}";
+                var messageId = BeginCommand(description);
+                _toInstanceWriter.TryWrite(new AssertMessage(assertion, messageId));
             }
 
             public async Task WaitAssertion(Action assertion)
@@ -694,6 +720,54 @@ namespace Robust.UnitTesting
             internal void MarkNonIdle()
             {
                 Post(() => {});
+            }
+
+            private int BeginCommand(string description)
+            {
+                _isSurelyIdle = false;
+                _currentTicksId += 1;
+                _pendingCommand = description;
+                _pendingCommandTimestamp = DiagnosticsStopwatch.GetTimestamp();
+                return _currentTicksId;
+            }
+
+            private void Invalidate(Exception exception)
+            {
+                _unhandledException = exception;
+                _isAlive = false;
+                _isSurelyIdle = true;
+
+                // If the instance thread is stuck in a command, this causes it to exit instead of processing more work
+                // if that command eventually returns.
+                _toInstanceWriter.TryComplete();
+            }
+
+            private string GetWaitFailureMessage(string reason)
+            {
+                var thread = InstanceThread;
+                var threadDescription = thread == null
+                    ? "synchronous"
+                    : $"'{thread.Name ?? "unnamed"}' (managed ID {thread.ManagedThreadId}, " +
+                      $"alive: {thread.IsAlive}, state: {thread.ThreadState})";
+                var testsRan = TestsRan.Count == 0 ? "<none>" : string.Join(", ", TestsRan);
+                var commandBacklog = _toInstanceReader.CanCount ? _toInstanceReader.Count.ToString() : "unknown";
+                var responseBacklog = _fromInstanceReader.CanCount ? _fromInstanceReader.Count.ToString() : "unknown";
+
+                return $"{reason}\n" +
+                       $"Instance: {GetType().Name}.\n" +
+                       $"Pending command: {_pendingCommand} " +
+                       $"(pending for {DiagnosticsStopwatch.GetElapsedTime(_pendingCommandTimestamp)}).\n" +
+                       $"Message state: sent {_currentTicksId}, acknowledged {_ackTicksId}.\n" +
+                       $"Channel backlog: {commandBacklog} command(s), {responseBacklog} response(s).\n" +
+                       $"Thread: {threadDescription}.\n" +
+                       $"Current NUnit test: {TestContext.CurrentContext.Test.FullName}.\n" +
+                       $"Tests that used this instance: {testsRan}.";
+            }
+
+            private static string DescribeCallback(Action callback)
+            {
+                var method = callback.Method;
+                return method.DeclaringType == null ? method.Name : $"{method.DeclaringType.FullName}.{method.Name}";
             }
 
             public virtual Task Cleanup() => Task.CompletedTask;
@@ -1297,6 +1371,8 @@ namespace Robust.UnitTesting
 
         public abstract class IntegrationOptions
         {
+            public static readonly TimeSpan DefaultWaitTimeout = TimeSpan.FromMinutes(5);
+
             public Action? InitIoC { get; set; }
             public Action? BeforeRegisterComponents { get; set; }
             public Action? BeforeStart { get; set; }
@@ -1323,6 +1399,12 @@ namespace Robust.UnitTesting
             public Dictionary<string, string> CVarOverrides { get; } = new();
             public bool Asynchronous { get; set; } = true;
             public bool? Pool { get; set; }
+
+            /// <summary>
+            /// Maximum time to wait for the instance to acknowledge a command. Set this to
+            /// <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> to disable the watchdog.
+            /// </summary>
+            public TimeSpan WaitTimeout { get; set; } = DefaultWaitTimeout;
 
             public Func<ILogHandler>? OverrideLogHandler { get; set; }
         }
