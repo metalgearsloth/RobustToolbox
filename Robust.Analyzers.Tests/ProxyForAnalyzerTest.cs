@@ -160,6 +160,58 @@ public sealed class ProxyForAnalyzerTest
     }
 
     [Test]
+    public async Task TestIgnoreProxyMethodImplementationInDerivedProxyClass()
+    {
+        const string code = """
+            using Robust.Shared.Analyzers;
+
+            public abstract partial class BaseProxyClass : ProxyClass
+            {
+                [ProxyFor(typeof(TargetClass))]
+                public void DoSomething()
+                {
+                    TargetClass.DoSomething();
+                }
+            }
+
+            public abstract partial class DerivedProxyClass : BaseProxyClass
+            {
+                [ProxyFor(typeof(TargetClass), nameof(TargetClass.DoSomething))]
+                public void DoSomethingVariant()
+                {
+                    TargetClass.DoSomething();
+                }
+            }
+            """;
+
+        await Verifier(code, []);
+    }
+
+    [Test]
+    public async Task TestGenericProxyMayHaveAdditionalConstraint()
+    {
+        const string code = """
+            using Robust.Shared.Analyzers;
+
+            public abstract partial class ProxyClass
+            {
+                [ProxyFor(typeof(GenericTargetClass), nameof(GenericTargetClass.DoSomething))]
+                public void DoThing<T>(int foo) where T : class
+                {
+                    GenericTargetClass.DoSomething<T>(foo);
+                }
+            }
+
+            public sealed class GenericTargetClass
+            {
+                public static void DoSomething<T>(int foo) { }
+            }
+            """;
+
+        await Verifier(code, []);
+    }
+
+    [Test]
     public async Task TestRedundantMethodName()
     {
         const string code = """

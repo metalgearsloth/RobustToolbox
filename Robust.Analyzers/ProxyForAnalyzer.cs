@@ -77,7 +77,7 @@ public sealed class ProxyForAnalyzer : DiagnosticAnalyzer
                     return;
 
                 // Pass proxy method information to the analyzer state
-                var state = new AnalyzerState(proxyMethods);
+                var state = new AnalyzerState(proxyMethods, proxyForAttributeType);
                 // Analyze each method invocation within the class
                 symbolContext.RegisterOperationAction(state.AnalyzeInvocation, OperationKind.Invocation);
             }, SymbolKind.NamedType);
@@ -138,12 +138,21 @@ public sealed class ProxyForAnalyzer : DiagnosticAnalyzer
         return true;
     }
 
-    private sealed class AnalyzerState(ProxyMethod[] ProxyMethods)
+    private sealed class AnalyzerState(ProxyMethod[] ProxyMethods, INamedTypeSymbol ProxyForAttribute)
     {
         public void AnalyzeInvocation(OperationAnalysisContext context)
         {
             if (context.Operation is not IInvocationOperation operation)
                 return;
+
+            var invokedMethod = operation.TargetMethod;
+
+            // Proxy methods are allowed to call their proxied target directly.
+            if (context.ContainingSymbol is IMethodSymbol containingMethod &&
+                IsProxyImplementationCall(containingMethod, invokedMethod))
+            {
+                return;
+            }
 
             // Make sure the invocation is happening on a member, not a parameter or something else
             if (operation.Instance is not IMemberReferenceOperation reference)
@@ -152,9 +161,6 @@ public sealed class ProxyForAnalyzer : DiagnosticAnalyzer
             // Make sure the member belongs to the proxy class
             if (!TypeSymbolHelper.Inherits(context.ContainingSymbol.ContainingType, reference.Member.ContainingType))
                 return;
-
-            // Get the method being invoked
-            var invokedMethod = operation.TargetMethod;
 
             // Check each method we found
             foreach (var (method, targetType, targetMethod) in ProxyMethods)
@@ -171,15 +177,10 @@ public sealed class ProxyForAnalyzer : DiagnosticAnalyzer
                 if (!DoSignaturesMatch(invokedMethod, method))
                     continue;
 
-                var props = new Dictionary<string, string?>
-                {
-                    { ProxyMethodName, method.Name }
-                };
-
                 context.ReportDiagnostic(Diagnostic.Create(
                     PreferProxyDescriptor,
                     operation.Syntax.GetLocation(),
-                    props.ToImmutableDictionary(),
+                    ImmutableDictionary<string, string?>.Empty.Add(ProxyMethodName, method.Name),
                     method.MetadataName,
                     $"{invokedMethod.ContainingType.Name}.{invokedMethod.Name}"
                 ));
@@ -187,6 +188,19 @@ public sealed class ProxyForAnalyzer : DiagnosticAnalyzer
                 // We should only need to report one violation
                 break;
             }
+        }
+
+        private bool IsProxyImplementationCall(IMethodSymbol containingMethod, IMethodSymbol invokedMethod)
+        {
+            if (!AttributeHelper.HasAttribute(containingMethod, ProxyForAttribute, out var attributeData))
+                return false;
+
+            var targetType = attributeData.ConstructorArguments[0].Value as INamedTypeSymbol;
+            if (!SymbolEqualityComparer.Default.Equals(targetType, invokedMethod.ContainingType))
+                return false;
+
+            var targetMethod = attributeData.ConstructorArguments[1].Value as string ?? containingMethod.Name;
+            return targetMethod == invokedMethod.Name;
         }
     }
 
@@ -265,6 +279,9 @@ public sealed class ProxyForAnalyzer : DiagnosticAnalyzer
         {
             var firstConstraints = first.TypeParameters[i].ConstraintTypes;
             var secondConstraints = second.TypeParameters[i].ConstraintTypes;
+            if (firstConstraints.Length > secondConstraints.Length)
+                return false;
+
             for (var j = 0; j < firstConstraints.Length; j++)
             {
                 if (!SymbolEqualityComparer.Default.Equals(firstConstraints[j], secondConstraints[j]))
@@ -276,21 +293,27 @@ public sealed class ProxyForAnalyzer : DiagnosticAnalyzer
         if (second.IsGenericMethod)
             second = second.Construct(first.TypeArguments, first.TypeArgumentNullableAnnotations);
 
-        // Filter out any optional parameters
-        var firstParams = first.Parameters.Where(p => !p.IsOptional).ToArray();
-        var secondParams = second.Parameters.Where(p => !p.IsOptional).ToArray();
-
-        // A different number of parameters means no match
-        if (firstParams.Length != secondParams.Length)
-            return false;
-
-        for (var i = 0; i < firstParams.Length; i++)
+        var firstIndex = 0;
+        var secondIndex = 0;
+        while (true)
         {
+            var hasFirstParam = TryGetNextRequiredParameter(first.Parameters, ref firstIndex, out var firstParam);
+            var hasSecondParam = TryGetNextRequiredParameter(second.Parameters, ref secondIndex, out var secondParam);
+
+            if (hasFirstParam != hasSecondParam)
+                return false;
+
+            if (!hasFirstParam)
+                return true;
+
+            if (firstParam is null || secondParam is null)
+                return false;
+
             // Check if the parameter type is a generic type symbol (like T, TComp, etc.)
-            if (firstParams[i].Type is INamedTypeSymbol namedType && namedType.IsGenericType)
+            if (firstParam.Type is INamedTypeSymbol namedType && namedType.IsGenericType)
             {
                 // If the compared parameter also is a generic type symbol, consider that a match
-                if (secondParams[i].Type is INamedTypeSymbol namedTypeSecond && namedTypeSecond.IsGenericType)
+                if (secondParam.Type is INamedTypeSymbol namedTypeSecond && namedTypeSecond.IsGenericType)
                     continue;
 
                 // Otherwise, no match
@@ -298,10 +321,25 @@ public sealed class ProxyForAnalyzer : DiagnosticAnalyzer
             }
 
             // Make sure the Types match
-            if (!SymbolEqualityComparer.IncludeNullability.Equals(firstParams[i].Type, secondParams[i].Type))
+            if (!SymbolEqualityComparer.IncludeNullability.Equals(firstParam.Type, secondParam.Type))
                 return false;
         }
-
-        return true;
     }
+
+    private static bool TryGetNextRequiredParameter(
+        ImmutableArray<IParameterSymbol> parameters,
+        ref int index,
+        [NotNullWhen(true)] out IParameterSymbol? parameter)
+    {
+        while (index < parameters.Length)
+        {
+            parameter = parameters[index++];
+            if (!parameter.IsOptional)
+                return true;
+        }
+
+        parameter = null;
+        return false;
+    }
+
 }
