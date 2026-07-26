@@ -1017,8 +1017,8 @@ namespace Robust.Shared.GameObjects
 
             var netEntity = GenerateNetEntity();
             SetNetEntity(uid, netEntity, metadata);
-            FinishComponentStorage(metadata, _metaReg, metadata);
-            FinishComponentStorage(xform, _xformReg, metadata);
+            FinishComponentStorage(uid, metadata, _metaReg, metadata);
+            FinishComponentStorage(uid, xform, _xformReg, metadata);
 
             // we want this called before adding components
             EntityAdded?.Invoke((uid, metadata));

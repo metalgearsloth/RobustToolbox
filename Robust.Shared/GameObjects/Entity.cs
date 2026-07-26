@@ -1,4 +1,5 @@
-﻿using Robust.Shared.Localization;
+﻿using System;
+using Robust.Shared.Localization;
 using Robust.Shared.Serialization.Manager.Attributes;
 using Robust.Shared.Toolshed.TypeParsers;
 using Robust.Shared.Utility;

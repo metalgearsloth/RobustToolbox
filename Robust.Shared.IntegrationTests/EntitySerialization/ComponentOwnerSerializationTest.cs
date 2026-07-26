@@ -50,7 +50,6 @@ internal sealed class ComponentOwnerSerializationTest : RobustIntegrationTest
         var entMan = server.EntMan;
         var mapSys = server.System<SharedMapSystem>();
         var loader = server.System<MapLoaderSystem>();
-        var mapMan = server.ResolveDependency<IMapManager>();
         var tileMan = server.ResolveDependency<ITileDefinitionManager>();
 
         var path = new ResPath($"{nameof(LoadedPhysicsComponentOwnsEntity)}.yml");
@@ -62,7 +61,7 @@ internal sealed class ComponentOwnerSerializationTest : RobustIntegrationTest
         await server.WaitPost(() =>
         {
             mapSys.CreateMap(out mapId);
-            var grid = mapMan.CreateGridEntity(mapId);
+            var grid = mapSys.CreateGridEntity(mapId);
             var coords = new MapCoordinates(new Vector2(7, 7), mapId);
             mapSys.SetTile(grid, mapSys.TileIndicesFor(grid, coords), new Tile(tDef.TileId));
 

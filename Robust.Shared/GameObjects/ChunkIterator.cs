@@ -4,41 +4,62 @@ namespace Robust.Shared.GameObjects;
 
 internal readonly struct ArchChunkIterator
 {
-    private readonly Chunk[] _chunks;
+    private readonly Query _query;
 
-    internal ArchChunkIterator(Chunk[] chunks)
+    internal ArchChunkIterator(Query query)
     {
-        _chunks = chunks;
+        _query = query;
     }
 
     public ArchChunkEnumerator GetEnumerator()
     {
-        return new ArchChunkEnumerator(_chunks);
+        return new ArchChunkEnumerator(_query);
     }
 }
 
 internal struct ArchChunkEnumerator
 {
-    private readonly Chunk[] _chunks;
-    private int _index;
+    private readonly Query _query;
+    private int _archetypeIndex;
+    private int _chunkIndex;
+    private Archetype? _archetype;
+    private Chunk _current;
 
-    public Chunk Current => _chunks[_index];
+    public Chunk Current => _current;
+    public Archetype CurrentArchetype => _archetype!;
 
-    internal ArchChunkEnumerator(Chunk[] chunks)
+    internal ArchChunkEnumerator(Query query)
     {
-        _chunks = chunks;
-        _index = -1;
+        _query = query;
+        _archetypeIndex = query.Matches.Count;
+        _chunkIndex = 0;
+        _archetype = null;
+        _current = default;
     }
 
     public bool MoveNext()
     {
-        while (++_index < _chunks.Length)
+        while (true)
         {
-            if (Current.Count > 0)
-                return true;
-        }
+            while (_archetype != null && --_chunkIndex >= 0)
+            {
+                var chunk = _archetype.GetChunk(_chunkIndex);
+                if (chunk.Count == 0)
+                    continue;
 
-        return false;
+                _current = chunk;
+                return true;
+            }
+
+            if (--_archetypeIndex < 0)
+                return false;
+
+            _archetype = _query.Matches.Span[_archetypeIndex];
+            if (_archetype.EntityCount == 0)
+                continue;
+
+            _chunkIndex = _archetype.ChunkCount;
+        }
     }
 }
 
@@ -47,26 +68,6 @@ internal static partial class QueryExtensions
     internal static ArchChunkIterator ChunkIterator(this World world, in QueryDescription queryDescription)
     {
         var query = world.Query(queryDescription);
-        var count = 0;
-
-        foreach (ref var chunk in query)
-        {
-            if (chunk.Count > 0)
-                count++;
-        }
-
-        if (count == 0)
-            return new ArchChunkIterator([]);
-
-        var chunks = new Chunk[count];
-        var index = 0;
-
-        foreach (ref var chunk in query)
-        {
-            if (chunk.Count > 0)
-                chunks[index++] = chunk;
-        }
-
-        return new ArchChunkIterator(chunks);
+        return new ArchChunkIterator(query);
     }
 }

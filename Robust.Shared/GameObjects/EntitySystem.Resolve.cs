@@ -70,6 +70,13 @@ namespace Robust.Shared.GameObjects
             where TComp1 : IComponent
             where TComp2 : IComponent
         {
+            if (comp1 == null &&
+                comp2 == null &&
+                EntityManager.TryGetComponents(uid, out comp1, out comp2))
+            {
+                return true;
+            }
+
             return Resolve(uid, ref comp1, logMissing) & Resolve(uid, ref comp2, logMissing);
         }
 
@@ -91,6 +98,14 @@ namespace Robust.Shared.GameObjects
             where TComp2 : IComponent
             where TComp3 : IComponent
         {
+            if (comp1 == null &&
+                comp2 == null &&
+                comp3 == null &&
+                EntityManager.TryGetComponents(uid, out comp1, out comp2, out comp3))
+            {
+                return true;
+            }
+
             return Resolve(uid, ref comp1, ref comp2, logMissing) & Resolve(uid, ref comp3, logMissing);
         }
 
@@ -115,6 +130,15 @@ namespace Robust.Shared.GameObjects
             where TComp3 : IComponent
             where TComp4 : IComponent
         {
+            if (comp1 == null &&
+                comp2 == null &&
+                comp3 == null &&
+                comp4 == null &&
+                EntityManager.TryGetComponents(uid, out comp1, out comp2, out comp3, out comp4))
+            {
+                return true;
+            }
+
             return Resolve(uid, ref comp1, ref comp2, logMissing) & Resolve(uid, ref comp3, ref comp4, logMissing);
         }
     }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using Arch.Core;
 using JetBrains.Annotations;
 using Robust.Shared.Containers;
 using Robust.Shared.Map;
@@ -569,6 +570,48 @@ public partial class EntitySystem
         return EntityManager.MetaQuery.TryGetComponent(uid.Value, out comp);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [ProxyFor(typeof(EntityManager), nameof(EntityManager.TryGetComponents))]
+    protected bool TryComp<T1, T2>(
+        EntityUid uid,
+        [NotNullWhen(true)] out T1? comp1,
+        [NotNullWhen(true)] out T2? comp2)
+        where T1 : IComponent?
+        where T2 : IComponent?
+    {
+        return EntityManager.TryGetComponents(uid, out comp1, out comp2);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [ProxyFor(typeof(EntityManager), nameof(EntityManager.TryGetComponents))]
+    protected bool TryComp<T1, T2, T3>(
+        EntityUid uid,
+        [NotNullWhen(true)] out T1? comp1,
+        [NotNullWhen(true)] out T2? comp2,
+        [NotNullWhen(true)] out T3? comp3)
+        where T1 : IComponent?
+        where T2 : IComponent?
+        where T3 : IComponent?
+    {
+        return EntityManager.TryGetComponents(uid, out comp1, out comp2, out comp3);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [ProxyFor(typeof(EntityManager), nameof(EntityManager.TryGetComponents))]
+    protected bool TryComp<T1, T2, T3, T4>(
+        EntityUid uid,
+        [NotNullWhen(true)] out T1? comp1,
+        [NotNullWhen(true)] out T2? comp2,
+        [NotNullWhen(true)] out T3? comp3,
+        [NotNullWhen(true)] out T4? comp4)
+        where T1 : IComponent?
+        where T2 : IComponent?
+        where T3 : IComponent?
+        where T4 : IComponent?
+    {
+        return EntityManager.TryGetComponents(uid, out comp1, out comp2, out comp3, out comp4);
+    }
+
     /// <inheritdoc cref="IEntityManager.GetComponents"/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [ProxyFor(typeof(EntityManager), nameof(EntityManager.GetComponents))]
@@ -713,6 +756,36 @@ public partial class EntitySystem
     protected bool HasComp([NotNullWhen(true)] EntityUid? uid, Type type)
     {
         return EntityManager.HasComponent(uid, type);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [ProxyFor(typeof(EntityManager), nameof(EntityManager.HasComponents))]
+    protected bool HasComp<T1, T2>(EntityUid uid)
+        where T1 : IComponent?
+        where T2 : IComponent?
+    {
+        return EntityManager.HasComponents<T1, T2>(uid);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [ProxyFor(typeof(EntityManager), nameof(EntityManager.HasComponents))]
+    protected bool HasComp<T1, T2, T3>(EntityUid uid)
+        where T1 : IComponent?
+        where T2 : IComponent?
+        where T3 : IComponent?
+    {
+        return EntityManager.HasComponents<T1, T2, T3>(uid);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [ProxyFor(typeof(EntityManager), nameof(EntityManager.HasComponents))]
+    protected bool HasComp<T1, T2, T3, T4>(EntityUid uid)
+        where T1 : IComponent?
+        where T2 : IComponent?
+        where T3 : IComponent?
+        where T4 : IComponent?
+    {
+        return EntityManager.HasComponents<T1, T2, T3, T4>(uid);
     }
 
     /// <summary>
@@ -1191,6 +1264,13 @@ public partial class EntitySystem
         return EntityManager.AllEntityQueryEnumerator<TComp1, TComp2, TComp3, TComp4>();
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [ProxyFor(typeof(EntityManager), nameof(EntityManager.AllEntityQueryEnumerator))]
+    protected ComponentQueryEnumerator AllEntityQuery(QueryDescription query)
+    {
+        return EntityManager.AllEntityQueryEnumerator(query);
+    }
+
     #endregion
 
     #region Get Entity Query
@@ -1232,6 +1312,13 @@ public partial class EntitySystem
         return EntityManager.EntityQueryEnumerator<TComp1, TComp2, TComp3, TComp4>();
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [ProxyFor(typeof(EntityManager))]
+    protected ComponentQueryEnumerator EntityQueryEnumerator(QueryDescription query)
+    {
+        return EntityManager.EntityQueryEnumerator(query);
+    }
+
     #endregion
 
     #region Entity Query
@@ -1245,6 +1332,39 @@ public partial class EntitySystem
     protected EntityQuery<T> GetEntityQuery<T>() where T : IComponent
     {
         return EntityManager.GetEntityQuery<T>();
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [ProxyFor(typeof(EntityManager))]
+    [Pure]
+    protected EntityQuery<TComp1, TComp2> GetEntityQuery<TComp1, TComp2>()
+        where TComp1 : IComponent
+        where TComp2 : IComponent
+    {
+        return EntityManager.GetEntityQuery<TComp1, TComp2>();
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [ProxyFor(typeof(EntityManager))]
+    [Pure]
+    protected EntityQuery<TComp1, TComp2, TComp3> GetEntityQuery<TComp1, TComp2, TComp3>()
+        where TComp1 : IComponent
+        where TComp2 : IComponent
+        where TComp3 : IComponent
+    {
+        return EntityManager.GetEntityQuery<TComp1, TComp2, TComp3>();
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [ProxyFor(typeof(EntityManager))]
+    [Pure]
+    protected EntityQuery<TComp1, TComp2, TComp3, TComp4> GetEntityQuery<TComp1, TComp2, TComp3, TComp4>()
+        where TComp1 : IComponent
+        where TComp2 : IComponent
+        where TComp3 : IComponent
+        where TComp4 : IComponent
+    {
+        return EntityManager.GetEntityQuery<TComp1, TComp2, TComp3, TComp4>();
     }
 
     /// <remarks>

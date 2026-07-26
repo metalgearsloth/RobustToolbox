@@ -78,9 +78,6 @@ public sealed partial class SerializationManager
             var hookCtxParam = Expression.Parameter(typeof(SerializationHookContext), "hookCtx");
             var contextParam = Expression.Parameter(typeof(ISerializationContext), "context");
 
-            Expression call;
-            var sameType = baseType == actualType;
-
             if (baseType.IsGenericType)
             {
                 // Frozen dictionaries/sets are abstract and have a bunch of implementations, but we always serialize them as their abstract type.
@@ -88,6 +85,9 @@ public sealed partial class SerializationManager
                 if (t == typeof(FrozenDictionary<,>) || t == typeof(FrozenSet<>))
                     actualType = baseType;
             }
+
+            Expression call;
+            var sameType = baseType == actualType;
 
             var targetVar = sameType ? targetParam : Expression.Variable(actualType);
             Expression sourceVar = sameType ? sourceParam : Expression.Convert(sourceParam, actualType);
@@ -272,14 +272,6 @@ public sealed partial class SerializationManager
             }, this);
     }
 
-    private bool ShouldReturnSource(Type type)
-    {
-        return type.IsPrimitive ||
-               type.IsEnum ||
-               type == typeof(string) ||
-               _copyByRefRegistrations.ContainsKey(type);
-    }
-
     private bool CopyToInternal<TCommon>(
         TCommon source,
         ref TCommon target,
@@ -298,7 +290,8 @@ public sealed partial class SerializationManager
             return true;
         }
 
-        if (ShouldReturnSource(typeof(TCommon))) //todo paul can be precomputed
+        ref readonly var information = ref SerializedType<TCommon>.Information;
+        if (information.ReturnSource)
         {
             target = source;
             return true;
@@ -469,6 +462,13 @@ public sealed partial class SerializationManager
         }
 
         ref readonly var information = ref SerializedType<T>.Information;
+        if (information.ReturnSource)
+        {
+            target = source;
+            RunAfterHook(target, hookCtx);
+            return;
+        }
+
         if (information.SerializationGenerated && !typeof(T).IsAbstract && !typeof(T).IsInterface)
         {
             var generated = Unsafe.As<ISerializationGenerated<T>>(source);

@@ -679,7 +679,7 @@ public sealed partial class EntityDeserializer :
                 {
                     var component = _factory.GetComponent(compReg);
                     CopyToOwned(entry.Component, ref component, uid);
-                    EntMan.SetComponentInternalOnly(uid, component, compReg, meta);
+                    EntMan.SetComponentInternalNoChecks(uid, component, compReg, meta);
                     EntMan.AddComponentEvents(uid, component, compReg, skipInit: false, meta);
                 }
 
@@ -731,7 +731,7 @@ public sealed partial class EntityDeserializer :
                 // TODO ECS also remove this
                 _deps.InjectDependencies(newComponent);
 
-                EntMan.SetComponentInternalOnly(uid, newComponent, compReg, meta);
+                EntMan.SetComponentInternalNoChecks(uid, newComponent, compReg, meta);
                 missingComponents.Add(newComponent);
             }
 

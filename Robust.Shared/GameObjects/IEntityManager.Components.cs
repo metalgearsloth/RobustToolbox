@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using Arch.Core;
 using Robust.Shared.Player;
 using Robust.Shared.Prototypes;
 using Robust.Shared.Timing;
@@ -177,6 +178,21 @@ namespace Robust.Shared.GameObjects
         /// <returns>True if the entity has the component type, otherwise false.</returns>
         bool HasComponent<T>([NotNullWhen(true)] EntityUid? uid) where T : IComponent;
 
+        bool HasComponents<T1, T2>(EntityUid uid)
+            where T1 : IComponent?
+            where T2 : IComponent?;
+
+        bool HasComponents<T1, T2, T3>(EntityUid uid)
+            where T1 : IComponent?
+            where T2 : IComponent?
+            where T3 : IComponent?;
+
+        bool HasComponents<T1, T2, T3, T4>(EntityUid uid)
+            where T1 : IComponent?
+            where T2 : IComponent?
+            where T3 : IComponent?
+            where T4 : IComponent?;
+
         /// <summary>
         ///     Checks if the entity has a component type.
         /// </summary>
@@ -303,6 +319,33 @@ namespace Robust.Shared.GameObjects
         /// <returns>If the component existed in the entity.</returns>
         bool TryGetComponent<T>([NotNullWhen(true)] EntityUid? uid, [NotNullWhen(true)] out T? component) where T : IComponent?;
 
+        bool TryGetComponents<T1, T2>(
+            EntityUid uid,
+            [NotNullWhen(true)] out T1? component1,
+            [NotNullWhen(true)] out T2? component2)
+            where T1 : IComponent?
+            where T2 : IComponent?;
+
+        bool TryGetComponents<T1, T2, T3>(
+            EntityUid uid,
+            [NotNullWhen(true)] out T1? component1,
+            [NotNullWhen(true)] out T2? component2,
+            [NotNullWhen(true)] out T3? component3)
+            where T1 : IComponent?
+            where T2 : IComponent?
+            where T3 : IComponent?;
+
+        bool TryGetComponents<T1, T2, T3, T4>(
+            EntityUid uid,
+            [NotNullWhen(true)] out T1? component1,
+            [NotNullWhen(true)] out T2? component2,
+            [NotNullWhen(true)] out T3? component3,
+            [NotNullWhen(true)] out T4? component4)
+            where T1 : IComponent?
+            where T2 : IComponent?
+            where T3 : IComponent?
+            where T4 : IComponent?;
+
         /// <summary>
         ///     Returns the component of a specific type.
         /// </summary>
@@ -418,6 +461,21 @@ namespace Robust.Shared.GameObjects
         /// </summary>
         EntityQuery<TComp1> GetEntityQuery<TComp1>() where TComp1 : IComponent;
 
+        EntityQuery<TComp1, TComp2> GetEntityQuery<TComp1, TComp2>()
+            where TComp1 : IComponent
+            where TComp2 : IComponent;
+
+        EntityQuery<TComp1, TComp2, TComp3> GetEntityQuery<TComp1, TComp2, TComp3>()
+            where TComp1 : IComponent
+            where TComp2 : IComponent
+            where TComp3 : IComponent;
+
+        EntityQuery<TComp1, TComp2, TComp3, TComp4> GetEntityQuery<TComp1, TComp2, TComp3, TComp4>()
+            where TComp1 : IComponent
+            where TComp2 : IComponent
+            where TComp3 : IComponent
+            where TComp4 : IComponent;
+
         EntityQuery<IComponent> GetEntityQuery(Type type);
 
         /// <summary>
@@ -517,6 +575,8 @@ namespace Robust.Shared.GameObjects
         /// </summary>
         public ComponentQueryEnumerator ComponentQueryEnumerator(ComponentRegistry registry);
 
+        ComponentQueryEnumerator AllEntityQueryEnumerator(QueryDescription query);
+
         AllEntityQueryEnumerator<IComponent> AllEntityQueryEnumerator(Type comp);
 
         AllEntityQueryEnumerator<TComp1> AllEntityQueryEnumerator<TComp1>()
@@ -554,6 +614,8 @@ namespace Robust.Shared.GameObjects
             where TComp2 : IComponent
             where TComp3 : IComponent
             where TComp4 : IComponent;
+
+        ComponentQueryEnumerator EntityQueryEnumerator(QueryDescription query);
 
         /// <summary>
         ///     Returns ALL component instances of a specified type.

@@ -89,6 +89,25 @@ public partial class EntityManager
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool TryGetComponentStorageInternal<T>(
+        EntityUid uid,
+        ComponentType type,
+        [NotNullWhen(true)] out T? component)
+        where T : IComponent?
+    {
+        if (uid.Valid &&
+            _world.TryGet(ToArchId(uid), ToArchVersion(uid), type, out var obj) &&
+            obj is T value)
+        {
+            component = value;
+            return true;
+        }
+
+        component = default;
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal bool TryGetComponentStorageInternal(
         EntityUid uid,
         ComponentType type,

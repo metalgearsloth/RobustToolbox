@@ -80,10 +80,11 @@ public partial class EntityManager
         ThreadCheck();
         DebugTools.Assert(compTypes.Count > 0);
         var archUid = ToArch(uid);
+        var archetype = _world.GetArchetype(archUid);
 
         for (var i = compTypes.Count - 1; i >= 0; i--)
         {
-            if (_world.Has(archUid, compTypes[i]))
+            if (archetype.Has(compTypes[i]))
                 compTypes.RemoveAt(i);
         }
 
@@ -97,18 +98,8 @@ public partial class EntityManager
     {
         ThreadCheck();
         DebugTools.Assert(compTypes.Count > 0);
-        var archUid = ToArch(uid);
 
-        for (var i = compTypes.Count - 1; i >= 0; i--)
-        {
-            if (!_world.Has(archUid, compTypes[i]))
-                compTypes.RemoveAt(i);
-        }
-
-        if (compTypes.Count == 0)
-            return;
-
-        _world.RemoveRange(archUid, compTypes.Span);
+        _world.RemoveRange(ToArch(uid), compTypes.Span);
     }
 
     internal Entity ToArch(EntityUid uid)

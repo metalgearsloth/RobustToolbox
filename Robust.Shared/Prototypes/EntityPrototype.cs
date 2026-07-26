@@ -327,7 +327,7 @@ namespace Robust.Shared.Prototypes
                 {
                     var comp = addComps[i];
                     var compReg = compRegs[i];
-                    entityManager.SetComponentInternalOnly(ent.Owner, (IComponent) comp, compReg, ent.Comp);
+                    entityManager.SetComponentInternalNoChecks(ent.Owner, (IComponent) comp, compReg, ent.Comp);
                     entityManager.AddComponentEvents(ent.Owner, (IComponent) comp, compReg, skipInit: false, ent.Comp);
                 }
             }

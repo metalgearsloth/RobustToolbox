@@ -16,6 +16,6 @@ public sealed class LightTreeSystem : SharedLightTreeSystem
         SubscribeLocalEvent<PointLightComponent, ComponentRemove>(OnCompRemoved);
 
         // TODO LIGHT move PointLightComponent to shared
-        Query = EntityManager.GetEntityQuery<SharedPointLightComponent, PointLightComponent>();
+        Query = EntityManager.GetTraitEntityQuery<SharedPointLightComponent, PointLightComponent>();
     }
 }
