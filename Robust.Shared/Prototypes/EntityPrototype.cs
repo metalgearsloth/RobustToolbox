@@ -282,7 +282,7 @@ namespace Robust.Shared.Prototypes
                     if (add)
                     {
                         compRegs.Add(compReg);
-                        compTypes.Add(compReg.Type);
+                        compTypes.Add(compReg.ArchType);
                         addComps.Add(comp);
                     }
                 }
@@ -312,7 +312,7 @@ namespace Robust.Shared.Prototypes
                     if (add)
                     {
                         compRegs.Add(compReg);
-                        compTypes.Add(compReg.Type);
+                        compTypes.Add(compReg.ArchType);
                         addComps.Add(comp);
                     }
                 }
