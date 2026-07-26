@@ -14,12 +14,14 @@ public abstract partial class MetaDataSystem : EntitySystem
     private EntityPausedEvent _pausedEvent;
 
     private EntityQuery<MetaDataComponent> _metaQuery;
+    private EntityQuery<PausedComponent> _pausedQuery;
 
     public override void Initialize()
     {
         base.Initialize();
 
         _metaQuery = GetEntityQuery<MetaDataComponent>();
+        _pausedQuery = GetEntityQuery<PausedComponent>();
         SubscribeLocalEvent<MetaDataComponent, ComponentHandleState>(OnMetaDataHandle);
         SubscribeLocalEvent<MetaDataComponent, ComponentGetState>(OnMetaDataGetState);
     }
@@ -41,6 +43,7 @@ public abstract partial class MetaDataSystem : EntitySystem
             component._entityPrototype = ProtoMan.Index<EntityPrototype>(state.PrototypeId);
 
         component.PauseTime = state.PauseTime;
+        SyncPausedComponent(uid, state.PauseTime != null);
     }
 
     public void SetEntityName(EntityUid uid, string value, MetaDataComponent? metadata = null, bool raiseEvents = true)
@@ -100,6 +103,7 @@ public abstract partial class MetaDataSystem : EntitySystem
         {
             DebugTools.Assert(metadata.PauseTime == null);
             metadata.PauseTime = _timing.CurTime;
+            SyncPausedComponent(uid, true);
             RaiseLocalEvent(uid, ref _pausedEvent);
         }
         else
@@ -107,10 +111,22 @@ public abstract partial class MetaDataSystem : EntitySystem
             DebugTools.Assert(metadata.PauseTime != null);
             var ev = new EntityUnpausedEvent(_timing.CurTime - metadata.PauseTime!.Value);
             metadata.PauseTime = null;
+            SyncPausedComponent(uid, false);
             RaiseLocalEvent(uid, ref ev);
         }
 
         Dirty(uid, metadata, metadata);
+    }
+
+    private void SyncPausedComponent(EntityUid uid, bool paused)
+    {
+        if (paused)
+        {
+            _pausedQuery.EnsureComponent(uid);
+            return;
+        }
+
+        _pausedQuery.RemoveComponent(uid);
     }
 
     /// <summary>

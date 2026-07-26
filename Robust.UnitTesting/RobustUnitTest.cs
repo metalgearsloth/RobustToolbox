@@ -49,6 +49,7 @@ namespace Robust.UnitTesting
                 typeof(MapGridComponent),
                 typeof(ContainerManagerComponent),
                 typeof(MetaDataComponent),
+                typeof(PausedComponent),
                 typeof(TransformComponent),
                 typeof(PhysicsComponent),
                 typeof(BroadphaseComponent),

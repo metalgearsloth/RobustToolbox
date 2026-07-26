@@ -1134,6 +1134,7 @@ public sealed partial class EntityDeserializer :
                 continue;
 
             meta.PauseTime = time;
+            EntMan.EnsureComponent<PausedComponent>(uid);
 
             // TODO ENTITY SERIALIZATION
             // TODO PowerNet / NodeNet Serialization

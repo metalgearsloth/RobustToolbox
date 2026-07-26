@@ -96,6 +96,27 @@ namespace Robust.UnitTesting.Shared.GameObjects
                         !entMan.Deleted(uid2));
         }
 
+        [Test]
+        public void EntityQueryEnsureRemoveComponentTest()
+        {
+            var sim = RobustServerSimulation
+                .NewSimulation()
+                .InitializeInstance();
+
+            var entMan = sim.Resolve<IEntityManager>();
+            var entity = entMan.Spawn(null, MapCoordinates.Nullspace);
+            var query = entMan.GetEntityQuery<PausedComponent>();
+
+            Assert.That(query.EnsureComponent(entity), Is.Not.Null);
+            Assert.That(query.HasComp(entity), Is.True);
+            Assert.That(query.EnsureComponent(entity, out var existing), Is.True);
+            Assert.That(existing, Is.Not.Null);
+
+            Assert.That(query.RemoveComponent(entity), Is.True);
+            Assert.That(query.HasComp(entity), Is.False);
+            Assert.That(query.RemoveComponent(entity), Is.False);
+        }
+
 
         [Test]
         public void AddRegistryComponentTest()

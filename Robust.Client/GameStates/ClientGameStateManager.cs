@@ -1446,6 +1446,7 @@ namespace Robust.Client.GameStates
                     // getting networked anyway. And if its some client-side timer on a networked entity, the timer
                     // shouldn't actually be getting paused just because the entity has left the players view.
                     metadata.PauseTime = TimeSpan.Zero;
+                    _entities.EnsureComponent<PausedComponent>(uid);
 
                     if (container != null)
                         containerSys.AddExpectedEntity(netEntity, container);

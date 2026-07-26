@@ -292,6 +292,7 @@ namespace Robust.UnitTesting.Server
 
             // if only we had some sort of attribute for automatically registering components.
             compFactory.RegisterClass<MetaDataComponent>();
+            compFactory.RegisterClass<PausedComponent>();
             compFactory.RegisterClass<TransformComponent>();
             compFactory.RegisterClass<MapGridComponent>();
             compFactory.RegisterClass<MapComponent>();
