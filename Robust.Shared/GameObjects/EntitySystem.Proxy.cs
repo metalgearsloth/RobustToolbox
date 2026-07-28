@@ -1093,6 +1093,15 @@ public partial class EntitySystem
     protected EntityUid PredictedSpawnAtPosition(string? prototype, EntityCoordinates coordinates, string? predictedSpawnId, ComponentRegistry? overrides = null)
         => EntityManager.PredictedSpawnAtPosition(prototype, coordinates, predictedSpawnId, overrides);
 
+    /// <inheritdoc cref="IEntityManager.PredictedSpawnAtPosition(string?,Robust.Shared.Map.EntityCoordinates,Robust.Shared.Maths.Angle,ComponentRegistry?)" />
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    [ProxyFor(typeof(EntityManager))]
+    protected EntityUid PredictedSpawnAtPosition(string? prototype, EntityCoordinates coordinates, Angle rotation, ComponentRegistry? overrides = null)
+        => EntityManager.PredictedSpawnAtPosition(prototype, coordinates, rotation, overrides);
+
+    protected EntityUid PredictedSpawnAtPosition(string? prototype, EntityCoordinates coordinates, Angle rotation, string? predictedSpawnId, ComponentRegistry? overrides = null)
+        => EntityManager.PredictedSpawnAtPosition(prototype, coordinates, rotation, predictedSpawnId, overrides);
+
     /// <inheritdoc cref="IEntityManager.TrySpawnInContainer" />
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     [ProxyFor(typeof(EntityManager))]
