@@ -70,7 +70,7 @@ namespace Robust.Client.GameObjects
             }
 
             // handle local binds before sending off
-            using (EntityManager.WithPredictedSpawnTick(message.Tick, session?.UserId))
+            using (EntityManager.WithPredictionContext(message.Tick, session?.UserId))
             {
                 foreach (var handler in BindRegistry.GetHandlers(function))
                 {
@@ -130,7 +130,7 @@ namespace Robust.Client.GameObjects
 
             Predicted = true;
             var session = _playerManager.LocalSession;
-            using (EntityManager.WithPredictedSpawnTick(inputCmd.Tick, session?.UserId))
+            using (EntityManager.WithPredictionContext(inputCmd.Tick, session?.UserId))
             {
                 foreach (var handler in BindRegistry.GetHandlers(keyFunc))
                 {

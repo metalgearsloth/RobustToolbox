@@ -181,7 +181,7 @@ internal sealed partial class PredictedSpawnReferenceTests : RobustIntegrationTe
 
         await client.WaitPost(() =>
         {
-            using (client.EntMan.WithPredictedSpawnTick(new GameTick(5), owner))
+            using (client.EntMan.WithPredictionContext(new GameTick(5), owner))
             {
                 var entity = client.EntMan.PredictedSpawn(null, predictedSpawnId: "delayed-spawn");
                 clientReference = client.EntMan.GetNetEntityReference(entity);
@@ -190,7 +190,7 @@ internal sealed partial class PredictedSpawnReferenceTests : RobustIntegrationTe
 
         await server.WaitPost(() =>
         {
-            using (server.EntMan.WithPredictedSpawnTick(new GameTick(8), owner))
+            using (server.EntMan.WithPredictionContext(new GameTick(8), owner))
             {
                 serverEntity = server.EntMan.PredictedSpawn(null, predictedSpawnId: "delayed-spawn");
             }
@@ -379,12 +379,12 @@ internal sealed partial class PredictedSpawnReferenceTests : RobustIntegrationTe
             EntityUid first;
             EntityUid second;
 
-            using (client.EntMan.WithPredictedSpawnTick(tick, firstUser))
+            using (client.EntMan.WithPredictionContext(tick, firstUser))
             {
                 first = client.EntMan.PredictedSpawn(null, predictedSpawnId: "same");
             }
 
-            using (client.EntMan.WithPredictedSpawnTick(tick, secondUser))
+            using (client.EntMan.WithPredictionContext(tick, secondUser))
             {
                 second = client.EntMan.PredictedSpawn(null, predictedSpawnId: "same");
             }

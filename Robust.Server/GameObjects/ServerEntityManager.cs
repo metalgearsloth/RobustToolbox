@@ -258,7 +258,7 @@ namespace Robust.Server.GameObjects
 #if EXCEPTION_TOLERANCE
             try
 #endif
-            using (WithPredictedSpawnTick(message.SourceTick, player.UserId))
+            using (WithPredictionContext(message.SourceTick, player.UserId))
             {
                 switch (message.Type)
                 {

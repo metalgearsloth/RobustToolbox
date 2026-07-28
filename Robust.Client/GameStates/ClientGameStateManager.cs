@@ -578,7 +578,7 @@ namespace Robust.Client.GameStates
                 while (hasPendingMessage && pendingMessagesEnumerator.Current.sourceTick <= _timing.CurTick)
                 {
                     var pending = pendingMessagesEnumerator.Current;
-                    using (_entities.WithPredictedSpawnTick(pending.sourceTick, _players.LocalSession?.UserId))
+                    using (_entities.WithPredictionContext(pending.sourceTick, _players.LocalSession?.UserId))
                     {
                         _entities.EventBus.RaiseEvent(EventSource.Local, pending.msg);
                         _entities.EventBus.RaiseEvent(EventSource.Local, pending.sessionMsg);

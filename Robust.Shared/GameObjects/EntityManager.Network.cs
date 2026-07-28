@@ -21,8 +21,7 @@ public partial class EntityManager
 
     private readonly Dictionary<PredictedSpawnKey, EntityUid> _predictedSpawnLookup = new();
     private readonly Dictionary<EntityUid, PredictedSpawnKey> _predictedSpawnKeys = new();
-    private GameTick? _predictedSpawnTickOverride;
-    private NetUserId? _predictedSpawnOwnerOverride;
+    private PredictionContext? _predictionContext;
 
     /// <summary>
     /// Clears an old inverse lookup for a particular entityuid.
@@ -245,27 +244,29 @@ public partial class EntityManager
     }
 
     /// <inheritdoc />
-    public PredictedSpawnTickScope WithPredictedSpawnTick(GameTick tick, NetUserId? owner = null)
+    public PredictionContextScope WithPredictionContext(GameTick tick, NetUserId? owner = null)
     {
-        var previousTick = _predictedSpawnTickOverride;
-        var previousOwner = _predictedSpawnOwnerOverride;
-        _predictedSpawnTickOverride = tick;
-        _predictedSpawnOwnerOverride = owner;
-        return new PredictedSpawnTickScope(this, previousTick, previousOwner);
+        return WithPredictionContext(new PredictionContext(tick, owner));
     }
 
     /// <inheritdoc />
-    public bool TryGetPredictedSpawnContext(out GameTick tick, out NetUserId? owner)
+    public PredictionContextScope WithPredictionContext(PredictionContext context)
     {
-        if (_predictedSpawnTickOverride is not { } predictedTick)
+        var previousContext = _predictionContext;
+        _predictionContext = context;
+        return new PredictionContextScope(this, previousContext);
+    }
+
+    /// <inheritdoc />
+    public bool TryGetPredictionContext(out PredictionContext context)
+    {
+        if (_predictionContext is not { } current)
         {
-            tick = default;
-            owner = null;
+            context = default;
             return false;
         }
 
-        tick = predictedTick;
-        owner = _predictedSpawnOwnerOverride;
+        context = current;
         return true;
     }
 
@@ -283,8 +284,8 @@ public partial class EntityManager
         if (!MetaQuery.Resolve(ent.Owner, ref ent.Comp))
             return;
 
-        var tick = _predictedSpawnTickOverride ?? _gameTiming.CurTick;
-        var key = new PredictedSpawnKey(tick, 0, id, _predictedSpawnOwnerOverride);
+        var tick = _predictionContext?.Tick ?? _gameTiming.CurTick;
+        var key = new PredictedSpawnKey(tick, 0, id, _predictionContext?.Owner);
         while (_predictedSpawnLookup.ContainsKey(key))
             key = key with { Index = checked((ushort) (key.Index + 1)) };
 
@@ -315,10 +316,9 @@ public partial class EntityManager
             Dirty(uid, predicted);
     }
 
-    internal void RestorePredictedSpawnTickScope(GameTick? tick, NetUserId? owner)
+    internal void RestorePredictionContext(PredictionContext? context)
     {
-        _predictedSpawnTickOverride = tick;
-        _predictedSpawnOwnerOverride = owner;
+        _predictionContext = context;
     }
 
     internal void UnregisterPredictedSpawn(EntityUid uid)

@@ -99,15 +99,19 @@ public partial interface IEntityManager
     public NetEntityReference GetNetEntityReference(EntityUid uid, MetaDataComponent? metadata = null);
 
     /// <summary>
-    /// Registers predicted spawns created in this scope against the specified tick.
+    /// Establishes the prediction context for work originating from the specified input.
     /// </summary>
-    public PredictedSpawnTickScope WithPredictedSpawnTick(GameTick tick, NetUserId? owner = null);
+    public PredictionContextScope WithPredictionContext(GameTick tick, NetUserId? owner = null);
 
     /// <summary>
-    /// Gets the input prediction context currently established by <see cref="WithPredictedSpawnTick"/>.
-    /// Delayed predicted operations should retain this context and restore it before creating their results.
+    /// Establishes <paramref name="context"/> for the current work.
     /// </summary>
-    public bool TryGetPredictedSpawnContext(out GameTick tick, out NetUserId? owner);
+    public PredictionContextScope WithPredictionContext(PredictionContext context);
+
+    /// <summary>
+    /// Gets the active input prediction context, if one is currently established.
+    /// </summary>
+    public bool TryGetPredictionContext(out PredictionContext context);
 
     /// <summary>
     /// HashSet version of <see cref="GetEntity"/>
