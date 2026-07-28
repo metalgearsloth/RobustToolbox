@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using Robust.Shared.Map;
+using Robust.Shared.Network;
+using Robust.Shared.Timing;
 
 namespace Robust.Shared.GameObjects;
 
@@ -25,6 +27,11 @@ public partial interface IEntityManager
     /// TryGet version of <see cref="GetEntity"/>
     /// </summary>
     public bool TryGetEntity(NetEntity? nEntity, [NotNullWhen(true)] out EntityUid? entity);
+
+    /// <summary>
+    /// TryGet version of <see cref="GetEntity(NetEntityReference)"/>
+    /// </summary>
+    public bool TryGetEntity(NetEntityReference reference, [NotNullWhen(true)] out EntityUid? entity);
 
     /// <summary>
     /// Tries to returns the corresponding local <see cref="EntityUid"/> along with the metdata component.
@@ -72,6 +79,11 @@ public partial interface IEntityManager
     public EntityUid? GetEntity(NetEntity? nEntity);
 
     /// <summary>
+    /// Returns the corresponding local <see cref="EntityUid"/> for a network entity reference.
+    /// </summary>
+    public EntityUid GetEntity(NetEntityReference reference);
+
+    /// <summary>
     /// Returns the corresponding <see cref="NetEntity"/> for the local entity.
     /// </summary>
     public NetEntity GetNetEntity(EntityUid uid, MetaDataComponent? metadata = null);
@@ -80,6 +92,16 @@ public partial interface IEntityManager
     /// Returns the corresponding <see cref="NetEntity"/> for the local entity.
     /// </summary>
     public NetEntity? GetNetEntity(EntityUid? uid, MetaDataComponent? metadata = null);
+
+    /// <summary>
+    /// Returns the corresponding network entity reference for the local entity.
+    /// </summary>
+    public NetEntityReference GetNetEntityReference(EntityUid uid, MetaDataComponent? metadata = null);
+
+    /// <summary>
+    /// Registers predicted spawns created in this scope against the specified tick.
+    /// </summary>
+    public PredictedSpawnTickScope WithPredictedSpawnTick(GameTick tick, NetUserId? owner = null);
 
     /// <summary>
     /// HashSet version of <see cref="GetEntity"/>

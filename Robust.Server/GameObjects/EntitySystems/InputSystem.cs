@@ -51,6 +51,13 @@ namespace Robust.Server.GameObjects
 
             var session = eventArgs.SenderSession;
 
+            if (msg.Uid.IsPredicted &&
+                msg.Uid.PredictedSpawnOwner is { } owner &&
+                owner != session.UserId)
+            {
+                return;
+            }
+
             if (_lastProcessedInputCmd[session] < msg.InputSequence)
                 _lastProcessedInputCmd[session] = msg.InputSequence;
 

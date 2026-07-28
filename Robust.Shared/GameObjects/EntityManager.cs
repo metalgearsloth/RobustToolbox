@@ -716,6 +716,8 @@ namespace Robust.Shared.GameObjects
                 }
             }
 
+            UnregisterPredictedSpawn(uid);
+
             // Dispose all my components, in a safe order so transform is available
             DisposeComponents(uid, metadata);
             SetLifeStage(metadata, EntityLifeStage.Deleted);

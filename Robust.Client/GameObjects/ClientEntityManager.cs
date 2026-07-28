@@ -179,9 +179,12 @@ namespace Robust.Client.GameObjects
 
             DebugTools.Assert(_gameTiming.InPrediction && _gameTiming.IsFirstTimePredicted || _client.RunLevel == ClientRunLevel.SinglePlayerGame);
 
-            var eventArgs = new EntitySessionEventArgs(session!);
-            EventBus.RaiseEvent(EventSource.Local, msg);
-            EventBus.RaiseEvent(EventSource.Local, new EntitySessionMessage<T>(eventArgs, msg));
+            using (WithPredictedSpawnTick(_gameTiming.CurTick, session!.UserId))
+            {
+                var eventArgs = new EntitySessionEventArgs(session);
+                EventBus.RaiseEvent(EventSource.Local, msg);
+                EventBus.RaiseEvent(EventSource.Local, new EntitySessionMessage<T>(eventArgs, msg));
+            }
         }
 
         /// <inheritdoc />

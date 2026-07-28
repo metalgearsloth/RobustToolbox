@@ -240,27 +240,62 @@ public partial class EntityManager
 
     public virtual EntityUid PredictedSpawnAttachedTo(string? protoName, EntityCoordinates coordinates, ComponentRegistry? overrides = null, Angle rotation = default)
     {
-        return SpawnAttachedTo(protoName, coordinates, overrides, rotation);
+        return PredictedSpawnAttachedTo(protoName, coordinates, null, overrides, rotation);
+    }
+
+    public virtual EntityUid PredictedSpawnAttachedTo(string? protoName, EntityCoordinates coordinates, string? predictedSpawnId, ComponentRegistry? overrides = null, Angle rotation = default)
+    {
+        var ent = SpawnAttachedTo(protoName, coordinates, overrides, rotation);
+        RegisterPredictedSpawn(ent, predictedSpawnId);
+        return ent;
     }
 
     public virtual EntityUid PredictedSpawn(string? protoName = null, ComponentRegistry? overrides = null, bool doMapInit = true)
     {
-        return Spawn(protoName, overrides, doMapInit);
+        return PredictedSpawn(protoName, null, overrides, doMapInit);
+    }
+
+    public virtual EntityUid PredictedSpawn(string? protoName, string? predictedSpawnId, ComponentRegistry? overrides = null, bool doMapInit = true)
+    {
+        var ent = Spawn(protoName, overrides, doMapInit);
+        RegisterPredictedSpawn(ent, predictedSpawnId);
+        return ent;
     }
 
     public virtual EntityUid PredictedSpawn(string? protoName, MapCoordinates coordinates, ComponentRegistry? overrides = null, Angle rotation = default!)
     {
-        return Spawn(protoName, coordinates, overrides, rotation);
+        return PredictedSpawn(protoName, coordinates, null, overrides, rotation);
+    }
+
+    public virtual EntityUid PredictedSpawn(string? protoName, MapCoordinates coordinates, string? predictedSpawnId, ComponentRegistry? overrides = null, Angle rotation = default!)
+    {
+        var ent = Spawn(protoName, coordinates, overrides, rotation);
+        RegisterPredictedSpawn(ent, predictedSpawnId);
+        return ent;
     }
 
     public virtual EntityUid PredictedSpawnAtPosition(string? protoName, EntityCoordinates coordinates, ComponentRegistry? overrides = null)
     {
-        return SpawnAtPosition(protoName, coordinates, overrides);
+        return PredictedSpawnAtPosition(protoName, coordinates, null, overrides);
+    }
+
+    public virtual EntityUid PredictedSpawnAtPosition(string? protoName, EntityCoordinates coordinates, string? predictedSpawnId, ComponentRegistry? overrides = null)
+    {
+        var ent = SpawnAtPosition(protoName, coordinates, overrides);
+        RegisterPredictedSpawn(ent, predictedSpawnId);
+        return ent;
     }
 
     public virtual EntityUid PredictedSpawnAtPosition(string? protoName, EntityCoordinates coordinates, Angle rotation, ComponentRegistry? overrides = null)
     {
-        return SpawnAtPosition(protoName, coordinates, rotation, overrides);
+        return PredictedSpawnAtPosition(protoName, coordinates, rotation, null, overrides);
+    }
+
+    public virtual EntityUid PredictedSpawnAtPosition(string? protoName, EntityCoordinates coordinates, Angle rotation, string? predictedSpawnId, ComponentRegistry? overrides = null)
+    {
+        var ent = SpawnAtPosition(protoName, coordinates, rotation, overrides);
+        RegisterPredictedSpawn(ent, predictedSpawnId);
+        return ent;
     }
 
     public virtual bool PredictedTrySpawnNextTo(
@@ -270,7 +305,22 @@ public partial class EntityManager
         TransformComponent? xform = null,
         ComponentRegistry? overrides = null)
     {
-        return TrySpawnNextTo(protoName, target, out uid, xform, overrides);
+        return PredictedTrySpawnNextTo(protoName, target, out uid, null, xform, overrides);
+    }
+
+    public virtual bool PredictedTrySpawnNextTo(
+        string? protoName,
+        EntityUid target,
+        [NotNullWhen(true)] out EntityUid? uid,
+        string? predictedSpawnId,
+        TransformComponent? xform = null,
+        ComponentRegistry? overrides = null)
+    {
+        if (!TrySpawnNextTo(protoName, target, out uid, xform, overrides))
+            return false;
+
+        RegisterPredictedSpawn(new Entity<MetaDataComponent?>(uid.Value, null), predictedSpawnId);
+        return true;
     }
 
     public virtual bool PredictedTrySpawnInContainer(
@@ -281,12 +331,35 @@ public partial class EntityManager
         ContainerManagerComponent? containerComp = null,
         ComponentRegistry? overrides = null)
     {
-        return TrySpawnInContainer(protoName, containerUid, containerId, out uid, containerComp, overrides);
+        return PredictedTrySpawnInContainer(protoName, containerUid, containerId, out uid, null, containerComp, overrides);
+    }
+
+    public virtual bool PredictedTrySpawnInContainer(
+        string? protoName,
+        EntityUid containerUid,
+        string containerId,
+        [NotNullWhen(true)] out EntityUid? uid,
+        string? predictedSpawnId,
+        ContainerManagerComponent? containerComp = null,
+        ComponentRegistry? overrides = null)
+    {
+        if (!TrySpawnInContainer(protoName, containerUid, containerId, out uid, containerComp, overrides))
+            return false;
+
+        RegisterPredictedSpawn(new Entity<MetaDataComponent?>(uid.Value, null), predictedSpawnId);
+        return true;
     }
 
     public virtual EntityUid PredictedSpawnNextToOrDrop(string? protoName, EntityUid target, TransformComponent? xform = null, ComponentRegistry? overrides = null)
     {
-        return SpawnNextToOrDrop(protoName, target, xform, overrides);
+        return PredictedSpawnNextToOrDrop(protoName, target, null, xform, overrides);
+    }
+
+    public virtual EntityUid PredictedSpawnNextToOrDrop(string? protoName, EntityUid target, string? predictedSpawnId, TransformComponent? xform = null, ComponentRegistry? overrides = null)
+    {
+        var ent = SpawnNextToOrDrop(protoName, target, xform, overrides);
+        RegisterPredictedSpawn(ent, predictedSpawnId);
+        return ent;
     }
 
     public virtual EntityUid PredictedSpawnInContainerOrDrop(
@@ -297,7 +370,21 @@ public partial class EntityManager
         ContainerManagerComponent? containerComp = null,
         ComponentRegistry? overrides = null)
     {
-        return SpawnInContainerOrDrop(protoName, containerUid, containerId, xform, containerComp, overrides);
+        return PredictedSpawnInContainerOrDrop(protoName, containerUid, containerId, null, xform, containerComp, overrides);
+    }
+
+    public virtual EntityUid PredictedSpawnInContainerOrDrop(
+        string? protoName,
+        EntityUid containerUid,
+        string containerId,
+        string? predictedSpawnId,
+        TransformComponent? xform = null,
+        ContainerManagerComponent? containerComp = null,
+        ComponentRegistry? overrides = null)
+    {
+        var ent = SpawnInContainerOrDrop(protoName, containerUid, containerId, xform, containerComp, overrides);
+        RegisterPredictedSpawn(ent, predictedSpawnId);
+        return ent;
     }
 
     public virtual EntityUid PredictedSpawnInContainerOrDrop(
@@ -309,13 +396,29 @@ public partial class EntityManager
         ContainerManagerComponent? containerComp = null,
         ComponentRegistry? overrides = null)
     {
-        return SpawnInContainerOrDrop(protoName,
+        return PredictedSpawnInContainerOrDrop(protoName, containerUid, containerId, out inserted, null, xform, containerComp, overrides);
+    }
+
+    public virtual EntityUid PredictedSpawnInContainerOrDrop(
+        string? protoName,
+        EntityUid containerUid,
+        string containerId,
+        out bool inserted,
+        string? predictedSpawnId,
+        TransformComponent? xform = null,
+        ContainerManagerComponent? containerComp = null,
+        ComponentRegistry? overrides = null)
+    {
+        var ent = SpawnInContainerOrDrop(protoName,
             containerUid,
             containerId,
             out inserted,
             xform,
             containerComp,
             overrides);
+
+        RegisterPredictedSpawn(ent, predictedSpawnId);
+        return ent;
     }
 
     /// <summary>
@@ -323,7 +426,7 @@ public partial class EntityManager
     /// </summary>
     public virtual void FlagPredicted(Entity<MetaDataComponent?> ent)
     {
-
+        RegisterPredictedSpawn(ent, null);
     }
 
     #endregion

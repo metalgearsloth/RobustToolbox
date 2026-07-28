@@ -577,8 +577,13 @@ namespace Robust.Client.GameStates
 
                 while (hasPendingMessage && pendingMessagesEnumerator.Current.sourceTick <= _timing.CurTick)
                 {
-                    _entities.EventBus.RaiseEvent(EventSource.Local, pendingMessagesEnumerator.Current.msg);
-                    _entities.EventBus.RaiseEvent(EventSource.Local, pendingMessagesEnumerator.Current.sessionMsg);
+                    var pending = pendingMessagesEnumerator.Current;
+                    using (_entities.WithPredictedSpawnTick(pending.sourceTick, _players.LocalSession?.UserId))
+                    {
+                        _entities.EventBus.RaiseEvent(EventSource.Local, pending.msg);
+                        _entities.EventBus.RaiseEvent(EventSource.Local, pending.sessionMsg);
+                    }
+
                     hasPendingMessage = pendingMessagesEnumerator.MoveNext();
                 }
 
@@ -626,10 +631,13 @@ namespace Robust.Client.GameStates
 
             // Handle predicted entity spawns.
             var predicted = new ValueList<EntityUid>();
-            var predictedQuery = _entities.AllEntityQueryEnumerator<PredictedSpawnComponent>();
+            var predictedQuery = _entities.AllEntityQueryEnumerator<PredictedSpawnComponent, MetaDataComponent>();
 
-            while (predictedQuery.MoveNext(out var uid, out var _))
+            while (predictedQuery.MoveNext(out var uid, out var _, out var metadata))
             {
+                if (!metadata.NetEntity.IsClientSide())
+                    continue;
+
                 predicted.Add(uid);
             }
 

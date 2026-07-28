@@ -2,6 +2,8 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Robust.Shared.Map;
+using Robust.Shared.Network;
+using Robust.Shared.Timing;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.GameObjects;
@@ -16,6 +18,11 @@ public partial class EntityManager
     /// Regular lookup uses MetadataComponent.
     /// </summary>
     protected readonly Dictionary<NetEntity, (EntityUid, MetaDataComponent)> NetEntityLookup = new(EntityCapacity);
+
+    private readonly Dictionary<PredictedSpawnKey, EntityUid> _predictedSpawnLookup = new();
+    private readonly Dictionary<EntityUid, PredictedSpawnKey> _predictedSpawnKeys = new();
+    private GameTick? _predictedSpawnTickOverride;
+    private NetUserId? _predictedSpawnOwnerOverride;
 
     /// <summary>
     /// Clears an old inverse lookup for a particular entityuid.
@@ -100,6 +107,22 @@ public partial class EntityManager
     }
 
     /// <inheritdoc />
+    public bool TryGetEntity(NetEntityReference reference, [NotNullWhen(true)] out EntityUid? entity)
+    {
+        if (!reference.IsPredicted)
+            return TryGetEntity(reference.NetEntity, out entity);
+
+        if (TryGetPredictedEntity(reference, out var uid))
+        {
+            entity = uid;
+            return true;
+        }
+
+        entity = null;
+        return false;
+    }
+
+    /// <inheritdoc />
     public bool TryGetNetEntity(EntityUid uid, [NotNullWhen(true)] out NetEntity? netEntity, MetaDataComponent? metadata = null)
     {
         if (uid == EntityUid.Invalid)
@@ -162,6 +185,17 @@ public partial class EntityManager
         return tuple.Item1;
     }
 
+    /// <inheritdoc />
+    public EntityUid GetEntity(NetEntityReference reference)
+    {
+        if (!reference.IsPredicted)
+            return GetEntity(reference.NetEntity);
+
+        return TryGetPredictedEntity(reference, out var uid)
+            ? uid.Value
+            : EntityUid.Invalid;
+    }
+
     public (EntityUid, MetaDataComponent) GetEntityData(NetEntity nEntity)
     {
         return NetEntityLookup[nEntity];
@@ -190,6 +224,37 @@ public partial class EntityManager
     }
 
     /// <inheritdoc />
+    public NetEntityReference GetNetEntityReference(EntityUid uid, MetaDataComponent? metadata = null)
+    {
+        var netEntity = GetNetEntity(uid, metadata);
+
+        if (!netEntity.IsClientSide())
+            return new NetEntityReference(netEntity);
+
+        if (TryGetComponent(uid, out PredictedSpawnComponent? predicted))
+        {
+            return new NetEntityReference(
+                NetEntity.Invalid,
+                predicted.SpawnTick,
+                predicted.SpawnIndex,
+                predicted.SpawnId,
+                predicted.SpawnOwner);
+        }
+
+        return new NetEntityReference(netEntity);
+    }
+
+    /// <inheritdoc />
+    public PredictedSpawnTickScope WithPredictedSpawnTick(GameTick tick, NetUserId? owner = null)
+    {
+        var previousTick = _predictedSpawnTickOverride;
+        var previousOwner = _predictedSpawnOwnerOverride;
+        _predictedSpawnTickOverride = tick;
+        _predictedSpawnOwnerOverride = owner;
+        return new PredictedSpawnTickScope(this, previousTick, previousOwner);
+    }
+
+    /// <inheritdoc />
     public NetEntity? GetNetEntity(EntityUid? uid, MetaDataComponent? metadata = null)
     {
         if (uid == null)
@@ -198,7 +263,121 @@ public partial class EntityManager
         return GetNetEntity(uid.Value, metadata);
     }
 
+    internal void RegisterPredictedSpawn(Entity<MetaDataComponent?> ent, string? id)
+    {
+        if (!MetaQuery.Resolve(ent.Owner, ref ent.Comp))
+            return;
+
+        var tick = _predictedSpawnTickOverride ?? _gameTiming.CurTick;
+        var key = new PredictedSpawnKey(tick, 0, id, _predictedSpawnOwnerOverride);
+        while (_predictedSpawnLookup.ContainsKey(key))
+            key = key with { Index = checked((ushort) (key.Index + 1)) };
+
+        if (EnsureComponent<PredictedSpawnComponent>(ent.Owner) is { } predicted)
+            SetPredictedSpawnReference(ent.Owner, predicted, key.Tick, key.Index, key.Id, key.Owner);
+    }
+
+    internal void SetPredictedSpawnReference(
+        EntityUid uid,
+        PredictedSpawnComponent predicted,
+        GameTick tick,
+        ushort index,
+        string? id,
+        NetUserId? owner,
+        bool dirty = true)
+    {
+        UnregisterPredictedSpawn(uid);
+
+        predicted.SpawnTick = tick;
+        predicted.SpawnIndex = index;
+        predicted.SpawnId = id;
+        predicted.SpawnOwner = owner;
+        var key = new PredictedSpawnKey(tick, index, id, owner);
+        _predictedSpawnLookup[key] = uid;
+        _predictedSpawnKeys[uid] = key;
+
+        if (dirty)
+            Dirty(uid, predicted);
+    }
+
+    internal void RestorePredictedSpawnTickScope(GameTick? tick, NetUserId? owner)
+    {
+        _predictedSpawnTickOverride = tick;
+        _predictedSpawnOwnerOverride = owner;
+    }
+
+    internal void UnregisterPredictedSpawn(EntityUid uid)
+    {
+        if (!_predictedSpawnKeys.Remove(uid, out var key))
+            return;
+
+        if (_predictedSpawnLookup.TryGetValue(key, out var mapped) && mapped == uid)
+            _predictedSpawnLookup.Remove(key);
+    }
+
     #endregion
+
+    private bool TryGetPredictedEntity(NetEntityReference reference, [NotNullWhen(true)] out EntityUid? entity)
+    {
+        if (_predictedSpawnLookup.TryGetValue(PredictedSpawnKey.FromReference(reference), out var uid) &&
+            EntityExists(uid))
+        {
+            entity = uid;
+            return true;
+        }
+
+        // Delayed predicted spawns, such as do-after completions, can happen at different local ticks on the
+        // predicting client and the authoritative server. When content provides a stable spawn ID, allow that ID
+        // and spawn index to reconcile the reference after the exact tick key misses.
+        if (reference.PredictedSpawnId != null)
+        {
+            EntityUid? fallback = null;
+
+            foreach (var (key, predictedUid) in _predictedSpawnLookup)
+            {
+                if (key.Id != reference.PredictedSpawnId ||
+                    key.Index != reference.PredictedSpawnIndex ||
+                    key.Owner != reference.PredictedSpawnOwner ||
+                    !EntityExists(predictedUid))
+                {
+                    continue;
+                }
+
+                if (fallback != null)
+                {
+                    entity = null;
+                    return false;
+                }
+
+                fallback = predictedUid;
+            }
+
+            if (fallback != null)
+            {
+                entity = fallback.Value;
+                return true;
+            }
+        }
+
+        entity = null;
+        return false;
+    }
+
+    private readonly record struct PredictedSpawnKey(
+        GameTick Tick,
+        ushort Index,
+        string? Id,
+        NetUserId? Owner)
+    {
+        public static PredictedSpawnKey FromReference(NetEntityReference reference)
+        {
+            return new PredictedSpawnKey(
+                reference.PredictedSpawnTick,
+                reference.PredictedSpawnIndex,
+                reference.PredictedSpawnId,
+                reference.PredictedSpawnOwner);
+        }
+    }
 
     #region NetCoordinates
 
