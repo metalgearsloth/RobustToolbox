@@ -104,6 +104,12 @@ public partial interface IEntityManager
     public PredictedSpawnTickScope WithPredictedSpawnTick(GameTick tick, NetUserId? owner = null);
 
     /// <summary>
+    /// Gets the input prediction context currently established by <see cref="WithPredictedSpawnTick"/>.
+    /// Delayed predicted operations should retain this context and restore it before creating their results.
+    /// </summary>
+    public bool TryGetPredictedSpawnContext(out GameTick tick, out NetUserId? owner);
+
+    /// <summary>
     /// HashSet version of <see cref="GetEntity"/>
     /// </summary>
     public HashSet<EntityUid> GetEntitySet(HashSet<NetEntity> netEntities);

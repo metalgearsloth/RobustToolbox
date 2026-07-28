@@ -169,7 +169,7 @@ internal sealed partial class PredictedSpawnReferenceTests : RobustIntegrationTe
     }
 
     [Test]
-    public async Task StableIdentifierResolvesAcrossDifferentSpawnTicks()
+    public async Task StableIdentifierDoesNotResolveAcrossDifferentSpawnTicks()
     {
         using var server = StartServer();
         using var client = StartClient();
@@ -195,7 +195,7 @@ internal sealed partial class PredictedSpawnReferenceTests : RobustIntegrationTe
                 serverEntity = server.EntMan.PredictedSpawn(null, predictedSpawnId: "delayed-spawn");
             }
 
-            Assert.That(server.EntMan.GetEntity(clientReference), Is.EqualTo(serverEntity));
+            Assert.That(server.EntMan.GetEntity(clientReference), Is.EqualTo(EntityUid.Invalid));
         });
     }
 

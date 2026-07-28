@@ -255,6 +255,21 @@ public partial class EntityManager
     }
 
     /// <inheritdoc />
+    public bool TryGetPredictedSpawnContext(out GameTick tick, out NetUserId? owner)
+    {
+        if (_predictedSpawnTickOverride is not { } predictedTick)
+        {
+            tick = default;
+            owner = null;
+            return false;
+        }
+
+        tick = predictedTick;
+        owner = _predictedSpawnOwnerOverride;
+        return true;
+    }
+
+    /// <inheritdoc />
     public NetEntity? GetNetEntity(EntityUid? uid, MetaDataComponent? metadata = null)
     {
         if (uid == null)
@@ -324,39 +339,6 @@ public partial class EntityManager
         {
             entity = uid;
             return true;
-        }
-
-        // Delayed predicted spawns, such as do-after completions, can happen at different local ticks on the
-        // predicting client and the authoritative server. When content provides a stable spawn ID, allow that ID
-        // and spawn index to reconcile the reference after the exact tick key misses.
-        if (reference.PredictedSpawnId != null)
-        {
-            EntityUid? fallback = null;
-
-            foreach (var (key, predictedUid) in _predictedSpawnLookup)
-            {
-                if (key.Id != reference.PredictedSpawnId ||
-                    key.Index != reference.PredictedSpawnIndex ||
-                    key.Owner != reference.PredictedSpawnOwner ||
-                    !EntityExists(predictedUid))
-                {
-                    continue;
-                }
-
-                if (fallback != null)
-                {
-                    entity = null;
-                    return false;
-                }
-
-                fallback = predictedUid;
-            }
-
-            if (fallback != null)
-            {
-                entity = fallback.Value;
-                return true;
-            }
         }
 
         entity = null;
