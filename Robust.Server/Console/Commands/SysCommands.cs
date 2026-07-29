@@ -92,7 +92,7 @@ namespace Robust.Server.Console.Commands
                 builder.AppendLine(
                     $"  Socket: local={localEndPoint?.ToString() ?? "(not bound)"}, family={socket?.AddressFamily.ToString() ?? config.LocalAddress.AddressFamily.ToString()}, dual-stack={socket?.DualMode ?? config.DualStack}");
                 builder.AppendLine(
-                    $"  MTU config: IPv4={config.MaximumTransmissionUnit}, IPv6={config.MaximumTransmissionUnitV6}, auto-expand={config.AutoExpandMTU}, probe-frequency={config.ExpandMTUFrequency:F2}s, max-failures={config.ExpandMTUFailAttempts}, unreliable-above-MTU={config.UnreliableSizeBehaviour}");
+                    $"  MTU config: IPv4={config.MaximumTransmissionUnit}, IPv6={config.MaximumTransmissionUnitV6}, auto-expand={config.AutoExpandMTU}, expand-cap-IPv4={config.MaximumExpandedTransmissionUnit}, expand-cap-IPv6={config.MaximumExpandedTransmissionUnitV6}, probe-frequency={config.ExpandMTUFrequency:F2}s, max-failures={config.ExpandMTUFailAttempts}, loss-window={config.ExpandMTULossWindow:F2}s, loss-threshold={config.ExpandMTULossResendThreshold}, unreliable-above-MTU={config.UnreliableSizeBehaviour}");
                 builder.AppendLine(
                     $"  Buffers: configured receive={config.ReceiveBufferSize}, send={config.SendBufferSize}; socket receive={socket?.ReceiveBufferSize.ToString() ?? "n/a"}, send={socket?.SendBufferSize.ToString() ?? "n/a"}");
                 builder.AppendLine(
@@ -113,7 +113,7 @@ namespace Robust.Server.Console.Commands
                     builder.AppendLine(
                         $"  Connection {connectionIndex}: remote={connection.RemoteEndPoint}, family={remoteFamily}, status={connection.Status}, RTT={connection.AverageRoundtripTime * 1000:F1}ms");
                     builder.AppendLine(
-                        $"    MTU: current={connection.CurrentMTU}, expansion={connection.MTUExpansionStatus}, largest-success={connection.LargestSuccessfulMTU}, smallest-failure={failedMtu}, last-probe={connection.LastSentMTUAttemptSize}, probe-failures={connection.MTUAttemptFailures}/{config.ExpandMTUFailAttempts}, send-too-large={connection.MTUSendFailures}");
+                        $"    MTU: current={connection.CurrentMTU}, expansion={connection.MTUExpansionStatus}, largest-success={connection.LargestSuccessfulMTU}, smallest-failure={failedMtu}, last-probe={connection.LastSentMTUAttemptSize}, probe-failures={connection.MTUAttemptFailures}/{config.ExpandMTUFailAttempts}, send-too-large={connection.MTUSendFailures}, loss-resends={connection.MTULossResends}/{config.ExpandMTULossResendThreshold}, loss-rollbacks={connection.MTULossRollbacks}");
                     builder.AppendLine(
                         $"    Traffic: sent={connectionStats.SentBytes} B/{connectionStats.SentPackets} packets/{connectionStats.SentMessages} messages; received={connectionStats.ReceivedBytes} B/{connectionStats.ReceivedPackets} packets/{connectionStats.ReceivedMessages} messages; dropped-messages={connectionStats.DroppedMessages}, resent-messages-delay={connectionStats.ResentMessagesDueToDelay}, resent-messages-hole={connectionStats.ResentMessagesDueToHole}");
                 }
