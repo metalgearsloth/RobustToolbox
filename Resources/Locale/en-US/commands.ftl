@@ -409,6 +409,8 @@ cmd-saveconfig-help = Usage: {$command}
 
 cmd-netaudit-desc = Prints into about NetMsg security.
 cmd-netaudit-help = Usage: {$command}
+cmd-netstats-desc = Dumps low-level networking configuration, MTU state, and traffic statistics.
+cmd-netstats-help = Usage: {$command}
 
 # Player commands
 cmd-tp-desc = Teleports a player to any location in the round.

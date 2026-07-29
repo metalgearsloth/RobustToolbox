@@ -158,6 +158,8 @@ namespace Robust.Shared.Network
 
         public IReadOnlyDictionary<Type, long> MessageBandwidthUsage => _bandwidthUsage;
 
+        internal IReadOnlyList<NetPeer> NetPeers => _netPeers.Select(peer => peer.Peer).ToArray();
+
         internal StringTable StringTable => _strings;
 
         /// <inheritdoc />
