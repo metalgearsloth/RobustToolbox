@@ -135,6 +135,26 @@ namespace Robust.Shared
             CVarDef.Create("net.mtu_expand", false, CVar.ARCHIVE);
 
         /// <summary>
+        /// Maximum UDP payload size to use when automatically expanding MTU for IPv4.
+        /// The default corresponds to a 1500-byte Ethernet MTU after IPv4 and UDP headers.
+        /// Values below <see cref="NetMtu"/> will not shrink the configured minimum MTU.
+        /// </summary>
+        /// <seealso cref="NetMtu"/>
+        /// <seealso cref="NetMtuExpand"/>
+        public static readonly CVarDef<int> NetMtuExpandMax =
+            CVarDef.Create("net.mtu_expand_max", NetPeerConfiguration.kEthernetPayloadMTU, CVar.ARCHIVE);
+
+        /// <summary>
+        /// Maximum UDP payload size to use when automatically expanding MTU for IPv6.
+        /// The default corresponds to a 1500-byte Ethernet MTU after IPv6 and UDP headers.
+        /// Values below <see cref="NetMtuIpv6"/> will not shrink the configured minimum MTU.
+        /// </summary>
+        /// <seealso cref="NetMtuIpv6"/>
+        /// <seealso cref="NetMtuExpand"/>
+        public static readonly CVarDef<int> NetMtuExpandMaxIpv6 =
+            CVarDef.Create("net.mtu_expand_max_ipv6", NetPeerConfiguration.kEthernetPayloadMTUV6, CVar.ARCHIVE);
+
+        /// <summary>
         /// Interval between MTU expansion attempts, in seconds.
         /// </summary>
         /// <remarks>
@@ -151,6 +171,20 @@ namespace Robust.Shared
         /// <seealso cref="NetMtuExpand"/>
         public static readonly CVarDef<int> NetMtuExpandFailAttempts =
             CVarDef.Create("net.mtu_expand_fail_attempts", 5, CVar.ARCHIVE);
+
+        /// <summary>
+        /// Number of reliable resends inside <see cref="NetMtuExpandLossWindow"/> before rolling an expanded MTU back to <see cref="NetMtu"/>.
+        /// </summary>
+        /// <seealso cref="NetMtuExpand"/>
+        public static readonly CVarDef<int> NetMtuExpandLossResendThreshold =
+            CVarDef.Create("net.mtu_expand_loss_resend_threshold", 4, CVar.ARCHIVE);
+
+        /// <summary>
+        /// Time window, in seconds, used to detect resend bursts for loss-aware MTU rollback.
+        /// </summary>
+        /// <seealso cref="NetMtuExpand"/>
+        public static readonly CVarDef<float> NetMtuExpandLossWindow =
+            CVarDef.Create("net.mtu_expand_loss_window", 5f, CVar.ARCHIVE);
 
         /// <summary>
         /// Maximum bytes used by incomplete Lidgren fragment groups for one connection.

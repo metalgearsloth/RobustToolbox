@@ -835,9 +835,13 @@ namespace Robust.Shared.Network
             // MTU stuff.
             netConfig.MaximumTransmissionUnit = _config.GetCVar(CVars.NetMtu);
             netConfig.MaximumTransmissionUnitV6 = _config.GetCVar(CVars.NetMtuIpv6);
+            netConfig.MaximumExpandedTransmissionUnit = _config.GetCVar(CVars.NetMtuExpandMax);
+            netConfig.MaximumExpandedTransmissionUnitV6 = _config.GetCVar(CVars.NetMtuExpandMaxIpv6);
             netConfig.AutoExpandMTU = _config.GetCVar(CVars.NetMtuExpand);
             netConfig.ExpandMTUFrequency = _config.GetCVar(CVars.NetMtuExpandFrequency);
             netConfig.ExpandMTUFailAttempts = _config.GetCVar(CVars.NetMtuExpandFailAttempts);
+            netConfig.ExpandMTULossResendThreshold = _config.GetCVar(CVars.NetMtuExpandLossResendThreshold);
+            netConfig.ExpandMTULossWindow = _config.GetCVar(CVars.NetMtuExpandLossWindow);
             netConfig.MaximumFragmentReassemblyBytesPerConnection = _config.GetCVar(CVars.NetMaxFragmentReassemblyBytesPerConnection);
             netConfig.FragmentGroupTimeout = _config.GetCVar(CVars.NetFragmentGroupTimeout);
 
