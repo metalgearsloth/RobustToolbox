@@ -534,11 +534,6 @@ namespace Robust.Client.Graphics.Clyde
                         rect.TopLeft, rect.TopRight, color, subRegion);
                 }
 
-                public override void DrawTexture(Texture texture, Vector2 position, Color? modulate = null)
-                {
-                    base.DrawTexture(texture, position, modulate);
-                }
-
                 /// <summary>
                 /// Draws an entity.
                 /// </summary>
