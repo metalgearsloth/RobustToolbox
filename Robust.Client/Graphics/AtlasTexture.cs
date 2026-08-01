@@ -21,6 +21,13 @@ namespace Robust.Client.Graphics
 
             SubRegion = subRegion;
             SourceTexture = texture;
+
+            var (width, height) = texture.Size;
+            NormalizedSubRegion = new Box2(
+                subRegion.Left / width,
+                (height - subRegion.Bottom) / height,
+                subRegion.Right / width,
+                (height - subRegion.Top) / height);
         }
 
         /// <summary>
@@ -32,6 +39,11 @@ namespace Robust.Client.Graphics
         ///     Our sub region within our source, in pixel coordinates.
         /// </summary>
         public UIBox2 SubRegion { get; }
+
+        /// <summary>
+        ///     Our sub region within the source texture, normalized for rendering.
+        /// </summary>
+        internal Box2 NormalizedSubRegion { get; }
 
         public override Color GetPixel(int x, int y)
         {

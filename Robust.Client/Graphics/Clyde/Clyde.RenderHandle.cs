@@ -68,6 +68,14 @@ namespace Robust.Client.Graphics.Clyde
             public void DrawTextureScreen(Texture texture, Vector2 bl, Vector2 br, Vector2 tl, Vector2 tr,
                 in Color modulate, in UIBox2? subRegion)
             {
+                if (subRegion == null && texture is AtlasTexture atlas)
+                {
+                    var texCoords = atlas.NormalizedSubRegion;
+                    _clyde.DrawTexture(((ClydeTexture) atlas.SourceTexture).TextureId, bl, br, tl, tr, in modulate,
+                        in texCoords);
+                    return;
+                }
+
                 var clydeTexture = ExtractTexture(texture, in subRegion, out var csr);
 
                 var (w, h) = clydeTexture.Size;
@@ -91,6 +99,14 @@ namespace Robust.Client.Graphics.Clyde
             public void DrawTextureWorld(Texture texture, Vector2 bl, Vector2 br, Vector2 tl, Vector2 tr,
                 Color modulate, in UIBox2? subRegion)
             {
+                if (subRegion == null && texture is AtlasTexture atlas)
+                {
+                    var texCoords = atlas.NormalizedSubRegion;
+                    _clyde.DrawTexture(((ClydeTexture) atlas.SourceTexture).TextureId, bl, br, tl, tr, in modulate,
+                        in texCoords);
+                    return;
+                }
+
                 var clydeTexture = ExtractTexture(texture, in subRegion, out var csr);
 
                 var sr = WorldTextureBoundsToUV(clydeTexture, csr);
