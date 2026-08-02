@@ -227,7 +227,7 @@ namespace Robust.Client.ResourceManagement
             var imageAtlases = new ValueList<Image<Rgba32>>();
 
             // List of all the actual atlases.
-            var finalAtlases = new ValueList<OwnedTexture>();
+            var finalAtlases = new ValueList<RSIResource.RsiAtlas>();
 
             // Number of total pixels in each atlas.
             var finalPixels = new ValueList<int>();
@@ -328,8 +328,8 @@ namespace Robust.Client.ResourceManagement
                 var imageAtlas = imageAtlases[i];
                 try
                 {
-                    var atlasTexture = Clyde.LoadTextureFromImage(imageAtlas, $"Meta atlas {i}");
-                    finalAtlases.Add(atlasTexture);
+                    var atlas = new RSIResource.RsiAtlas(Clyde.LoadTextureFromImage(imageAtlas, $"Meta atlas {i}"));
+                    finalAtlases.Add(atlas);
 
                     sawmill.Debug($"(Meta atlas {i}) - cropped utilization: {(float)finalPixels[i] / (maxSize * imageAtlas.Height):P2}, fill percentage: {(float)imageAtlas.Height / maxSize:P2}");
                 }
@@ -344,7 +344,9 @@ namespace Robust.Client.ResourceManagement
             {
                 foreach (var rsi in level.RSIList)
                 {
-                    rsi.AtlasTexture = finalAtlases[level.AtlasId];
+                    var atlas = finalAtlases[level.AtlasId];
+                    rsi.Atlas = atlas;
+                    rsi.AtlasTexture = atlas.Texture;
                 }
             }
 
@@ -392,6 +394,11 @@ namespace Robust.Client.ResourceManagement
                 {
                     data.AtlasSheet?.Dispose();
                 }
+            }
+
+            foreach (var atlas in finalAtlases)
+            {
+                atlas.Dispose();
             }
 
             sawmill.Debug(

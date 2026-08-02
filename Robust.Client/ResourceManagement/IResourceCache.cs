@@ -49,9 +49,11 @@ public interface IResourceCache : IResourceManager
 
     IEnumerable<KeyValuePair<ResPath, T>> GetAllResources<T>() where T : BaseResource, new();
 
-    // Resource load callbacks so content can hook stuff like click maps.
+    // Resource lifecycle callbacks so content can hook things like click maps.
     event Action<TextureLoadedEventArgs> OnRawTextureLoaded;
+    event Action<Texture> OnRawTextureUnloaded;
     event Action<RsiLoadedEventArgs> OnRsiLoaded;
+    event Action<RSI> OnRsiUnloaded;
 
     [Obsolete("Fetch these through IoC directly instead")]
     IClyde Clyde { get; }

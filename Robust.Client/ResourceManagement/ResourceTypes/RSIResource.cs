@@ -18,9 +18,13 @@ namespace Robust.Client.ResourceManagement
     ///     Handles the loading code for RSI files.
     ///     See <see cref="RSI"/> for the RSI API itself.
     /// </summary>
-    public sealed class RSIResource : BaseResource
+    public sealed class RSIResource : BaseResource, IBaseResource
     {
+        private RsiAtlas? _atlas;
+        private bool _disposed;
+
         public override ResPath? Fallback => new("/Textures/error.rsi");
+        static bool IBaseResource.CanBeRemoved => true;
 
         public RSI RSI { get; private set; } = default!;
 
@@ -250,7 +254,54 @@ namespace Robust.Client.ResourceManagement
         internal void LoadFinish(IResourceCacheInternal cache, LoadStepData data)
         {
             RSI = data.Rsi;
-            cache.RsiLoaded(new RsiLoadedEventArgs(data.Path, this, data.AtlasSheet, data.CallbackOffsets));
+            _atlas = data.Atlas?.AddReference() ?? new RsiAtlas(data.AtlasTexture);
+            cache.RsiLoaded(new RsiLoadedEventArgs(data.Path, this, data.AtlasSheet, data.CallbackOffsets, data.AtlasOffset));
+        }
+
+        public override void Dispose()
+        {
+            if (_disposed)
+                return;
+
+            _disposed = true;
+            _atlas?.Dispose();
+            _atlas = null;
+
+            base.Dispose();
+        }
+
+        /// <summary>
+        ///     Owns an RSI atlas texture and keeps it alive until every RSI that uses it is disposed.
+        /// </summary>
+        internal sealed class RsiAtlas : IDisposable
+        {
+            private OwnedTexture? _texture;
+            private int _references = 1;
+
+            public OwnedTexture Texture => _texture ?? throw new ObjectDisposedException(nameof(RsiAtlas));
+
+            public RsiAtlas(OwnedTexture texture)
+            {
+                _texture = texture;
+            }
+
+            public RsiAtlas AddReference()
+            {
+                if (_texture == null)
+                    throw new ObjectDisposedException(nameof(RsiAtlas));
+
+                _references++;
+                return this;
+            }
+
+            public void Dispose()
+            {
+                if (--_references != 0)
+                    return;
+
+                _texture!.Dispose();
+                _texture = null;
+            }
         }
 
         /// <summary>
@@ -411,7 +462,8 @@ namespace Robust.Client.ResourceManagement
             public int[] FrameCounts = default!;
             public Vector2i FrameSize;
             public Dictionary<RSI.StateId, Vector2i[][]> CallbackOffsets = default!;
-            public Texture AtlasTexture = default!;
+            public RsiAtlas? Atlas;
+            public OwnedTexture AtlasTexture = default!;
             public Vector2i AtlasOffset;
             public RSI Rsi = default!;
             public TextureLoadParameters LoadParameters;

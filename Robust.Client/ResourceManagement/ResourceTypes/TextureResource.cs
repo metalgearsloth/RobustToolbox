@@ -133,6 +133,8 @@ namespace Robust.Client.ResourceManagement
 
             var data = new LoadStepData {Path = path};
 
+            var cache = dependencies.Resolve<IResourceCache>() as IResourceCacheInternal;
+
             LoadTextureParameters(dependencies.Resolve<IResourceManager>(), data);
             LoadPreTextureData(dependencies.Resolve<IResourceManager>(), data);
 
@@ -143,11 +145,14 @@ namespace Robust.Client.ResourceManagement
             }
             else
             {
-                // Dimensions do not match, make new texture.
+                // Dimensions do not match, discard the old texture before making a new one.
+                cache?.TextureUnloaded(_texture);
                 _texture.Dispose();
                 LoadTexture(dependencies.Resolve<IClyde>(), data);
                 _texture = data.Texture;
             }
+
+            cache?.TextureLoaded(new TextureLoadedEventArgs(path, data.Image, this));
 
             data.Image.Dispose();
         }

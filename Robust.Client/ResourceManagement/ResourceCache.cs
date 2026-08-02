@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using Robust.Client.Audio;
+using Robust.Client.Graphics;
 using Robust.Shared.ContentPack;
 using Robust.Shared.IoC;
 using Robust.Shared.Utility;
@@ -122,6 +123,7 @@ internal sealed partial class ResourceCache : ResourceManager, IResourceCacheInt
         if (!cache.Resources.Remove(path, out var resource))
             return false;
 
+        UnloadResource(resource);
         cache.NonExistent.Remove(path);
         resource.Dispose();
 
@@ -198,7 +200,9 @@ internal sealed partial class ResourceCache : ResourceManager, IResourceCacheInt
     }
 
     public event Action<TextureLoadedEventArgs>? OnRawTextureLoaded;
+    public event Action<Texture>? OnRawTextureUnloaded;
     public event Action<RsiLoadedEventArgs>? OnRsiLoaded;
+    public event Action<RSI>? OnRsiUnloaded;
 
     #region IDisposable Members
 
@@ -221,6 +225,7 @@ internal sealed partial class ResourceCache : ResourceManager, IResourceCacheInt
         {
             foreach (var res in _cachedResources.Values.SelectMany(dict => dict.Resources.Values))
             {
+                UnloadResource(res);
                 res.Dispose();
             }
         }
@@ -249,6 +254,29 @@ internal sealed partial class ResourceCache : ResourceManager, IResourceCacheInt
     public void RsiLoaded(RsiLoadedEventArgs eventArgs)
     {
         OnRsiLoaded?.Invoke(eventArgs);
+    }
+
+    public void TextureUnloaded(Texture texture)
+    {
+        OnRawTextureUnloaded?.Invoke(texture);
+    }
+
+    public void RsiUnloaded(RSI rsi)
+    {
+        OnRsiUnloaded?.Invoke(rsi);
+    }
+
+    private void UnloadResource(BaseResource resource)
+    {
+        switch (resource)
+        {
+            case TextureResource texture:
+                TextureUnloaded(texture.Texture);
+                break;
+            case RSIResource rsi:
+                RsiUnloaded(rsi.RSI);
+                break;
+        }
     }
 
     private sealed class TypeData
