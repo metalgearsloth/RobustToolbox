@@ -79,7 +79,8 @@ internal partial class Clyde
         foreach (var (treeOwner, comp) in _spriteTreeSystem.GetIntersectingTrees(map, worldBounds))
         {
             var treeXform = query.GetComponent(treeOwner);
-            var treePos = treeXform.LocalPosition;
+            var treePos = treeData.Sys.GetRenderLocalPosition(treeXform);
+            var treeRot = treeData.Sys.GetRenderLocalRotation(treeXform);
             var bounds = _transformSystem.GetInvWorldMatrix(treeOwner).TransformBox(worldBounds);
             DebugTools.Assert(treeXform.MapUid == treeXform.ParentUid || !treeXform.ParentUid.IsValid());
 
@@ -97,9 +98,9 @@ internal partial class Clyde
             {
                 TreeOwner = treeOwner,
                 TreePos = treePos,
-                TreeRot = treeXform.LocalRotation,
-                Sin = MathF.Sin((float)treeXform.LocalRotation),
-                Cos = MathF.Cos((float)treeXform.LocalRotation),
+                TreeRot = treeRot,
+                Sin = MathF.Sin((float)treeRot),
+                Cos = MathF.Cos((float)treeRot),
             };
 
             comp.Tree.QueryAabb(ref list,
@@ -167,7 +168,7 @@ internal partial class Clyde
             // var spriteWorldBB = data.Sprite.CalculateRotatedBoundingBox(data.WorldPos, data.WorldRot, batch.ViewRotation);
             // data.SpriteScreenBB = Viewport.GetWorldToLocalMatrix().TransformBox(spriteWorldBB);
 
-            var (pos, rot) = batch.Sys.GetRelativePositionRotation(data.Xform, batch.TreeOwner);
+            var (pos, rot) = batch.Sys.GetRenderRelativePositionRotation(data.Xform, batch.TreeOwner, batch.Query);
             pos = new Vector2(
                 batch.TreePos.X + batch.Cos * pos.X - batch.Sin * pos.Y,
                 batch.TreePos.Y + batch.Sin * pos.X + batch.Cos * pos.Y);

@@ -905,6 +905,8 @@ public abstract partial class SharedTransformSystem
                 || !xform.LocalRotation.EqualsApprox(newState.Rotation)
                 || xform.ParentUid != parent)
             {
+                BeforeHandleState(uid, xform, parent);
+
                 // remove from any old grid lookups
                 if (xform.Anchored && TryComp(xform.ParentUid, out MapGridComponent? grid))
                 {
@@ -956,6 +958,15 @@ public abstract partial class SharedTransformSystem
         }
 
         HandleNextTransformState(uid, xform, args.Next);
+        AfterHandleState(uid, xform);
+    }
+
+    protected virtual void BeforeHandleState(EntityUid uid, TransformComponent xform, EntityUid newParent)
+    {
+    }
+
+    protected virtual void AfterHandleState(EntityUid uid, TransformComponent xform)
+    {
     }
 
     private TransformComponentState? GetTransformState(TransformComponent xform, IComponentState? state)

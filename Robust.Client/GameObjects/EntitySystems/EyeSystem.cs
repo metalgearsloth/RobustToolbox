@@ -9,6 +9,7 @@ namespace Robust.Client.GameObjects;
 public sealed partial class EyeSystem : SharedEyeSystem
 {
     [Dependency] private IEyeManager _eyeManager = default!;
+    [Dependency] private TransformSystem _transformSystem = default!;
 
     public override void Initialize()
     {
@@ -62,7 +63,7 @@ public sealed partial class EyeSystem : SharedEyeSystem
                 eyeComponent.Target = null;
             }
 
-            eyeComponent.Eye.Position = TransformSystem.GetMapCoordinates(xform);
+            eyeComponent.Eye.Position = _transformSystem.GetRenderMapCoordinates(xform);
         }
     }
 }

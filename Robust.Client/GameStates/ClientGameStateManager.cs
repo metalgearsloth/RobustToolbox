@@ -142,6 +142,7 @@ namespace Robust.Client.GameStates
         public bool DropStates;
 #endif
 
+        private bool _missingStateForPresentation;
         private bool _resettingPredictedEntities;
         private readonly List<EntityUid> _brokenEnts = new();
 
@@ -374,6 +375,8 @@ namespace Robust.Client.GameStates
             _prof.EmitEntities(_entities.EntityCount);
 
             bool processedAny = false;
+            var xformSystem = _entitySystemManager.GetEntitySystem<TransformSystem>();
+            xformSystem.BeginPredictionCorrection();
 
             _timing.LastProcessedTick = _timing.LastRealTick;
             while (_timing.LastProcessedTick < targetProcessedTick)
@@ -400,6 +403,8 @@ namespace Robust.Client.GameStates
                 {
                     // Might just be missing a state, but we may be able to make use of a future state if it has a low enough from sequence.
                     _timing.LastProcessedTick += 1;
+                    _missingStateForPresentation = true;
+                    xformSystem.NotifyStateMissing();
                     continue;
                 }
 
@@ -457,7 +462,16 @@ namespace Robust.Client.GameStates
                     try
                     {
 #endif
-                    ApplyGameState(curState, nextState);
+                    xformSystem.SetStateLossCorrection(_missingStateForPresentation);
+                    try
+                    {
+                        ApplyGameState(curState, nextState);
+                    }
+                    finally
+                    {
+                        xformSystem.SetStateLossCorrection(false);
+                        _missingStateForPresentation = false;
+                    }
 #if EXCEPTION_TOLERANCE
                     }
                     catch (MissingMetadataException e)
@@ -492,12 +506,16 @@ namespace Robust.Client.GameStates
             // If we are about to process an another tick in the same frame, lets not bother unnecessarily running prediction ticks
             // Really the main-loop ticking just needs to be more specialized for clients.
             if (_timing.TickRemainderRealtime >= _timing.CalcAdjustedTickPeriod())
+            {
+                xformSystem.EndPredictionCorrection();
                 return;
+            }
 
             if (!processedAny)
             {
                 // Failed to process even a single tick. Chances are the tick buffer is empty, either because of
                 // networking issues or because the server is dead. This will functionally freeze the client-side simulation.
+                xformSystem.EndPredictionCorrection();
                 return;
             }
 
@@ -531,6 +549,9 @@ namespace Robust.Client.GameStates
             {
                 _entities.TickUpdate((float)_timing.TickPeriod.TotalSeconds, noPredictions: !IsPredictionEnabled, histogram: null);
             }
+
+            xformSystem.CapturePredictionReplayTick();
+            xformSystem.EndPredictionCorrection();
         }
 
         public void RequestFullState(NetEntity? missingEntity = null, GameTick? tick = null)
@@ -551,6 +572,7 @@ namespace Robust.Client.GameStates
             }
 
             var input = _entitySystemManager.GetEntitySystem<InputSystem>();
+            var xformSystem = _entitySystemManager.GetEntitySystem<TransformSystem>();
             using var pendingInputEnumerator = _pendingInputs.GetEnumerator();
             using var pendingMessagesEnumerator = _pendingSystemMessages.GetEnumerator();
             var hasPendingInput = pendingInputEnumerator.MoveNext();
@@ -601,6 +623,8 @@ namespace Robust.Client.GameStates
                     {
                         _entities.ProcessQueueudDeletions();
                     }
+
+                    xformSystem.CapturePredictionReplayTick();
                 }
 
                 _prof.WriteGroupEnd(groupStart, "Prediction tick", ProfData.Int64(_timing.CurTick.Value));
