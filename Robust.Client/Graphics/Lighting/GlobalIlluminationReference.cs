@@ -5,25 +5,58 @@ using Robust.Shared.Maths;
 namespace Robust.Client.Graphics.Lighting;
 
 /// <summary>
-/// Deterministic CPU reference helpers for the experimental SDF/JFA GI path.
-/// These are intentionally simple and mirror the GPU algorithm closely enough for unit tests.
+/// Deterministic CPU reference helpers for the experimental 2D GI paths.
+/// The radiance-cascade implementation intentionally models directional interval samples
+/// instead of mirroring incidental GPU texture behaviour.
 /// </summary>
 internal static class GlobalIlluminationReference
 {
-    public readonly record struct TraceResult(bool Hit, Vector2i Cell, Vector3 Radiance, int Steps);
+    public const int RadianceCascadeSpatialBranchFactor = 2;
+    public const int RadianceCascadeAngularBranchFactor = 4;
+
+    public readonly record struct RadianceSample(Vector3 Radiance, float Transmittance)
+    {
+        public static RadianceSample Transparent => new(Vector3.Zero, 1f);
+
+        public static RadianceSample Merge(RadianceSample near, RadianceSample far)
+        {
+            return new RadianceSample(
+                near.Radiance + near.Transmittance * far.Radiance,
+                near.Transmittance * far.Transmittance);
+        }
+    }
+
+    public readonly record struct TraceResult(bool Hit, Vector2i Cell, Vector3 Radiance, float Transmittance, int Steps);
+
+    public readonly record struct ErrorMetrics(float MeanAbsoluteError, float RootMeanSquaredError, float MaxAbsoluteError, float MeanReferenceMagnitude);
 
     public sealed class RadianceCascadeResult
     {
-        public RadianceCascadeResult(Vector3[] current, Vector3[][] cascades, Vector2i[] cascadeSizes)
+        public RadianceCascadeResult(
+            Vector3[] current,
+            RadianceSample[][] cascades,
+            Vector2i[] probeSizes,
+            Vector2i[] atlasSizes,
+            int[] directionCounts,
+            float[] intervalStarts,
+            float[] intervalEnds)
         {
             Current = current;
             Cascades = cascades;
-            CascadeSizes = cascadeSizes;
+            ProbeSizes = probeSizes;
+            AtlasSizes = atlasSizes;
+            DirectionCounts = directionCounts;
+            IntervalStarts = intervalStarts;
+            IntervalEnds = intervalEnds;
         }
 
         public Vector3[] Current { get; }
-        public Vector3[][] Cascades { get; }
-        public Vector2i[] CascadeSizes { get; }
+        public RadianceSample[][] Cascades { get; }
+        public Vector2i[] ProbeSizes { get; }
+        public Vector2i[] AtlasSizes { get; }
+        public int[] DirectionCounts { get; }
+        public float[] IntervalStarts { get; }
+        public float[] IntervalEnds { get; }
     }
 
     public static Vector2i ScaledTargetSize(Vector2i viewportSize, float scale)
@@ -34,25 +67,121 @@ internal static class GlobalIlluminationReference
             Math.Max(1, (int)Math.Ceiling(viewportSize.Y * clampedScale)));
     }
 
-    public static Vector2i RadianceCascadeTargetSize(Vector2i baseSize, int cascade)
+    public static Matrix3x2 CreateScreenUvToWorldMatrix(
+        Vector2 worldTopLeft,
+        Vector2 worldTopRight,
+        Vector2 worldBottomLeft)
     {
-        var divisor = 1 << Math.Clamp(cascade, 0, 8);
+        // Clyde's fullscreen passes use pos = (clip + 1) / 2, so uv.y = 1 is the top of the
+        // viewport and uv.y = 0 is the bottom. Keep this convention explicit so GI buffers line
+        // up with the normal light-map sampling path.
+        var worldX = worldTopRight - worldTopLeft;
+        var worldY = worldTopLeft - worldBottomLeft;
+
+        return new Matrix3x2(
+            worldX.X,
+            worldX.Y,
+            worldY.X,
+            worldY.Y,
+            worldBottomLeft.X,
+            worldBottomLeft.Y);
+    }
+
+    public static Vector2i RadianceCascadeProbeSize(Vector2i baseSize, int cascade)
+    {
+        var divisor = 1 << Math.Clamp(cascade, 0, 12);
         return new Vector2i(
             Math.Max(1, (baseSize.X + divisor - 1) / divisor),
             Math.Max(1, (baseSize.Y + divisor - 1) / divisor));
     }
 
-    public static Vector2i?[] ExactNearestField(ReadOnlySpan<bool> occlusionMask, int width, int height)
+    public static Vector2i RadianceCascadeDirectionGrid(int directionCount)
+    {
+        directionCount = Math.Max(1, directionCount);
+        var columns = (int)Math.Ceiling(Math.Sqrt(directionCount));
+        var rows = (directionCount + columns - 1) / columns;
+        return new Vector2i(columns, rows);
+    }
+
+    public static Vector2i RadianceCascadeAtlasSize(Vector2i baseSize, int cascade, int baseRays)
+    {
+        var probeSize = RadianceCascadeProbeSize(baseSize, cascade);
+        var directionGrid = RadianceCascadeDirectionGrid(RadianceCascadeRayCount(baseRays, cascade));
+        return new Vector2i(probeSize.X * directionGrid.X, probeSize.Y * directionGrid.Y);
+    }
+
+    public static int RadianceCascadeRayCount(int baseRays, int cascade)
+    {
+        if (baseRays <= 0)
+            throw new ArgumentOutOfRangeException(nameof(baseRays));
+
+        var result = baseRays;
+        for (var i = 0; i < cascade; i++)
+            result *= RadianceCascadeAngularBranchFactor;
+
+        return Math.Clamp(result, 1, 4096);
+    }
+
+    public static int RadianceCascadeChildDirectionIndex(int parentDirectionIndex, int child)
+    {
+        if (parentDirectionIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(parentDirectionIndex));
+
+        if (child < 0 || child >= RadianceCascadeAngularBranchFactor)
+            throw new ArgumentOutOfRangeException(nameof(child));
+
+        return parentDirectionIndex * RadianceCascadeAngularBranchFactor + child;
+    }
+
+    public static float RadianceCascadeDirectionAngle(int directionIndex, int directionCount)
+    {
+        if (directionCount <= 0)
+            throw new ArgumentOutOfRangeException(nameof(directionCount));
+
+        if (directionIndex < 0 || directionIndex >= directionCount)
+            throw new ArgumentOutOfRangeException(nameof(directionIndex));
+
+        return (directionIndex + 0.5f) / directionCount * MathF.Tau;
+    }
+
+    public static Vector2 RadianceCascadeDirection(int directionIndex, int directionCount)
+    {
+        var angle = RadianceCascadeDirectionAngle(directionIndex, directionCount);
+        return new Vector2(MathF.Cos(angle), MathF.Sin(angle));
+    }
+
+    public static float RadianceCascadeIntervalStart(float baseIntervalLength, int cascade)
+    {
+        if (baseIntervalLength <= 0f)
+            throw new ArgumentOutOfRangeException(nameof(baseIntervalLength));
+
+        if (cascade < 0)
+            throw new ArgumentOutOfRangeException(nameof(cascade));
+
+        return baseIntervalLength * (MathF.Pow(RadianceCascadeAngularBranchFactor, cascade) - 1f) /
+               (RadianceCascadeAngularBranchFactor - 1f);
+    }
+
+    public static float RadianceCascadeIntervalEnd(float baseIntervalLength, int cascade)
+    {
+        return RadianceCascadeIntervalStart(baseIntervalLength, cascade + 1);
+    }
+
+    public static Vector2i?[] ExactNearestField(
+        ReadOnlySpan<bool> occlusionMask,
+        int width,
+        int height,
+        Vector2? cellWorldSize = null)
     {
         ValidateMask(occlusionMask, width, height);
-
+        var cellSize = cellWorldSize ?? Vector2.One;
         var result = new Vector2i?[width * height];
 
         for (var y = 0; y < height; y++)
         {
             for (var x = 0; x < width; x++)
             {
-                var bestDistance = int.MaxValue;
+                var bestDistance = float.PositiveInfinity;
                 Vector2i? best = null;
 
                 for (var sy = 0; sy < height; sy++)
@@ -62,9 +191,7 @@ internal static class GlobalIlluminationReference
                         if (!occlusionMask[Index(sx, sy, width)])
                             continue;
 
-                        var dx = sx - x;
-                        var dy = sy - y;
-                        var distance = dx * dx + dy * dy;
+                        var distance = AspectDistanceSquared(new Vector2i(sx, sy), x, y, cellSize);
                         if (distance >= bestDistance)
                             continue;
 
@@ -80,10 +207,14 @@ internal static class GlobalIlluminationReference
         return result;
     }
 
-    public static Vector2i?[] JumpFloodNearestField(ReadOnlySpan<bool> occlusionMask, int width, int height)
+    public static Vector2i?[] JumpFloodNearestField(
+        ReadOnlySpan<bool> occlusionMask,
+        int width,
+        int height,
+        Vector2? cellWorldSize = null)
     {
         ValidateMask(occlusionMask, width, height);
-
+        var cellSize = cellWorldSize ?? Vector2.One;
         var source = new Vector2i?[width * height];
         var destination = new Vector2i?[width * height];
 
@@ -104,8 +235,8 @@ internal static class GlobalIlluminationReference
                 {
                     var best = source[Index(x, y, width)];
                     var bestDistance = best is { } seed
-                        ? DistanceSquared(seed, x, y)
-                        : int.MaxValue;
+                        ? AspectDistanceSquared(seed, x, y, cellSize)
+                        : float.PositiveInfinity;
 
                     for (var oy = -1; oy <= 1; oy++)
                     {
@@ -120,7 +251,7 @@ internal static class GlobalIlluminationReference
                             if (candidate == null)
                                 continue;
 
-                            var distance = DistanceSquared(candidate.Value, x, y);
+                            var distance = AspectDistanceSquared(candidate.Value, x, y, cellSize);
                             if (distance >= bestDistance)
                                 continue;
 
@@ -140,11 +271,16 @@ internal static class GlobalIlluminationReference
         return source;
     }
 
-    public static float[] DistanceField(ReadOnlySpan<Vector2i?> nearestField, int width, int height)
+    public static float[] DistanceField(
+        ReadOnlySpan<Vector2i?> nearestField,
+        int width,
+        int height,
+        Vector2? cellWorldSize = null)
     {
         if (nearestField.Length != width * height)
             throw new ArgumentException("Nearest field dimensions do not match.", nameof(nearestField));
 
+        var cellSize = cellWorldSize ?? Vector2.One;
         var result = new float[width * height];
         for (var y = 0; y < height; y++)
         {
@@ -153,7 +289,7 @@ internal static class GlobalIlluminationReference
                 var nearest = nearestField[Index(x, y, width)];
                 result[Index(x, y, width)] = nearest == null
                     ? float.PositiveInfinity
-                    : MathF.Sqrt(DistanceSquared(nearest.Value, x, y));
+                    : MathF.Sqrt(AspectDistanceSquared(nearest.Value, x, y, cellSize));
             }
         }
 
@@ -175,15 +311,28 @@ internal static class GlobalIlluminationReference
         ValidateMask(occlusionMask, width, height);
         ValidateRadiance(directRadiance, width, height, nameof(directRadiance));
         ValidateRadiance(previousGi, width, height, nameof(previousGi));
+        ValidateFov(fovMask, width, height);
 
-        if (fovMask.Length != 0 && fovMask.Length != width * height)
-            throw new ArgumentException("FOV mask dimensions do not match.", nameof(fovMask));
+        var source = new Vector3[width * height];
+        for (var i = 0; i < source.Length; i++)
+            source[i] = directRadiance[i] + previousGi[i];
 
-        if (direction.LengthSquared() <= 0.000001f)
-            throw new ArgumentException("Direction must be non-zero.", nameof(direction));
+        var sample = TraceDirectInterval(
+            occlusionMask,
+            source,
+            fovMask,
+            width,
+            height,
+            start,
+            Vector2.Normalize(direction),
+            0.25f,
+            maxSteps,
+            0.25f,
+            out var hit,
+            out var hitCell,
+            out var steps);
 
-        var nearest = ExactNearestField(occlusionMask, width, height);
-        return TraceRay(occlusionMask, directRadiance, previousGi, fovMask, nearest, width, height, start, direction, maxSteps, bounceDecay);
+        return new TraceResult(hit, hitCell, sample.Radiance * bounceDecay, sample.Transmittance, steps);
     }
 
     public static Vector3 TracePixel(
@@ -204,23 +353,26 @@ internal static class GlobalIlluminationReference
         ValidateMask(occlusionMask, width, height);
         ValidateRadiance(directRadiance, width, height, nameof(directRadiance));
         ValidateRadiance(previousGi, width, height, nameof(previousGi));
+        ValidateFov(fovMask, width, height);
 
-        if (fovMask.Length != 0 && fovMask.Length != width * height)
-            throw new ArgumentException("FOV mask dimensions do not match.", nameof(fovMask));
+        var gathered = Vector3.Zero;
+        for (var i = 0; i < rays; i++)
+        {
+            var direction = RadianceCascadeDirection(i, rays);
+            gathered += TraceRay(
+                occlusionMask,
+                directRadiance,
+                previousGi,
+                fovMask,
+                width,
+                height,
+                pixel,
+                direction,
+                maxSteps,
+                bounceDecay).Radiance;
+        }
 
-        var nearest = ExactNearestField(occlusionMask, width, height);
-        return TracePixel(
-            occlusionMask,
-            directRadiance,
-            previousGi,
-            fovMask,
-            nearest,
-            width,
-            height,
-            pixel,
-            rays,
-            maxSteps,
-            bounceDecay);
+        return gathered / rays;
     }
 
     public static Vector3[] TraceImage(
@@ -235,42 +387,80 @@ internal static class GlobalIlluminationReference
         float bounceDecay,
         bool useJumpFloodNearest = true)
     {
-        if (rays <= 0)
-            throw new ArgumentOutOfRangeException(nameof(rays));
-
-        ValidateMask(occlusionMask, width, height);
-        ValidateRadiance(directRadiance, width, height, nameof(directRadiance));
-        ValidateRadiance(previousGi, width, height, nameof(previousGi));
-
-        if (fovMask.Length != 0 && fovMask.Length != width * height)
-            throw new ArgumentException("FOV mask dimensions do not match.", nameof(fovMask));
-
-        var nearest = useJumpFloodNearest
-            ? JumpFloodNearestField(occlusionMask, width, height)
-            : ExactNearestField(occlusionMask, width, height);
-
         var result = new Vector3[width * height];
-
         for (var y = 0; y < height; y++)
         {
             for (var x = 0; x < width; x++)
             {
-                var idx = Index(x, y, width);
-                if (fovMask.Length != 0 && !fovMask[idx])
+                if (occlusionMask[Index(x, y, width)])
                     continue;
 
-                result[idx] = TracePixel(
+                result[Index(x, y, width)] = TracePixel(
                     occlusionMask,
                     directRadiance,
                     previousGi,
                     fovMask,
-                    nearest,
                     width,
                     height,
                     new Vector2(x + 0.5f, y + 0.5f),
                     rays,
                     maxSteps,
                     bounceDecay);
+            }
+        }
+
+        return result;
+    }
+
+    public static Vector3[] TraceBruteForceImage(
+        ReadOnlySpan<bool> occlusionMask,
+        ReadOnlySpan<Vector3> directRadiance,
+        ReadOnlySpan<bool> fovMask,
+        int width,
+        int height,
+        int rays,
+        float maxDistance,
+        float stepLength,
+        float bounceDecay)
+    {
+        if (rays <= 0)
+            throw new ArgumentOutOfRangeException(nameof(rays));
+
+        ValidateMask(occlusionMask, width, height);
+        ValidateRadiance(directRadiance, width, height, nameof(directRadiance));
+        ValidateFov(fovMask, width, height);
+
+        var result = new Vector3[width * height];
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                if (occlusionMask[Index(x, y, width)])
+                    continue;
+
+                var start = new Vector2(x + 0.5f, y + 0.5f);
+                var gathered = Vector3.Zero;
+                for (var directionIndex = 0; directionIndex < rays; directionIndex++)
+                {
+                    var direction = RadianceCascadeDirection(directionIndex, rays);
+                    var sample = TraceDirectInterval(
+                        occlusionMask,
+                        directRadiance,
+                        fovMask,
+                        width,
+                        height,
+                        start,
+                        direction,
+                        stepLength,
+                        maxDistance,
+                        stepLength,
+                        out _,
+                        out _,
+                        out _);
+                    gathered += sample.Radiance;
+                }
+
+                result[Index(x, y, width)] = gathered / rays * bounceDecay;
             }
         }
 
@@ -286,9 +476,9 @@ internal static class GlobalIlluminationReference
         int height,
         int cascadeCount,
         int baseRays,
-        int maxSteps,
-        float bounceDecay,
-        bool useJumpFloodNearest = true)
+        float baseIntervalLength,
+        float traceStepLength,
+        float bounceDecay)
     {
         if (cascadeCount <= 0)
             throw new ArgumentOutOfRangeException(nameof(cascadeCount));
@@ -296,230 +486,139 @@ internal static class GlobalIlluminationReference
         if (baseRays <= 0)
             throw new ArgumentOutOfRangeException(nameof(baseRays));
 
+        if (baseIntervalLength <= 0f)
+            throw new ArgumentOutOfRangeException(nameof(baseIntervalLength));
+
+        if (traceStepLength <= 0f)
+            throw new ArgumentOutOfRangeException(nameof(traceStepLength));
+
         ValidateMask(occlusionMask, width, height);
         ValidateRadiance(directRadiance, width, height, nameof(directRadiance));
         ValidateRadiance(previousGi, width, height, nameof(previousGi));
+        ValidateFov(fovMask, width, height);
 
-        if (fovMask.Length != 0 && fovMask.Length != width * height)
-            throw new ArgumentException("FOV mask dimensions do not match.", nameof(fovMask));
-
-        var nearest = useJumpFloodNearest
-            ? JumpFloodNearestField(occlusionMask, width, height)
-            : ExactNearestField(occlusionMask, width, height);
-
-        cascadeCount = Math.Clamp(cascadeCount, 1, 4);
-        var cascades = new Vector3[cascadeCount][];
-        var cascadeSizes = new Vector2i[cascadeCount];
+        cascadeCount = Math.Clamp(cascadeCount, 1, 5);
+        var cascades = new RadianceSample[cascadeCount][];
+        var probeSizes = new Vector2i[cascadeCount];
+        var atlasSizes = new Vector2i[cascadeCount];
+        var directionCounts = new int[cascadeCount];
+        var intervalStarts = new float[cascadeCount];
+        var intervalEnds = new float[cascadeCount];
         var baseSize = new Vector2i(width, height);
 
-        Vector3[]? previousCascade = null;
-        Vector2i previousCascadeSize = default;
+        for (var cascade = 0; cascade < cascadeCount; cascade++)
+        {
+            probeSizes[cascade] = RadianceCascadeProbeSize(baseSize, cascade);
+            directionCounts[cascade] = RadianceCascadeRayCount(baseRays, cascade);
+            atlasSizes[cascade] = RadianceCascadeAtlasSize(baseSize, cascade, baseRays);
+            intervalStarts[cascade] = RadianceCascadeIntervalStart(baseIntervalLength, cascade);
+            intervalEnds[cascade] = RadianceCascadeIntervalEnd(baseIntervalLength, cascade);
+            cascades[cascade] = new RadianceSample[probeSizes[cascade].X * probeSizes[cascade].Y * directionCounts[cascade]];
+        }
 
         for (var cascade = cascadeCount - 1; cascade >= 0; cascade--)
         {
-            var size = RadianceCascadeTargetSize(baseSize, cascade);
-            var result = new Vector3[size.X * size.Y];
-            var rays = RadianceCascadeRayCount(baseRays, cascade);
-            var intervalStart = RadianceCascadeIntervalStart(maxSteps, cascade);
-            var intervalEnd = RadianceCascadeIntervalEnd(maxSteps, cascade);
+            var probeSize = probeSizes[cascade];
+            var directionCount = directionCounts[cascade];
+            var intervalStart = intervalStarts[cascade];
+            var intervalEnd = intervalEnds[cascade];
 
-            for (var y = 0; y < size.Y; y++)
+            for (var py = 0; py < probeSize.Y; py++)
             {
-                for (var x = 0; x < size.X; x++)
+                for (var px = 0; px < probeSize.X; px++)
                 {
-                    var uv = new Vector2((x + 0.5f) / size.X, (y + 0.5f) / size.Y);
-                    var basePixel = new Vector2(uv.X * width, uv.Y * height);
-                    var baseCell = new Vector2i(
-                        Math.Clamp((int)MathF.Floor(basePixel.X), 0, width - 1),
-                        Math.Clamp((int)MathF.Floor(basePixel.Y), 0, height - 1));
-                    var baseIdx = Index(baseCell.X, baseCell.Y, width);
-
-                    if (fovMask.Length != 0 && !fovMask[baseIdx])
+                    var world = ProbeWorldPosition(px, py, probeSize, width, height);
+                    var worldCell = ToCell(world, width, height);
+                    if (worldCell != null && occlusionMask[Index(worldCell.Value.X, worldCell.Value.Y, width)])
                         continue;
 
-                    var gathered = Vector3.Zero;
-                    for (var i = 0; i < rays; i++)
+                    for (var directionIndex = 0; directionIndex < directionCount; directionIndex++)
                     {
-                        var angle = i / (float)rays * MathF.PI * 2f;
-                        var direction = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
-                        gathered += TraceRadianceCascadeInterval(
+                        var direction = RadianceCascadeDirection(directionIndex, directionCount);
+                        var near = TraceDirectInterval(
                             occlusionMask,
                             directRadiance,
-                            previousGi,
                             fovMask,
-                            nearest,
-                            previousCascade ?? Array.Empty<Vector3>(),
-                            previousCascadeSize,
                             width,
                             height,
-                            basePixel,
+                            world,
                             direction,
-                            maxSteps,
                             intervalStart,
                             intervalEnd,
-                            bounceDecay);
+                            traceStepLength,
+                            out _,
+                            out _,
+                            out _);
+
+                        var merged = near;
+                        if (cascade + 1 < cascadeCount)
+                        {
+                            var farWorld = world + direction * intervalEnd;
+                            var far = new RadianceSample(Vector3.Zero, 0f);
+                            for (var child = 0; child < RadianceCascadeAngularBranchFactor; child++)
+                            {
+                                var childDirection = RadianceCascadeChildDirectionIndex(directionIndex, child);
+                                far = Add(far, SampleCascadeBilinear(
+                                    cascades[cascade + 1],
+                                    probeSizes[cascade + 1],
+                                    directionCounts[cascade + 1],
+                                    occlusionMask,
+                                    width,
+                                    height,
+                                    farWorld,
+                                    childDirection));
+                            }
+
+                            far = Scale(far, 1f / RadianceCascadeAngularBranchFactor);
+                            merged = RadianceSample.Merge(near, far);
+                        }
+
+                        cascades[cascade][DirectionalIndex(px, py, directionIndex, probeSize, directionCount)] = merged;
                     }
-
-                    result[Index(x, y, size.X)] = gathered / rays;
                 }
             }
-
-            cascades[cascade] = result;
-            cascadeSizes[cascade] = size;
-            previousCascade = result;
-            previousCascadeSize = size;
         }
 
-        return new RadianceCascadeResult(cascades[0], cascades, cascadeSizes);
+        var current = ResolveCascadeZero(cascades[0], probeSizes[0], directionCounts[0], bounceDecay);
+        return new RadianceCascadeResult(current, cascades, probeSizes, atlasSizes, directionCounts, intervalStarts, intervalEnds);
     }
 
-    public static int RadianceCascadeRayCount(int baseRays, int cascade)
+    public static ErrorMetrics CompareImages(ReadOnlySpan<Vector3> actual, ReadOnlySpan<Vector3> reference, ReadOnlySpan<bool> occlusionMask)
     {
-        var multiplier = 1;
-        for (var i = 0; i < cascade; i++)
-            multiplier *= 4;
+        if (actual.Length != reference.Length)
+            throw new ArgumentException("Image dimensions do not match.", nameof(reference));
 
-        return Math.Clamp(baseRays * multiplier, 1, 256);
-    }
+        if (occlusionMask.Length != 0 && occlusionMask.Length != actual.Length)
+            throw new ArgumentException("Occlusion mask dimensions do not match.", nameof(occlusionMask));
 
-    public static float RadianceCascadeIntervalStart(int maxSteps, int cascade)
-    {
-        return 0f;
-    }
+        var count = 0;
+        var absoluteSum = 0f;
+        var squaredSum = 0f;
+        var max = 0f;
+        var referenceSum = 0f;
 
-    public static float RadianceCascadeIntervalEnd(int maxSteps, int cascade)
-    {
-        return maxSteps * (MathF.Pow(2f, cascade + 1) - 1f);
-    }
-
-    private static Vector3 TracePixel(
-        ReadOnlySpan<bool> occlusionMask,
-        ReadOnlySpan<Vector3> directRadiance,
-        ReadOnlySpan<Vector3> previousGi,
-        ReadOnlySpan<bool> fovMask,
-        ReadOnlySpan<Vector2i?> nearest,
-        int width,
-        int height,
-        Vector2 pixel,
-        int rays,
-        int maxSteps,
-        float bounceDecay)
-    {
-        var gathered = Vector3.Zero;
-
-        for (var i = 0; i < rays; i++)
+        for (var i = 0; i < actual.Length; i++)
         {
-            var angle = i / (float)rays * MathF.PI * 2f;
-            var direction = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
-            gathered += TraceRay(
-                occlusionMask,
-                directRadiance,
-                previousGi,
-                fovMask,
-                nearest,
-                width,
-                height,
-                pixel,
-                direction,
-                maxSteps,
-                bounceDecay).Radiance;
+            if (occlusionMask.Length != 0 && occlusionMask[i])
+                continue;
+
+            var diff = actual[i] - reference[i];
+            var abs = (MathF.Abs(diff.X) + MathF.Abs(diff.Y) + MathF.Abs(diff.Z)) / 3f;
+            absoluteSum += abs;
+            squaredSum += diff.LengthSquared() / 3f;
+            max = MathF.Max(max, MathF.Max(MathF.Abs(diff.X), MathF.Max(MathF.Abs(diff.Y), MathF.Abs(diff.Z))));
+            referenceSum += reference[i].Length();
+            count++;
         }
 
-        return gathered / rays;
-    }
+        if (count == 0)
+            return new ErrorMetrics(0f, 0f, 0f, 0f);
 
-    private static Vector3 TraceRadianceCascadeInterval(
-        ReadOnlySpan<bool> occlusionMask,
-        ReadOnlySpan<Vector3> directRadiance,
-        ReadOnlySpan<Vector3> previousGi,
-        ReadOnlySpan<bool> fovMask,
-        ReadOnlySpan<Vector2i?> nearest,
-        ReadOnlySpan<Vector3> previousCascade,
-        Vector2i previousCascadeSize,
-        int width,
-        int height,
-        Vector2 start,
-        Vector2 direction,
-        int maxSteps,
-        float intervalStart,
-        float intervalEnd,
-        float bounceDecay)
-    {
-        var rayDirection = Vector2.Normalize(direction);
-        var startDistance = 1f;
-        var position = start + rayDirection * startDistance;
-        var traveled = startDistance;
-        var bestRadiance = Vector3.Zero;
-        var bestScore = 0f;
-
-        for (var step = 0; step < maxSteps; step++)
-        {
-            var cell = new Vector2i((int)MathF.Floor(position.X), (int)MathF.Floor(position.Y));
-            if (!Inside(cell.X, cell.Y, width, height))
-                break;
-
-            var idx = Index(cell.X, cell.Y, width);
-            var nearestCell = nearest[idx];
-            if (nearestCell == null)
-                break;
-
-            if (traveled >= intervalStart)
-            {
-                var rayRadiance = SampleRadianceAtPosition(directRadiance, previousGi, fovMask, width, height, position);
-                var rayScore = Luminance(rayRadiance) / (1f + traveled * 0.35f);
-                if (rayScore > bestScore)
-                {
-                    bestScore = rayScore;
-                    bestRadiance = rayRadiance / (1f + traveled * 0.35f);
-                }
-            }
-
-            var distance = DistanceToCellCenter(nearestCell.Value, position);
-            if (occlusionMask[idx] || distance <= 0.75f)
-            {
-                if (traveled < intervalStart)
-                    return bestRadiance;
-
-                var hitCell = occlusionMask[idx] ? cell : nearestCell.Value;
-                var hitIdx = Index(hitCell.X, hitCell.Y, width);
-
-                if (fovMask.Length != 0 && !fovMask[hitIdx])
-                    return Vector3.Zero;
-
-                var surfaceRadiance = SampleRadianceAtPosition(
-                    directRadiance,
-                    previousGi,
-                    fovMask,
-                    width,
-                    height,
-                    position - rayDirection * 0.5f);
-                return ComponentMax(bestRadiance, surfaceRadiance) * bounceDecay;
-            }
-
-            if (traveled >= intervalEnd)
-            {
-                if (previousCascade.Length != 0)
-                    return ComponentMax(bestRadiance, SampleRadiance(previousCascade, previousCascadeSize, position, width, height));
-
-                break;
-            }
-
-            var stepLength = Math.Max(distance - 0.75f, 0.25f);
-            position += rayDirection * stepLength;
-            traveled += stepLength;
-        }
-
-        return bestRadiance * bounceDecay;
-    }
-
-    private static Vector3 SampleRadiance(ReadOnlySpan<Vector3> radiance, Vector2i radianceSize, Vector2 position, int width, int height)
-    {
-        if (radiance.Length == 0)
-            return Vector3.Zero;
-
-        var x = Math.Clamp((int)MathF.Floor(position.X / width * radianceSize.X), 0, radianceSize.X - 1);
-        var y = Math.Clamp((int)MathF.Floor(position.Y / height * radianceSize.Y), 0, radianceSize.Y - 1);
-        return radiance[Index(x, y, radianceSize.X)];
+        return new ErrorMetrics(
+            absoluteSum / count,
+            MathF.Sqrt(squaredSum / count),
+            max,
+            referenceSum / count);
     }
 
     public static bool ShouldRejectHistory(
@@ -552,102 +651,168 @@ internal static class GlobalIlluminationReference
         return previousOcclusionHash != currentOcclusionHash;
     }
 
-    private static TraceResult TraceRay(
+    public static Vector2 ProbeWorldPosition(int probeX, int probeY, Vector2i probeSize, int width, int height)
+    {
+        return new Vector2(
+            (probeX + 0.5f) / probeSize.X * width,
+            (probeY + 0.5f) / probeSize.Y * height);
+    }
+
+    public static int DirectionalIndex(int probeX, int probeY, int directionIndex, Vector2i probeSize, int directionCount)
+    {
+        return (probeY * probeSize.X + probeX) * directionCount + directionIndex;
+    }
+
+    private static Vector3[] ResolveCascadeZero(ReadOnlySpan<RadianceSample> cascade, Vector2i probeSize, int directionCount, float bounceDecay)
+    {
+        var result = new Vector3[probeSize.X * probeSize.Y];
+        for (var y = 0; y < probeSize.Y; y++)
+        {
+            for (var x = 0; x < probeSize.X; x++)
+            {
+                var radiance = Vector3.Zero;
+                for (var d = 0; d < directionCount; d++)
+                    radiance += cascade[DirectionalIndex(x, y, d, probeSize, directionCount)].Radiance;
+
+                result[Index(x, y, probeSize.X)] = radiance / directionCount * bounceDecay;
+            }
+        }
+
+        return result;
+    }
+
+    private static RadianceSample TraceDirectInterval(
         ReadOnlySpan<bool> occlusionMask,
         ReadOnlySpan<Vector3> directRadiance,
-        ReadOnlySpan<Vector3> previousGi,
         ReadOnlySpan<bool> fovMask,
-        ReadOnlySpan<Vector2i?> nearest,
         int width,
         int height,
         Vector2 start,
         Vector2 direction,
-        int maxSteps,
-        float bounceDecay)
+        float intervalStart,
+        float intervalEnd,
+        float stepLength,
+        out bool hit,
+        out Vector2i hitCell,
+        out int steps)
     {
-        var rayDirection = Vector2.Normalize(direction);
-        var position = start + rayDirection * 0.5f;
-        var traveled = 0.5f;
-        var bestRadiance = Vector3.Zero;
-        var bestScore = 0f;
+        hit = false;
+        hitCell = default;
+        steps = 0;
+        var radiance = Vector3.Zero;
 
-        for (var step = 0; step < maxSteps; step++)
+        for (var traveled = stepLength; traveled < intervalEnd; traveled += stepLength)
         {
-            var cell = new Vector2i((int)MathF.Floor(position.X), (int)MathF.Floor(position.Y));
-            if (!Inside(cell.X, cell.Y, width, height))
-                break;
+            steps++;
+            var position = start + direction * traveled;
+            var cell = ToCell(position, width, height);
+            if (cell == null)
+                return new RadianceSample(radiance, 1f);
 
-            var idx = Index(cell.X, cell.Y, width);
-            var nearestCell = nearest[idx];
-            if (nearestCell == null)
-                break;
-
-            var rayRadiance = SampleRadianceAtPosition(directRadiance, previousGi, fovMask, width, height, position);
-            var rayScore = Luminance(rayRadiance) / (1f + traveled * 0.35f);
-            if (rayScore > bestScore)
+            var idx = Index(cell.Value.X, cell.Value.Y, width);
+            if (occlusionMask[idx])
             {
-                bestScore = rayScore;
-                bestRadiance = rayRadiance / (1f + traveled * 0.35f);
+                hit = true;
+                hitCell = cell.Value;
+                return new RadianceSample(radiance, 0f);
             }
 
-            var distance = DistanceToCellCenter(nearestCell.Value, position);
-            if (occlusionMask[idx] || distance <= 0.75f)
-            {
-                var hitCell = occlusionMask[idx] ? cell : nearestCell.Value;
-                var hitIdx = Index(hitCell.X, hitCell.Y, width);
-
-                if (fovMask.Length != 0 && !fovMask[hitIdx])
-                    return new TraceResult(true, hitCell, Vector3.Zero, step + 1);
-
-                var surfaceRadiance = SampleRadianceAtPosition(
-                    directRadiance,
-                    previousGi,
-                    fovMask,
-                    width,
-                    height,
-                    position - rayDirection * 0.5f);
-                var radiance = ComponentMax(bestRadiance, surfaceRadiance) * bounceDecay;
-                return new TraceResult(true, hitCell, radiance, step + 1);
-            }
-
-            var stepLength = Math.Max(distance - 0.75f, 0.25f);
-            position += rayDirection * stepLength;
-            traveled += stepLength;
+            if (traveled >= intervalStart && (fovMask.Length == 0 || fovMask[idx]))
+                radiance += directRadiance[idx] * (stepLength / (1f + traveled * 0.35f));
         }
 
-        return new TraceResult(false, default, bestRadiance * bounceDecay, maxSteps);
+        return new RadianceSample(radiance, 1f);
     }
 
-    private static Vector3 SampleRadianceAtPosition(
-        ReadOnlySpan<Vector3> directRadiance,
-        ReadOnlySpan<Vector3> previousGi,
-        ReadOnlySpan<bool> fovMask,
+    private static RadianceSample SampleCascadeBilinear(
+        ReadOnlySpan<RadianceSample> cascade,
+        Vector2i probeSize,
+        int directionCount,
+        ReadOnlySpan<bool> occlusionMask,
         int width,
         int height,
-        Vector2 position)
+        Vector2 world,
+        int directionIndex)
     {
-        var cell = new Vector2i((int)MathF.Floor(position.X), (int)MathF.Floor(position.Y));
-        if (!Inside(cell.X, cell.Y, width, height))
-            return Vector3.Zero;
+        if (directionIndex < 0 || directionIndex >= directionCount)
+            return RadianceSample.Transparent;
 
-        var idx = Index(cell.X, cell.Y, width);
-        if (fovMask.Length != 0 && !fovMask[idx])
-            return Vector3.Zero;
+        var uv = new Vector2(world.X / width, world.Y / height);
+        if (uv.X < 0f || uv.Y < 0f || uv.X > 1f || uv.Y > 1f)
+            return RadianceSample.Transparent;
 
-        return directRadiance[idx] + previousGi[idx];
+        var probeCoord = uv * new Vector2(probeSize.X, probeSize.Y) - new Vector2(0.5f);
+        var baseX = MathF.Floor(probeCoord.X);
+        var baseY = MathF.Floor(probeCoord.Y);
+        var fracX = probeCoord.X - baseX;
+        var fracY = probeCoord.Y - baseY;
+        var total = new RadianceSample(Vector3.Zero, 0f);
+
+        for (var oy = 0; oy <= 1; oy++)
+        {
+            for (var ox = 0; ox <= 1; ox++)
+            {
+                var x = Math.Clamp((int)baseX + ox, 0, probeSize.X - 1);
+                var y = Math.Clamp((int)baseY + oy, 0, probeSize.Y - 1);
+                var wx = ox == 0 ? 1f - fracX : fracX;
+                var wy = oy == 0 ? 1f - fracY : fracY;
+                var weight = wx * wy;
+                var probeWorld = ProbeWorldPosition(x, y, probeSize, width, height);
+                var sample = SegmentBlocked(occlusionMask, width, height, world, probeWorld, 0.25f)
+                    ? new RadianceSample(Vector3.Zero, 0f)
+                    : cascade[DirectionalIndex(x, y, directionIndex, probeSize, directionCount)];
+                total = Add(total, Scale(sample, weight));
+            }
+        }
+
+        return total;
     }
 
-    private static Vector3 ComponentMax(Vector3 a, Vector3 b)
+    private static bool SegmentBlocked(
+        ReadOnlySpan<bool> occlusionMask,
+        int width,
+        int height,
+        Vector2 start,
+        Vector2 end,
+        float stepLength)
     {
-        return new Vector3(
-            MathF.Max(a.X, b.X),
-            MathF.Max(a.Y, b.Y),
-            MathF.Max(a.Z, b.Z));
+        var delta = end - start;
+        var length = delta.Length();
+        if (length <= 0.0001f)
+            return false;
+
+        var direction = delta / length;
+        for (var traveled = stepLength; traveled < length; traveled += stepLength)
+        {
+            var cell = ToCell(start + direction * traveled, width, height);
+            if (cell == null)
+                return true;
+
+            if (occlusionMask[Index(cell.Value.X, cell.Value.Y, width)])
+                return true;
+        }
+
+        return false;
     }
 
-    private static float Luminance(Vector3 value)
+    private static RadianceSample Add(RadianceSample a, RadianceSample b)
     {
-        return value.X * 0.2126f + value.Y * 0.7152f + value.Z * 0.0722f;
+        return new RadianceSample(a.Radiance + b.Radiance, a.Transmittance + b.Transmittance);
+    }
+
+    private static RadianceSample Scale(RadianceSample sample, float scale)
+    {
+        return new RadianceSample(sample.Radiance * scale, sample.Transmittance * scale);
+    }
+
+    private static Vector2i? ToCell(Vector2 position, int width, int height)
+    {
+        var x = (int)MathF.Floor(position.X);
+        var y = (int)MathF.Floor(position.Y);
+        if (!Inside(x, y, width, height))
+            return null;
+
+        return new Vector2i(x, y);
     }
 
     private static int InitialJumpFloodStep(int size)
@@ -659,17 +824,11 @@ internal static class GlobalIlluminationReference
         return step >> 1;
     }
 
-    private static int DistanceSquared(Vector2i seed, int x, int y)
+    private static float AspectDistanceSquared(Vector2i seed, int x, int y, Vector2 cellSize)
     {
-        var dx = seed.X - x;
-        var dy = seed.Y - y;
+        var dx = (seed.X - x) * cellSize.X;
+        var dy = (seed.Y - y) * cellSize.Y;
         return dx * dx + dy * dy;
-    }
-
-    private static float DistanceToCellCenter(Vector2i seed, Vector2 position)
-    {
-        var center = new Vector2(seed.X + 0.5f, seed.Y + 0.5f);
-        return (center - position).Length();
     }
 
     private static bool Inside(int x, int y, int width, int height)
@@ -698,5 +857,11 @@ internal static class GlobalIlluminationReference
     {
         if (radiance.Length != width * height)
             throw new ArgumentException("Radiance dimensions do not match.", argumentName);
+    }
+
+    private static void ValidateFov(ReadOnlySpan<bool> fovMask, int width, int height)
+    {
+        if (fovMask.Length != 0 && fovMask.Length != width * height)
+            throw new ArgumentException("FOV mask dimensions do not match.", nameof(fovMask));
     }
 }

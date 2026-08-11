@@ -2,6 +2,7 @@ preset raw;
 
 uniform highp vec2 targetSize;
 uniform highp float jumpStep;
+uniform highp vec2 uvWorldSize;
 
 varying highp vec2 pos;
 
@@ -28,7 +29,7 @@ void fragment()
             highp vec4 candidate = zTexture(sampleUv);
             if (candidate.z >= 0.5)
             {
-                highp vec2 diff = candidate.xy - pos;
+                highp vec2 diff = (candidate.xy - pos) * uvWorldSize;
                 highp float dist = dot(diff, diff);
                 if (dist < bestDistance)
                 {

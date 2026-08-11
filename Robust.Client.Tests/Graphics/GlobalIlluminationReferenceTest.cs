@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.IO;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
+using System.Linq;
 using System.Numerics;
 using NUnit.Framework;
 using Robust.Client.Graphics;
@@ -19,6 +19,14 @@ namespace Robust.Client.Tests.Graphics;
 [TestFixture]
 public sealed class GlobalIlluminationReferenceTest
 {
+    private const int RcCascadeCount = 3;
+    private const int RcBaseRays = 32;
+    private const float RcBaseInterval = 2f;
+    private const float RcStep = 0.25f;
+    private const float RcBounceDecay = 0.65f;
+    private const int BruteForceRays = 256;
+    private const float BruteForceStep = 0.125f;
+
     private static readonly string[] GiShaderPaths =
     {
         "/Shaders/Internal/gi-occlusion-mask.swsl",
@@ -26,22 +34,20 @@ public sealed class GlobalIlluminationReferenceTest
         "/Shaders/Internal/gi-jfa-jump.swsl",
         "/Shaders/Internal/gi-trace.swsl",
         "/Shaders/Internal/gi-radiance-cascade.swsl",
+        "/Shaders/Internal/gi-radiance-resolve.swsl",
         "/Shaders/Internal/gi-combine.swsl",
         "/Shaders/Internal/gi-debug.swsl"
     };
 
     [Test]
-    public void GiEnabledByDefaultForIteration()
+    public void GiIsExperimentalAndDisabledByDefault()
     {
         Assert.Multiple(() =>
         {
             Assert.That(CVars.DisplayGiEnabled.Name, Is.EqualTo("display.gi_enabled"));
-            Assert.That(CVars.DisplayGiEnabled.DefaultValue, Is.True);
-            Assert.That(CVars.DisplayGiBackend.Name, Is.EqualTo("display.gi_backend"));
-            Assert.That(CVars.DisplayGiBackend.DefaultValue, Is.EqualTo(0));
-            Assert.That(CVars.DisplayGiIntensity.Name, Is.EqualTo("display.gi_intensity"));
-            Assert.That(CVars.DisplayGiIntensity.DefaultValue, Is.EqualTo(2.0f));
-            Assert.That(CVars.DisplayGiTemporalJitter.Name, Is.EqualTo("display.gi_temporal_jitter"));
+            Assert.That(CVars.DisplayGiEnabled.DefaultValue, Is.False);
+            Assert.That(CVars.DisplayGiHistoryWeight.DefaultValue, Is.EqualTo(0.0f));
+            Assert.That(CVars.DisplayGiIntensity.DefaultValue, Is.EqualTo(1.0f));
             Assert.That(CVars.DisplayGiTemporalJitter.DefaultValue, Is.EqualTo(0.0f));
         });
     }
@@ -63,30 +69,27 @@ public sealed class GlobalIlluminationReferenceTest
     }
 
     [Test]
-    public void JfaProducesSensibleNearestObstacleResults()
+    public void JfaNearestFieldUsesAspectCorrectDistance()
     {
-        const int width = 8;
-        const int height = 8;
+        const int width = 6;
+        const int height = 4;
         var mask = new bool[width * height];
-        mask[Index(2, 2, width)] = true;
-        mask[Index(6, 5, width)] = true;
+        mask[Index(4, 2, width)] = true;
+        mask[Index(1, 0, width)] = true;
 
-        var field = GlobalIlluminationReference.JumpFloodNearestField(mask, width, height);
-        var distances = GlobalIlluminationReference.DistanceField(field, width, height);
+        var nearest = GlobalIlluminationReference.ExactNearestField(mask, width, height, new Vector2(0.25f, 2f));
+        var jfa = GlobalIlluminationReference.JumpFloodNearestField(mask, width, height, new Vector2(0.25f, 2f));
+        var query = Index(1, 2, width);
 
         Assert.Multiple(() =>
         {
-            Assert.That(field[Index(2, 2, width)], Is.EqualTo(new Vector2i(2, 2)));
-            Assert.That(field[Index(6, 5, width)], Is.EqualTo(new Vector2i(6, 5)));
-            Assert.That(field[Index(0, 0, width)], Is.EqualTo(new Vector2i(2, 2)));
-            Assert.That(field[Index(7, 7, width)], Is.EqualTo(new Vector2i(6, 5)));
-            Assert.That(distances[Index(2, 2, width)], Is.EqualTo(0f));
-            Assert.That(distances.All(float.IsFinite), Is.True);
+            Assert.That(nearest[query], Is.EqualTo(new Vector2i(4, 2)));
+            Assert.That(jfa[query], Is.EqualTo(new Vector2i(4, 2)));
         });
     }
 
     [Test]
-    public void EmptyMaskDoesNotGenerateIntersections()
+    public void EmptyMaskDoesNotGenerateNearestSeedsOrIntersections()
     {
         const int width = 6;
         const int height = 4;
@@ -113,12 +116,13 @@ public sealed class GlobalIlluminationReferenceTest
             Assert.That(field.All(x => x == null), Is.True);
             Assert.That(distances.All(float.IsPositiveInfinity), Is.True);
             Assert.That(trace.Hit, Is.False);
+            Assert.That(trace.Transmittance, Is.EqualTo(1f));
             Assert.That(trace.Radiance, Is.EqualTo(Vector3.Zero));
         });
     }
 
     [Test]
-    public void SingleWallBlocksGiRays()
+    public void SingleWallBlocksGiRaysWithZeroTransmittance()
     {
         const int width = 7;
         const int height = 3;
@@ -129,7 +133,6 @@ public sealed class GlobalIlluminationReferenceTest
         for (var y = 0; y < height; y++)
             mask[Index(3, y, width)] = true;
 
-        mask[Index(0, 1, width)] = true;
         direct[Index(0, 1, width)] = new Vector3(10f, 10f, 10f);
 
         var trace = GlobalIlluminationReference.TraceRay(
@@ -148,264 +151,239 @@ public sealed class GlobalIlluminationReferenceTest
         {
             Assert.That(trace.Hit, Is.True);
             Assert.That(trace.Cell, Is.EqualTo(new Vector2i(3, 1)));
+            Assert.That(trace.Transmittance, Is.EqualTo(0f));
             Assert.That(trace.Radiance, Is.EqualTo(Vector3.Zero));
         });
     }
 
     [Test]
-    public void DoorOpeningAllowsIndirectLightThrough()
+    public void RadianceCascadeIntervalsAreContiguousAndGeometric()
     {
-        const int width = 9;
-        const int height = 5;
-        var mask = new bool[width * height];
+        Assert.Multiple(() =>
+        {
+            Assert.That(GlobalIlluminationReference.RadianceCascadeIntervalStart(2f, 0), Is.EqualTo(0f));
+            Assert.That(GlobalIlluminationReference.RadianceCascadeIntervalEnd(2f, 0), Is.EqualTo(2f));
+            Assert.That(GlobalIlluminationReference.RadianceCascadeIntervalStart(2f, 1), Is.EqualTo(2f));
+            Assert.That(GlobalIlluminationReference.RadianceCascadeIntervalEnd(2f, 1), Is.EqualTo(10f));
+            Assert.That(GlobalIlluminationReference.RadianceCascadeIntervalStart(2f, 2), Is.EqualTo(10f));
+            Assert.That(GlobalIlluminationReference.RadianceCascadeIntervalEnd(2f, 2), Is.EqualTo(42f));
+        });
+    }
+
+    [Test]
+    public void RadianceCascadeLayoutRetainsAngularSamples()
+    {
+        var baseSize = new Vector2i(64, 32);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(GlobalIlluminationReference.RadianceCascadeProbeSize(baseSize, 0), Is.EqualTo(new Vector2i(64, 32)));
+            Assert.That(GlobalIlluminationReference.RadianceCascadeProbeSize(baseSize, 1), Is.EqualTo(new Vector2i(32, 16)));
+            Assert.That(GlobalIlluminationReference.RadianceCascadeRayCount(8, 0), Is.EqualTo(8));
+            Assert.That(GlobalIlluminationReference.RadianceCascadeRayCount(8, 1), Is.EqualTo(32));
+            Assert.That(GlobalIlluminationReference.RadianceCascadeRayCount(8, 2), Is.EqualTo(128));
+            Assert.That(GlobalIlluminationReference.RadianceCascadeDirectionGrid(32), Is.EqualTo(new Vector2i(6, 6)));
+            Assert.That(GlobalIlluminationReference.RadianceCascadeAtlasSize(baseSize, 1, 8), Is.EqualTo(new Vector2i(192, 96)));
+        });
+    }
+
+    [Test]
+    public void AngularDirectionChildrenStayInsideParentCone()
+    {
+        const int parentDirectionCount = 8;
+        var parentDirectionIndex = 3;
+        var parentStart = parentDirectionIndex / (float)parentDirectionCount * MathF.Tau;
+        var parentEnd = (parentDirectionIndex + 1f) / parentDirectionCount * MathF.Tau;
+        var childDirectionCount = parentDirectionCount * GlobalIlluminationReference.RadianceCascadeAngularBranchFactor;
+        var average = Vector2.Zero;
+
+        for (var child = 0; child < GlobalIlluminationReference.RadianceCascadeAngularBranchFactor; child++)
+        {
+            var childIndex = GlobalIlluminationReference.RadianceCascadeChildDirectionIndex(parentDirectionIndex, child);
+            var childAngle = GlobalIlluminationReference.RadianceCascadeDirectionAngle(childIndex, childDirectionCount);
+            Assert.That(childAngle, Is.InRange(parentStart, parentEnd));
+            average += GlobalIlluminationReference.RadianceCascadeDirection(childIndex, childDirectionCount);
+        }
+
+        average = Vector2.Normalize(average);
+        var parent = GlobalIlluminationReference.RadianceCascadeDirection(parentDirectionIndex, parentDirectionCount);
+        Assert.That(Vector2.Dot(average, parent), Is.GreaterThan(0.999f));
+    }
+
+    [Test]
+    public void TransmittanceAwareMergePreservesOcclusion()
+    {
+        var blockedNear = new GlobalIlluminationReference.RadianceSample(new Vector3(1f, 0f, 0f), 0f);
+        var partiallyOpenNear = new GlobalIlluminationReference.RadianceSample(new Vector3(1f, 0f, 0f), 0.25f);
+        var far = new GlobalIlluminationReference.RadianceSample(new Vector3(0f, 4f, 0f), 0.5f);
+
+        var blocked = GlobalIlluminationReference.RadianceSample.Merge(blockedNear, far);
+        var open = GlobalIlluminationReference.RadianceSample.Merge(partiallyOpenNear, far);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(blocked.Radiance, Is.EqualTo(new Vector3(1f, 0f, 0f)));
+            Assert.That(blocked.Transmittance, Is.EqualTo(0f));
+            Assert.That(open.Radiance, Is.EqualTo(new Vector3(1f, 1f, 0f)));
+            Assert.That(open.Transmittance, Is.EqualTo(0.125f));
+        });
+    }
+
+    [Test]
+    public void RadianceCascadesApproximatePointEmitterWithBlocker()
+    {
+        const int width = 16;
+        const int height = 16;
+        var mask = BuildBorderedRoom(width, height);
         var direct = new Vector3[width * height];
-        var previous = new Vector3[width * height];
+        var fov = Enumerable.Repeat(true, width * height).ToArray();
 
-        mask = BuildTwoRoomScene(width, height, doorwayOpen: true);
-        direct[Index(2, 2, width)] = new Vector3(4f, 2f, 1f);
+        for (var y = 5; y <= 11; y++)
+            mask[Index(8, y, width)] = true;
 
-        var trace = GlobalIlluminationReference.TraceRay(
+        direct[Index(4, 8, width)] = new Vector3(8f, 6f, 3f);
+
+        AssertRcCloseToBrute("point-emitter-blocker", mask, direct, fov, width, height, maxMae: 0.08f, maxRmse: 0.18f, maxAbs: 1.35f);
+    }
+
+    [Test]
+    public void RadianceCascadesApproximateDoorwayTransfer()
+    {
+        const int width = 20;
+        const int height = 12;
+        var mask = BuildTwoRoomScene(width, height, doorwayOpen: true);
+        var direct = new Vector3[width * height];
+        var fov = Enumerable.Repeat(true, width * height).ToArray();
+
+        direct[Index(5, 6, width)] = new Vector3(7f, 4f, 2f);
+        direct[Index(6, 5, width)] = new Vector3(4f, 2f, 1f);
+
+        var comparison = AssertRcCloseToBrute("doorway", mask, direct, fov, width, height, maxMae: 0.10f, maxRmse: 0.22f, maxAbs: 1.6f);
+        var rightRoomNearDoor = Index(12, 6, width);
+
+        Assert.That(comparison.Rc.Current[rightRoomNearDoor].Length(), Is.GreaterThan(0.01f));
+    }
+
+    [Test]
+    public void RadianceCascadesApproximateTwoColoredEmitters()
+    {
+        const int width = 16;
+        const int height = 16;
+        var mask = BuildBorderedRoom(width, height);
+        var direct = new Vector3[width * height];
+        var fov = Enumerable.Repeat(true, width * height).ToArray();
+
+        direct[Index(4, 8, width)] = new Vector3(7f, 0f, 0f);
+        direct[Index(11, 8, width)] = new Vector3(0f, 0f, 7f);
+
+        var comparison = AssertRcCloseToBrute("two-colored-emitters", mask, direct, fov, width, height, maxMae: 0.09f, maxRmse: 0.20f, maxAbs: 1.45f);
+        Assert.Multiple(() =>
+        {
+            Assert.That(comparison.Rc.Current[Index(5, 8, width)].X, Is.GreaterThan(comparison.Rc.Current[Index(5, 8, width)].Z));
+            Assert.That(comparison.Rc.Current[Index(10, 8, width)].Z, Is.GreaterThan(comparison.Rc.Current[Index(10, 8, width)].X));
+        });
+    }
+
+    [Test]
+    public void RadianceCascadesPreserveSymmetry()
+    {
+        const int width = 18;
+        const int height = 14;
+        var mask = BuildBorderedRoom(width, height);
+        var direct = new Vector3[width * height];
+        var fov = Enumerable.Repeat(true, width * height).ToArray();
+
+        direct[Index(5, 7, width)] = new Vector3(5f, 4f, 3f);
+        direct[Index(12, 7, width)] = new Vector3(5f, 4f, 3f);
+
+        var comparison = AssertRcCloseToBrute("symmetry", mask, direct, fov, width, height, maxMae: 0.07f, maxRmse: 0.16f, maxAbs: 1.2f);
+
+        for (var y = 1; y < height - 1; y++)
+        {
+            for (var x = 1; x < width / 2; x++)
+            {
+                var left = comparison.Rc.Current[Index(x, y, width)];
+                var right = comparison.Rc.Current[Index(width - 1 - x, y, width)];
+                Assert.That((left - right).Length(), Is.LessThan(0.08f), $"Symmetry mismatch at {x},{y}");
+            }
+        }
+    }
+
+    [Test]
+    public void SealedRoomDoesNotLeakLight()
+    {
+        const int width = 20;
+        const int height = 12;
+        var mask = BuildTwoRoomScene(width, height, doorwayOpen: false);
+        var direct = new Vector3[width * height];
+        var fov = Enumerable.Repeat(true, width * height).ToArray();
+
+        direct[Index(5, 6, width)] = new Vector3(7f, 5f, 3f);
+        var comparison = AssertRcCloseToBrute("sealed-room", mask, direct, fov, width, height, maxMae: 0.08f, maxRmse: 0.18f, maxAbs: 1.2f);
+
+        var rightRoomMax = 0f;
+        for (var y = 1; y < height - 1; y++)
+        {
+            for (var x = width / 2 + 1; x < width - 1; x++)
+                rightRoomMax = MathF.Max(rightRoomMax, comparison.Rc.Current[Index(x, y, width)].Length());
+        }
+
+        Assert.That(rightRoomMax, Is.LessThan(0.01f));
+    }
+
+    [Test]
+    public void FovMaskPreventsGiLeakFromHiddenLight()
+    {
+        const int width = 8;
+        const int height = 5;
+        var mask = BuildBorderedRoom(width, height);
+        var direct = new Vector3[width * height];
+        var fov = Enumerable.Repeat(true, width * height).ToArray();
+
+        direct[Index(2, 2, width)] = new Vector3(8f, 8f, 8f);
+        fov[Index(2, 2, width)] = false;
+
+        var rc = GlobalIlluminationReference.TraceRadianceCascades(
             mask,
             direct,
-            previous,
-            Array.Empty<bool>(),
+            new Vector3[width * height],
+            fov,
             width,
             height,
-            new Vector2(7.5f, 2.5f),
-            -Vector2.UnitX,
-            32,
-            0.5f);
+            RcCascadeCount,
+            RcBaseRays,
+            RcBaseInterval,
+            RcStep,
+            RcBounceDecay);
 
-        Assert.Multiple(() =>
-        {
-            Assert.That(trace.Hit, Is.True);
-            Assert.That(trace.Cell, Is.EqualTo(new Vector2i(0, 2)));
-            Assert.That(trace.Radiance.Length(), Is.GreaterThan(0.1f));
-        });
+        Assert.That(rc.Current.Max(x => x.Length()), Is.LessThan(0.001f));
     }
 
     [Test]
-    public void DoorOpeningAllowsFloorRadiancePropagationWithoutWallLeak()
-    {
-        const int width = 9;
-        const int height = 5;
-        var direct = new Vector3[width * height];
-        var previous = new Vector3[width * height];
-        var fov = Enumerable.Repeat(true, width * height).ToArray();
-        var openDoorMask = BuildTwoRoomScene(width, height, doorwayOpen: true);
-        var sealedWallMask = BuildTwoRoomScene(width, height, doorwayOpen: false);
-
-        direct[Index(2, 2, width)] = new Vector3(6f, 4f, 2f);
-
-        var openDoorGi = GlobalIlluminationReference.TraceRay(
-            openDoorMask,
-            direct,
-            previous,
-            fov,
-            width,
-            height,
-            new Vector2(7.5f, 2.5f),
-            -Vector2.UnitX,
-            32,
-            0.5f);
-
-        var sealedWallGi = GlobalIlluminationReference.TraceRay(
-            sealedWallMask,
-            direct,
-            previous,
-            fov,
-            width,
-            height,
-            new Vector2(7.5f, 2.5f),
-            -Vector2.UnitX,
-            32,
-            0.5f);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(openDoorGi.Radiance.Length(), Is.GreaterThan(0.1f));
-            Assert.That(sealedWallGi.Radiance, Is.EqualTo(Vector3.Zero));
-        });
-    }
-
-    [Test]
-    public void TwoRoomDoorwayDebugSceneProducesIndirectLightWithoutWallLeak()
-    {
-        const int width = 10;
-        const int height = 5;
-        var direct = new Vector3[width * height];
-        var previous = new Vector3[width * height];
-        var fov = Enumerable.Repeat(true, width * height).ToArray();
-        var openDoorMask = BuildTwoRoomScene(width, height, doorwayOpen: true);
-        var sealedWallMask = BuildTwoRoomScene(width, height, doorwayOpen: false);
-
-        direct[Index(0, 2, width)] = new Vector3(8f, 6f, 4f);
-
-        var openDoorGi = GlobalIlluminationReference.TracePixel(
-            openDoorMask,
-            direct,
-            previous,
-            fov,
-            width,
-            height,
-            new Vector2(7.5f, 2.5f),
-            4,
-            64,
-            0.5f);
-
-        var sealedWallGi = GlobalIlluminationReference.TracePixel(
-            sealedWallMask,
-            direct,
-            previous,
-            fov,
-            width,
-            height,
-            new Vector2(7.5f, 2.5f),
-            4,
-            64,
-            0.5f);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(openDoorGi.Length(), Is.GreaterThan(0.1f));
-            Assert.That(sealedWallGi, Is.EqualTo(Vector3.Zero));
-        });
-    }
-
-    [Test]
-    public void RadianceCascadeTargetsAndIntervalsAreDeterministic()
-    {
-        Assert.Multiple(() =>
-        {
-            Assert.That(GlobalIlluminationReference.RadianceCascadeTargetSize(new Vector2i(96, 48), 0), Is.EqualTo(new Vector2i(96, 48)));
-            Assert.That(GlobalIlluminationReference.RadianceCascadeTargetSize(new Vector2i(96, 48), 1), Is.EqualTo(new Vector2i(48, 24)));
-            Assert.That(GlobalIlluminationReference.RadianceCascadeTargetSize(new Vector2i(95, 47), 2), Is.EqualTo(new Vector2i(24, 12)));
-            Assert.That(GlobalIlluminationReference.RadianceCascadeRayCount(4, 0), Is.EqualTo(4));
-            Assert.That(GlobalIlluminationReference.RadianceCascadeRayCount(4, 1), Is.EqualTo(16));
-            Assert.That(GlobalIlluminationReference.RadianceCascadeRayCount(4, 2), Is.EqualTo(64));
-            Assert.That(GlobalIlluminationReference.RadianceCascadeIntervalStart(8, 0), Is.EqualTo(0f));
-            Assert.That(GlobalIlluminationReference.RadianceCascadeIntervalEnd(8, 2), Is.EqualTo(56f));
-        });
-    }
-
-    [Test]
-    public void RadianceCascadesAllowIndirectLightThroughDoorwayWithoutWallLeak()
-    {
-        const int width = 48;
-        const int height = 24;
-        var previous = new Vector3[width * height];
-        var fov = Enumerable.Repeat(true, width * height).ToArray();
-        var openDoorMask = BuildTwoRoomDebugDumpScene(width, height, doorwayOpen: true);
-        var sealedWallMask = BuildTwoRoomDebugDumpScene(width, height, doorwayOpen: false);
-        var direct = BuildDebugDirectRadiance(openDoorMask, width, height);
-
-        var openDoorResult = GlobalIlluminationReference.TraceRadianceCascades(
-            openDoorMask,
-            direct,
-            previous,
-            fov,
-            width,
-            height,
-            cascadeCount: 3,
-            baseRays: 4,
-            maxSteps: 8,
-            bounceDecay: 0.55f);
-
-        var sealedWallResult = GlobalIlluminationReference.TraceRadianceCascades(
-            sealedWallMask,
-            direct,
-            previous,
-            fov,
-            width,
-            height,
-            cascadeCount: 3,
-            baseRays: 4,
-            maxSteps: 8,
-            bounceDecay: 0.55f);
-
-        var rightRoomNearDoor = Index(width / 2 + 3, height / 2, width);
-        var farCorner = Index(width - 5, height / 2, width);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(openDoorResult.Current[rightRoomNearDoor].Length(), Is.GreaterThan(0.05f));
-            Assert.That(openDoorResult.Current[farCorner].Length(), Is.GreaterThan(0.001f));
-            Assert.That(sealedWallResult.Current[rightRoomNearDoor], Is.EqualTo(Vector3.Zero));
-            Assert.That(sealedWallResult.Current[farCorner], Is.EqualTo(Vector3.Zero));
-        });
-    }
-
-    [Test]
-    public void GiDebugDumpWritesArtifactsWhenRequested()
+    public void GiDebugDumpWritesArtifactsAndMetricsWhenRequested()
     {
         if (!IsTruthy(Environment.GetEnvironmentVariable("ROBUST_GI_DUMP_DEBUG")))
             return;
 
-        const int width = 96;
-        const int height = 48;
-        const int rays = 16;
-        const int steps = 96;
-        const float bounceDecay = 0.55f;
+        const int width = 32;
+        const int height = 18;
+        var mask = BuildTwoRoomScene(width, height, doorwayOpen: true);
+        var direct = new Vector3[width * height];
         var fov = Enumerable.Repeat(true, width * height).ToArray();
-        var mask = BuildTwoRoomDebugDumpScene(width, height, doorwayOpen: true);
-        var direct = BuildDebugDirectRadiance(mask, width, height);
-        var nearest = GlobalIlluminationReference.JumpFloodNearestField(mask, width, height);
+        direct[Index(7, 9, width)] = new Vector3(8f, 5f, 2f);
+        direct[Index(9, 8, width)] = new Vector3(4f, 1f, 0.5f);
+
+        var comparison = CompareRcToBrute(mask, direct, fov, width, height);
+        var nearest = GlobalIlluminationReference.JumpFloodNearestField(mask, width, height, new Vector2(1f, 1f));
         var distances = GlobalIlluminationReference.DistanceField(nearest, width, height);
-        var previous = new Vector3[width * height];
-        var firstBounce = GlobalIlluminationReference.TraceImage(mask, direct, previous, fov, width, height, rays, steps, bounceDecay);
-        var accumulated = firstBounce;
-
-        for (var i = 1; i < 4; i++)
-            accumulated = GlobalIlluminationReference.TraceImage(mask, direct, accumulated, fov, width, height, rays, steps, bounceDecay);
-
-        var combined = CombineDebugLighting(direct, accumulated, width, height);
-        var rcFirst = GlobalIlluminationReference.TraceRadianceCascades(
-            mask,
-            direct,
-            previous,
-            fov,
-            width,
-            height,
-            cascadeCount: 3,
-            baseRays: 4,
-            maxSteps: 12,
-            bounceDecay: bounceDecay);
-        var rcAccumulated = rcFirst;
-
-        for (var i = 1; i < 4; i++)
-        {
-            rcAccumulated = GlobalIlluminationReference.TraceRadianceCascades(
-                mask,
-                direct,
-                rcAccumulated.Current,
-                fov,
-                width,
-                height,
-                cascadeCount: 3,
-                baseRays: 4,
-                maxSteps: 12,
-                bounceDecay: bounceDecay);
-        }
-
-        var rcCombined = CombineDebugLighting(direct, rcAccumulated.Current, width, height);
         var outputDir = GetGiDumpDirectory();
         Directory.CreateDirectory(outputDir);
 
         WriteImage(Path.Combine(outputDir, "01-occlusion-mask.png"), width, height, (x, y) =>
             mask[Index(x, y, width)] ? new Rgba32(255, 255, 255, 255) : new Rgba32(0, 0, 0, 255));
 
-        WriteImage(Path.Combine(outputDir, "02-jfa-nearest-seed.png"), width, height, (x, y) =>
-        {
-            var seed = nearest[Index(x, y, width)];
-            if (seed == null)
-                return new Rgba32(0, 0, 0, 255);
-
-            return new Rgba32(
-                ToByte(seed.Value.X / (float)Math.Max(1, width - 1)),
-                ToByte(seed.Value.Y / (float)Math.Max(1, height - 1)),
-                255,
-                255);
-        });
+        WriteImage(Path.Combine(outputDir, "02-direct-radiance.png"), width, height, (x, y) =>
+            EncodeRadiance(direct[Index(x, y, width)], 0.25f));
 
         var maxDistance = distances.Where(float.IsFinite).DefaultIfEmpty(1f).Max();
         WriteImage(Path.Combine(outputDir, "03-sdf-distance.png"), width, height, (x, y) =>
@@ -414,167 +392,96 @@ public sealed class GlobalIlluminationReferenceTest
             var value = float.IsFinite(distance)
                 ? Math.Clamp(distance / Math.Max(1f, maxDistance), 0f, 1f)
                 : 0f;
-
             var byteValue = ToByte(value);
             return new Rgba32(byteValue, byteValue, byteValue, 255);
         });
 
-        WriteImage(Path.Combine(outputDir, "04-direct-radiance.png"), width, height, (x, y) =>
-            EncodeRadiance(direct[Index(x, y, width)], 0.25f));
+        WriteImage(Path.Combine(outputDir, "04-bruteforce-reference.png"), width, height, (x, y) =>
+            EncodeRadiance(comparison.Brute[Index(x, y, width)], 1f));
 
-        WriteImage(Path.Combine(outputDir, "05-gi-first-bounce.png"), width, height, (x, y) =>
-            EncodeRadiance(firstBounce[Index(x, y, width)], 1f));
+        WriteImage(Path.Combine(outputDir, "05-rc-current.png"), width, height, (x, y) =>
+            EncodeRadiance(comparison.Rc.Current[Index(x, y, width)], 1f));
 
-        WriteImage(Path.Combine(outputDir, "06-gi-accumulated.png"), width, height, (x, y) =>
-            EncodeRadiance(accumulated[Index(x, y, width)], 1f));
-
-        WriteImage(Path.Combine(outputDir, "07-final-combined-reference.png"), width, height, (x, y) =>
-            EncodeRadiance(combined[Index(x, y, width)], 0.4f));
-
-        for (var cascade = rcAccumulated.Cascades.Length - 1; cascade >= 0; cascade--)
+        WriteImage(Path.Combine(outputDir, "06-rc-error-heatmap.png"), width, height, (x, y) =>
         {
-            var cascadeSize = rcAccumulated.CascadeSizes[cascade];
-            var cascadeImage = rcAccumulated.Cascades[cascade];
-            WriteImage(Path.Combine(outputDir, $"08-rc-cascade-{cascade}.png"), cascadeSize.X, cascadeSize.Y, (x, y) =>
-                EncodeRadiance(cascadeImage[Index(x, y, cascadeSize.X)], 1f));
+            var diff = (comparison.Rc.Current[Index(x, y, width)] - comparison.Brute[Index(x, y, width)]).Length();
+            return Heat(diff * 2f);
+        });
+
+        for (var cascade = 0; cascade < comparison.Rc.Cascades.Length; cascade++)
+        {
+            WriteCascadeAtlasImage(Path.Combine(outputDir, $"07-rc-cascade-{cascade}-radiance.png"), comparison.Rc, cascade, sample =>
+                EncodeRadiance(sample.Radiance, 0.6f));
+            WriteCascadeAtlasImage(Path.Combine(outputDir, $"08-rc-cascade-{cascade}-transmittance.png"), comparison.Rc, cascade, sample =>
+            {
+                var value = ToByte(sample.Transmittance);
+                return new Rgba32(value, value, value, 255);
+            });
         }
 
-        WriteImage(Path.Combine(outputDir, "09-rc-final-current.png"), width, height, (x, y) =>
-            EncodeRadiance(rcAccumulated.Current[Index(x, y, width)], 1f));
+        File.WriteAllText(
+            Path.Combine(outputDir, "metrics.txt"),
+            $"MAE={comparison.Metrics.MeanAbsoluteError}\nRMSE={comparison.Metrics.RootMeanSquaredError}\nMAX={comparison.Metrics.MaxAbsoluteError}\nMeanReference={comparison.Metrics.MeanReferenceMagnitude}\n");
 
-        WriteImage(Path.Combine(outputDir, "10-rc-final-combined-reference.png"), width, height, (x, y) =>
-            EncodeRadiance(rcCombined[Index(x, y, width)], 0.4f));
-
-        TestContext.Out.WriteLine($"Wrote GI debug dump images to: {outputDir}");
+        TestContext.Out.WriteLine($"Wrote GI debug dump images and metrics to: {outputDir}");
     }
 
-    [Test]
-    public void GiTargetScaleResizesDeterministically()
+    private static RcComparison AssertRcCloseToBrute(
+        string sceneName,
+        bool[] mask,
+        Vector3[] direct,
+        bool[] fov,
+        int width,
+        int height,
+        float maxMae,
+        float maxRmse,
+        float maxAbs)
     {
+        var comparison = CompareRcToBrute(mask, direct, fov, width, height);
+        TestContext.Out.WriteLine($"{sceneName}: MAE={comparison.Metrics.MeanAbsoluteError:0.0000}, RMSE={comparison.Metrics.RootMeanSquaredError:0.0000}, MAX={comparison.Metrics.MaxAbsoluteError:0.0000}, MeanRef={comparison.Metrics.MeanReferenceMagnitude:0.0000}");
+
         Assert.Multiple(() =>
         {
-            Assert.That(GlobalIlluminationReference.ScaledTargetSize(new Vector2i(1920, 1080), 0.25f), Is.EqualTo(new Vector2i(480, 270)));
-            Assert.That(GlobalIlluminationReference.ScaledTargetSize(new Vector2i(100, 100), 0f), Is.EqualTo(new Vector2i(5, 5)));
-            Assert.That(GlobalIlluminationReference.ScaledTargetSize(new Vector2i(100, 50), 2f), Is.EqualTo(new Vector2i(100, 50)));
+            Assert.That(comparison.Metrics.MeanAbsoluteError, Is.LessThan(maxMae), sceneName);
+            Assert.That(comparison.Metrics.RootMeanSquaredError, Is.LessThan(maxRmse), sceneName);
+            Assert.That(comparison.Metrics.MaxAbsoluteError, Is.LessThan(maxAbs), sceneName);
         });
+
+        return comparison;
     }
 
-    [Test]
-    public void HistoryRejectedWhenSettingsOrOcclusionChange()
+    private static RcComparison CompareRcToBrute(bool[] mask, Vector3[] direct, bool[] fov, int width, int height)
     {
-        Assert.Multiple(() =>
-        {
-            Assert.That(GlobalIlluminationReference.ShouldRejectHistory(
-                Vector2.Zero,
-                Vector2.Zero,
-                Vector2.One,
-                Vector2.One,
-                Angle.Zero,
-                Angle.Zero,
-                1,
-                2,
-                10,
-                10), Is.True);
-
-            Assert.That(GlobalIlluminationReference.ShouldRejectHistory(
-                Vector2.Zero,
-                Vector2.Zero,
-                Vector2.One,
-                Vector2.One,
-                Angle.Zero,
-                Angle.Zero,
-                1,
-                1,
-                10,
-                11), Is.True);
-        });
-    }
-
-    [Test]
-    public void CameraMovementReprojectsHistoryUnlessJumping()
-    {
-        Assert.Multiple(() =>
-        {
-            Assert.That(GlobalIlluminationReference.ShouldRejectHistory(
-                Vector2.Zero,
-                new Vector2(0.01f, 0f),
-                Vector2.One,
-                Vector2.One,
-                Angle.Zero,
-                Angle.Zero,
-                1,
-                1,
-                10,
-                10), Is.False);
-
-            Assert.That(GlobalIlluminationReference.ShouldRejectHistory(
-                Vector2.Zero,
-                new Vector2(5f, 0f),
-                Vector2.One,
-                Vector2.One,
-                Angle.Zero,
-                Angle.Zero,
-                1,
-                1,
-                10,
-                10), Is.True);
-
-            Assert.That(GlobalIlluminationReference.ShouldRejectHistory(
-                Vector2.Zero,
-                Vector2.Zero,
-                Vector2.One,
-                Vector2.One,
-                Angle.Zero,
-                Angle.Zero,
-                1,
-                1,
-                10,
-                10), Is.False);
-        });
-    }
-
-    [Test]
-    public void FovMaskPreventsGiLeakFromHiddenLight()
-    {
-        const int width = 5;
-        const int height = 1;
-        var mask = new bool[width * height];
-        var direct = new Vector3[width * height];
-        var previous = new Vector3[width * height];
-        var fov = Enumerable.Repeat(true, width * height).ToArray();
-
-        mask[Index(0, 0, width)] = true;
-        direct[Index(0, 0, width)] = new Vector3(5f, 5f, 5f);
-        fov[Index(0, 0, width)] = false;
-
-        var trace = GlobalIlluminationReference.TraceRay(
+        var maxDistance = GlobalIlluminationReference.RadianceCascadeIntervalEnd(RcBaseInterval, RcCascadeCount - 1);
+        var brute = GlobalIlluminationReference.TraceBruteForceImage(
             mask,
             direct,
-            previous,
             fov,
             width,
             height,
-            new Vector2(3.5f, 0.5f),
-            -Vector2.UnitX,
-            16,
-            1f);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(trace.Hit, Is.True);
-            Assert.That(trace.Radiance, Is.EqualTo(Vector3.Zero));
-        });
+            BruteForceRays,
+            maxDistance,
+            BruteForceStep,
+            RcBounceDecay);
+        var rc = GlobalIlluminationReference.TraceRadianceCascades(
+            mask,
+            direct,
+            new Vector3[width * height],
+            fov,
+            width,
+            height,
+            RcCascadeCount,
+            RcBaseRays,
+            RcBaseInterval,
+            RcStep,
+            RcBounceDecay);
+        var metrics = GlobalIlluminationReference.CompareImages(rc.Current, brute, mask);
+        return new RcComparison(rc, brute, metrics);
     }
 
-    private static int Index(int x, int y, int width)
-    {
-        return y * width + x;
-    }
-
-    private static bool[] BuildTwoRoomScene(int width, int height, bool doorwayOpen)
+    private static bool[] BuildBorderedRoom(int width, int height)
     {
         var mask = new bool[width * height];
-
         for (var x = 0; x < width; x++)
         {
             mask[Index(x, 0, width)] = true;
@@ -585,32 +492,20 @@ public sealed class GlobalIlluminationReferenceTest
         {
             mask[Index(0, y, width)] = true;
             mask[Index(width - 1, y, width)] = true;
-
-            if (!doorwayOpen || y != 2)
-                mask[Index(4, y, width)] = true;
         }
 
         return mask;
     }
 
-    private static bool[] BuildTwoRoomDebugDumpScene(int width, int height, bool doorwayOpen)
+    private static bool[] BuildTwoRoomScene(int width, int height, bool doorwayOpen)
     {
-        var mask = new bool[width * height];
+        var mask = BuildBorderedRoom(width, height);
         var splitX = width / 2;
         var doorCenter = height / 2;
-        var doorHalfHeight = Math.Max(2, height / 10);
+        var doorHalfHeight = Math.Max(1, height / 8);
 
-        for (var x = 0; x < width; x++)
+        for (var y = 1; y < height - 1; y++)
         {
-            mask[Index(x, 0, width)] = true;
-            mask[Index(x, height - 1, width)] = true;
-        }
-
-        for (var y = 0; y < height; y++)
-        {
-            mask[Index(0, y, width)] = true;
-            mask[Index(width - 1, y, width)] = true;
-
             var inDoorway = y >= doorCenter - doorHalfHeight && y <= doorCenter + doorHalfHeight;
             if (!doorwayOpen || !inDoorway)
                 mask[Index(splitX, y, width)] = true;
@@ -619,58 +514,25 @@ public sealed class GlobalIlluminationReferenceTest
         return mask;
     }
 
-    private static Vector3[] BuildDebugDirectRadiance(ReadOnlySpan<bool> mask, int width, int height)
+    private static int Index(int x, int y, int width)
     {
-        var radiance = new Vector3[width * height];
-        var splitX = width / 2;
-        var lightPosition = new Vector2(width * 0.18f, height * 0.50f);
-        var lightColor = new Vector3(8f, 5.5f, 3.5f);
-
-        for (var y = 0; y < height; y++)
-        {
-            for (var x = 0; x < width; x++)
-            {
-                if (x >= splitX - 1)
-                    continue;
-
-                var idx = Index(x, y, width);
-                var delta = new Vector2(x + 0.5f, y + 0.5f) - lightPosition;
-                var attenuation = 1f / (1f + delta.LengthSquared() * 0.015f);
-
-                // Keep non-occluder direct lighting dimmer than wall/surface lighting so the GI buffers
-                // still show what rays collect from hit surfaces.
-                radiance[idx] = lightColor * attenuation * (mask[idx] ? 1f : 0.35f);
-            }
-        }
-
-        return radiance;
-    }
-
-    private static Vector3[] CombineDebugLighting(ReadOnlySpan<Vector3> direct, ReadOnlySpan<Vector3> gi, int width, int height)
-    {
-        var result = new Vector3[width * height];
-        var ambient = new Vector3(0.03f, 0.03f, 0.04f);
-
-        for (var i = 0; i < result.Length; i++)
-            result[i] = ambient + direct[i] + gi[i];
-
-        return result;
+        return y * width + x;
     }
 
     private static string GetGiDumpDirectory()
     {
         var configured = Environment.GetEnvironmentVariable("ROBUST_GI_DUMP_DIR");
         return string.IsNullOrWhiteSpace(configured)
-            ? Path.Combine(TestContext.CurrentContext.WorkDirectory, "GiDebugDumps", "two-room-reference")
+            ? Path.Combine(TestContext.CurrentContext.WorkDirectory, "GiDebugDumps", "radiance-cascade-reference")
             : configured;
     }
 
     private static bool IsTruthy(string? value)
     {
         return value != null
-            && (value.Equals("1", StringComparison.OrdinalIgnoreCase)
-                || value.Equals("true", StringComparison.OrdinalIgnoreCase)
-                || value.Equals("yes", StringComparison.OrdinalIgnoreCase));
+               && (value.Equals("1", StringComparison.OrdinalIgnoreCase)
+                   || value.Equals("true", StringComparison.OrdinalIgnoreCase)
+                   || value.Equals("yes", StringComparison.OrdinalIgnoreCase));
     }
 
     private static void WriteImage(string path, int width, int height, Func<int, int, Rgba32> getPixel)
@@ -686,14 +548,34 @@ public sealed class GlobalIlluminationReferenceTest
                 for (var oy = 0; oy < scale; oy++)
                 {
                     for (var ox = 0; ox < scale; ox++)
-                    {
                         image[x * scale + ox, y * scale + oy] = color;
-                    }
                 }
             }
         }
 
         image.Save(path);
+    }
+
+    private static void WriteCascadeAtlasImage(string path, GlobalIlluminationReference.RadianceCascadeResult rc, int cascade, Func<GlobalIlluminationReference.RadianceSample, Rgba32> encode)
+    {
+        var probeSize = rc.ProbeSizes[cascade];
+        var atlasSize = rc.AtlasSizes[cascade];
+        var directionCount = rc.DirectionCounts[cascade];
+        var directionGrid = GlobalIlluminationReference.RadianceCascadeDirectionGrid(directionCount);
+        var samples = rc.Cascades[cascade];
+
+        WriteImage(path, atlasSize.X, atlasSize.Y, (x, y) =>
+        {
+            var probeX = x % probeSize.X;
+            var probeY = y % probeSize.Y;
+            var tileX = x / probeSize.X;
+            var tileY = y / probeSize.Y;
+            var directionIndex = tileY * directionGrid.X + tileX;
+            if (directionIndex >= directionCount)
+                return new Rgba32(0, 0, 0, 255);
+
+            return encode(samples[GlobalIlluminationReference.DirectionalIndex(probeX, probeY, directionIndex, probeSize, directionCount)]);
+        });
     }
 
     private static Rgba32 EncodeRadiance(Vector3 radiance, float exposure)
@@ -702,6 +584,16 @@ public sealed class GlobalIlluminationReferenceTest
             ToByte(ToneMap(radiance.X * exposure)),
             ToByte(ToneMap(radiance.Y * exposure)),
             ToByte(ToneMap(radiance.Z * exposure)),
+            255);
+    }
+
+    private static Rgba32 Heat(float value)
+    {
+        value = Math.Clamp(value, 0f, 1f);
+        return new Rgba32(
+            ToByte(value),
+            ToByte(MathF.Max(0f, 1f - MathF.Abs(value - 0.5f) * 2f)),
+            ToByte(1f - value),
             255);
     }
 
@@ -715,6 +607,11 @@ public sealed class GlobalIlluminationReferenceTest
     {
         return (byte)Math.Round(Math.Clamp(value, 0f, 1f) * 255f);
     }
+
+    private readonly record struct RcComparison(
+        GlobalIlluminationReference.RadianceCascadeResult Rc,
+        Vector3[] Brute,
+        GlobalIlluminationReference.ErrorMetrics Metrics);
 
     private sealed class ShaderResourceManagerStub : IResourceManager
     {

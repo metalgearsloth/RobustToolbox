@@ -1005,7 +1005,7 @@ namespace Robust.Shared
         /// Enables experimental low-resolution screen-space GI/radiosity on top of the normal direct-light pass.
         /// </summary>
         public static readonly CVarDef<bool> DisplayGiEnabled =
-            CVarDef.Create("display.gi_enabled", true, CVar.CLIENTONLY | CVar.ARCHIVE);
+            CVarDef.Create("display.gi_enabled", false, CVar.CLIENTONLY | CVar.ARCHIVE);
 
         /// <summary>
         /// Experimental GI backend. 0=SDF raymarch, 1=radiance cascades.
@@ -1029,13 +1029,13 @@ namespace Robust.Shared
         /// Maximum SDF raymarch steps per GI ray.
         /// </summary>
         public static readonly CVarDef<int> DisplayGiSteps =
-            CVarDef.Create("display.gi_steps", 16, CVar.CLIENTONLY | CVar.ARCHIVE);
+            CVarDef.Create("display.gi_steps", 64, CVar.CLIENTONLY | CVar.ARCHIVE);
 
         /// <summary>
         /// Amount of previous-frame GI retained during temporal accumulation.
         /// </summary>
         public static readonly CVarDef<float> DisplayGiHistoryWeight =
-            CVarDef.Create("display.gi_history_weight", 0.85f, CVar.CLIENTONLY | CVar.ARCHIVE);
+            CVarDef.Create("display.gi_history_weight", 0.0f, CVar.CLIENTONLY | CVar.ARCHIVE);
 
         /// <summary>
         /// Diffuse bounce multiplier applied to direct and previous-frame GI gathered at ray hits.
@@ -1047,7 +1047,7 @@ namespace Robust.Shared
         /// Multiplier applied when combining the experimental GI buffer into the final light buffer.
         /// </summary>
         public static readonly CVarDef<float> DisplayGiIntensity =
-            CVarDef.Create("display.gi_intensity", 2.0f, CVar.CLIENTONLY | CVar.ARCHIVE);
+            CVarDef.Create("display.gi_intensity", 1.0f, CVar.CLIENTONLY | CVar.ARCHIVE);
 
         /// <summary>
         /// Amount of per-frame angular jitter applied to GI rays. 0 is stable, 1 uses full temporal jitter.

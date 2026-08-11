@@ -1,0 +1,46 @@
+preset raw;
+
+uniform sampler2D cascadeTexture;
+uniform sampler2D previousGiTexture;
+
+uniform highp vec2 targetSize;
+uniform highp vec2 cascadeAtlasSize;
+uniform highp vec2 directionGrid;
+uniform highp float directionCount;
+uniform highp float historyWeight;
+uniform highp float bounceDecay;
+
+varying highp vec2 pos;
+
+void vertex()
+{
+    VERTEX = apply_mvp(VERTEX);
+    pos = (VERTEX + vec2(1.0)) / 2.0;
+}
+
+highp vec2 atlasUv(highp vec2 probeCoord, highp float directionIndex)
+{
+    highp float tileX = mod(directionIndex, directionGrid.x);
+    highp float tileY = floor(directionIndex / directionGrid.x);
+    highp vec2 pixel = vec2(tileX, tileY) * targetSize + probeCoord + vec2(0.5);
+    return pixel / cascadeAtlasSize;
+}
+
+void fragment()
+{
+    highp vec2 probeCoord = floor(pos * targetSize);
+    highp vec3 radiance = vec3(0.0);
+
+    for (int i = 0; i < 64; i++)
+    {
+        if (float(i) >= directionCount)
+            break;
+
+        radiance += texture2D(cascadeTexture, atlasUv(probeCoord, float(i))).rgb;
+    }
+
+    radiance = radiance / max(directionCount, 1.0) * bounceDecay;
+
+    highp vec3 previous = texture2D(previousGiTexture, pos).rgb;
+    COLOR = vec4(mix(radiance, previous, historyWeight), 1.0);
+}

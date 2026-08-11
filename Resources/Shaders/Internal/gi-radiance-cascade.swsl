@@ -7,38 +7,38 @@ const highp float TWO_PI = 6.28318530717958647692;
 
 uniform sampler2D jfaTexture;
 uniform sampler2D directTexture;
-uniform sampler2D previousGiTexture;
 uniform sampler2D fovTexture;
 uniform sampler2D occlusionTexture;
-uniform sampler2D previousCascadeTexture;
+uniform sampler2D higherCascadeTexture;
 
 uniform highp vec2 targetSize;
+uniform highp vec2 probeSize;
+uniform highp vec2 directionGrid;
+uniform highp float directionCount;
+uniform highp vec2 higherProbeSize;
+uniform highp vec2 higherDirectionGrid;
+uniform highp float higherDirectionCount;
+uniform highp vec2 higherAtlasSize;
 uniform highp mat3 uvToWorld;
 uniform highp mat3 worldToUv;
 uniform highp mat3 previousWorldToUv;
 uniform highp vec2 eyePosition;
 uniform highp float fovEnabled;
-uniform highp float rays;
 uniform highp float steps;
-uniform highp float historyWeight;
-uniform highp float bounceDecay;
 uniform highp float frameIndex;
 uniform highp float giTexelWorldSize;
 uniform highp float temporalJitter;
 uniform highp float cascadeIndex;
 uniform highp float intervalStart;
 uniform highp float intervalEnd;
-uniform highp float hasPreviousCascade;
-uniform highp float isFinalCascade;
+uniform highp float hasHigherCascade;
 
 varying highp vec2 pos;
-varying highp vec2 worldPosition;
 
 void vertex()
 {
     VERTEX = apply_mvp(VERTEX);
     pos = (VERTEX + vec2(1.0)) / 2.0;
-    worldPosition = (uvToWorld * vec3(pos, 1.0)).xy;
 }
 
 highp float hash12(highp vec2 p)
@@ -63,16 +63,107 @@ highp float fovVisibility(highp vec2 world)
     return ChebyshevUpperBound(occludeDepth(diff, fovTexture, 0.25), dist);
 }
 
-highp vec3 samplePreviousGiAtWorld(highp vec2 world)
+highp vec2 directionFromIndex(highp float directionIndex, highp float count)
 {
-    highp vec2 previousUv = (previousWorldToUv * vec3(world, 1.0)).xy;
-    if (!uvInside(previousUv))
-        return vec3(0.0);
-
-    return texture2D(previousGiTexture, previousUv).rgb;
+    highp float angle = ((directionIndex + 0.5) / max(count, 1.0)) * TWO_PI;
+    return vec2(cos(angle), sin(angle));
 }
 
-highp vec3 sampleRadianceAtWorld(highp vec2 world)
+highp vec2 atlasUv(highp vec2 sampleProbe, highp float directionIndex, highp vec2 sampleProbeSize, highp vec2 sampleDirectionGrid, highp vec2 sampleAtlasSize)
+{
+    highp float tileX = mod(directionIndex, sampleDirectionGrid.x);
+    highp float tileY = floor(directionIndex / sampleDirectionGrid.x);
+    highp vec2 pixel = vec2(tileX, tileY) * sampleProbeSize + sampleProbe + vec2(0.5);
+    return pixel / sampleAtlasSize;
+}
+
+highp float segmentTransmittance(highp vec2 startWorld, highp vec2 endWorld)
+{
+    highp vec2 delta = endWorld - startWorld;
+    highp float lengthToEnd = length(delta);
+    if (lengthToEnd <= 0.0001)
+        return 1.0;
+
+    highp vec2 direction = delta / lengthToEnd;
+    highp float traveled = giTexelWorldSize * 0.5;
+    highp float stepLength = max(giTexelWorldSize * 0.5, lengthToEnd / 16.0);
+    highp float hitDistance = giTexelWorldSize * 1.5;
+
+    for (int i = 0; i < 32; i++)
+    {
+        if (traveled >= lengthToEnd)
+            break;
+
+        highp vec2 world = startWorld + direction * traveled;
+        highp vec2 uv = (worldToUv * vec3(world, 1.0)).xy;
+        if (!uvInside(uv))
+            return 0.0;
+
+        highp float occluder = texture2D(occlusionTexture, uv).r;
+        highp vec4 seed = texture2D(jfaTexture, uv);
+        if (occluder > 0.5)
+            return 0.0;
+
+        if (seed.z >= 0.5)
+        {
+            highp vec2 seedWorld = (uvToWorld * vec3(seed.xy, 1.0)).xy;
+            if (length(seedWorld - world) <= hitDistance)
+                return 0.0;
+        }
+
+        traveled += stepLength;
+    }
+
+    return 1.0;
+}
+
+highp vec4 sampleHigherCascadeDirection(highp vec2 world, highp float directionIndex)
+{
+    if (hasHigherCascade < 0.5 || directionIndex >= higherDirectionCount)
+        return vec4(0.0, 0.0, 0.0, 1.0);
+
+    highp vec2 uv = (worldToUv * vec3(world, 1.0)).xy;
+    if (!uvInside(uv))
+        return vec4(0.0, 0.0, 0.0, 1.0);
+
+    highp vec2 probeCoord = uv * higherProbeSize - vec2(0.5);
+    highp vec2 baseProbe = floor(probeCoord);
+    highp vec2 fracProbe = fract(probeCoord);
+    highp vec4 total = vec4(0.0);
+
+    for (int oy = 0; oy <= 1; oy++)
+    {
+        for (int ox = 0; ox <= 1; ox++)
+        {
+            highp vec2 offset = vec2(float(ox), float(oy));
+            highp vec2 probe = clamp(baseProbe + offset, vec2(0.0), higherProbeSize - vec2(1.0));
+            highp float wx = ox == 0 ? 1.0 - fracProbe.x : fracProbe.x;
+            highp float wy = oy == 0 ? 1.0 - fracProbe.y : fracProbe.y;
+            highp float weight = wx * wy;
+            highp vec2 probeUv = (probe + vec2(0.5)) / higherProbeSize;
+            highp vec2 probeWorld = (uvToWorld * vec3(probeUv, 1.0)).xy;
+            highp float visible = segmentTransmittance(world, probeWorld);
+            highp vec4 sample = texture2D(higherCascadeTexture, atlasUv(probe, directionIndex, higherProbeSize, higherDirectionGrid, higherAtlasSize));
+            total += vec4(sample.rgb * visible, sample.a * visible) * weight;
+        }
+    }
+
+    return total;
+}
+
+highp vec4 sampleHigherCascadeCone(highp vec2 world, highp float directionIndex)
+{
+    highp vec4 total = vec4(0.0);
+    for (int child = 0; child < 4; child++)
+    {
+        highp float childIndex = directionIndex * 4.0 + float(child);
+        total += sampleHigherCascadeDirection(world, childIndex);
+    }
+
+    return total * 0.25;
+}
+
+highp vec3 sampleDirectAtWorld(highp vec2 world)
 {
     if (fovVisibility(world) <= 0.001)
         return vec3(0.0);
@@ -81,41 +172,26 @@ highp vec3 sampleRadianceAtWorld(highp vec2 world)
     if (!uvInside(uv))
         return vec3(0.0);
 
-    highp vec3 direct = texture2D(directTexture, uv).rgb;
-    highp vec3 previous = samplePreviousGiAtWorld(world);
-    return direct + previous;
+    return texture2D(directTexture, uv).rgb;
 }
 
-highp vec3 traceInterval(highp vec2 direction)
+highp vec4 traceInterval(highp vec2 worldPosition, highp vec2 direction)
 {
-    highp float startDistance = giTexelWorldSize;
-    highp vec2 rayWorld = worldPosition + direction * startDistance;
-    highp float traveled = startDistance;
+    highp float traveled = giTexelWorldSize * 0.5;
+    highp float intervalRemaining = max(intervalEnd - traveled, 0.0);
+    highp vec2 rayWorld = worldPosition + direction * traveled;
     highp float hitDistance = giTexelWorldSize * 1.5;
     highp float minimumStep = giTexelWorldSize * 0.5;
-    highp vec3 bestRadiance = vec3(0.0);
-    highp float bestScore = 0.0;
+    highp vec3 radiance = vec3(0.0);
 
-    for (int i = 0; i < 128; i++)
+    for (int i = 0; i < 256; i++)
     {
-        if (float(i) >= steps)
+        if (float(i) >= steps || intervalRemaining <= 0.0)
             break;
 
         highp vec2 rayUv = (worldToUv * vec3(rayWorld, 1.0)).xy;
         if (!uvInside(rayUv))
-            break;
-
-        if (traveled >= intervalStart)
-        {
-            highp vec3 rayRadiance = sampleRadianceAtWorld(rayWorld);
-            highp float rayLuma = dot(rayRadiance, vec3(0.2126, 0.7152, 0.0722));
-            highp float rayScore = rayLuma / (1.0 + traveled * 0.35);
-            if (rayScore > bestScore)
-            {
-                bestScore = rayScore;
-                bestRadiance = rayRadiance / (1.0 + traveled * 0.35);
-            }
-        }
+            return vec4(radiance, 1.0);
 
         highp float occluder = texture2D(occlusionTexture, rayUv).r;
         highp vec4 seed = texture2D(jfaTexture, rayUv);
@@ -127,63 +203,53 @@ highp vec3 traceInterval(highp vec2 direction)
         }
 
         if (occluder > 0.5 || distanceToWall <= hitDistance)
-        {
-            if (traveled < intervalStart)
-                return bestRadiance;
+            return vec4(radiance, 0.0);
 
-            highp vec2 hitUv = occluder > 0.5 ? rayUv : seed.xy;
-            highp vec2 hitWorld = (uvToWorld * vec3(hitUv, 1.0)).xy;
-            highp vec3 surfaceRadiance = sampleRadianceAtWorld(hitWorld - direction * giTexelWorldSize);
-            return max(bestRadiance, surfaceRadiance) * fovVisibility(hitWorld);
+        highp float sdfStep = max(distanceToWall - hitDistance, minimumStep);
+        highp float maxSampleStep = giTexelWorldSize * max(1.0, pow(2.0, cascadeIndex));
+        highp float stepLength = min(min(sdfStep, maxSampleStep), intervalRemaining);
+        if (traveled >= intervalStart)
+        {
+            highp vec3 direct = sampleDirectAtWorld(rayWorld);
+            radiance += direct * (stepLength / (1.0 + traveled * 0.35));
         }
 
-        if (traveled >= intervalEnd)
-        {
-            if (hasPreviousCascade > 0.5 && fovVisibility(rayWorld) > 0.001)
-                return max(bestRadiance, texture2D(previousCascadeTexture, rayUv).rgb);
-
-            break;
-        }
-
-        highp float stepLength = max(distanceToWall - hitDistance, minimumStep);
         rayWorld += direction * stepLength;
         traveled += stepLength;
+        intervalRemaining -= stepLength;
     }
 
-    return bestRadiance;
+    return vec4(radiance, 1.0);
 }
 
 void fragment()
 {
-    if (!uvInside(pos) || fovVisibility(worldPosition) <= 0.001)
+    highp vec2 pixel = floor(pos * targetSize);
+    highp vec2 probeCoord = mod(pixel, probeSize);
+    highp vec2 directionTile = floor(pixel / probeSize);
+    highp float directionIndex = directionTile.y * directionGrid.x + directionTile.x;
+
+    if (directionIndex >= directionCount)
     {
         COLOR = vec4(0.0, 0.0, 0.0, 1.0);
         return;
     }
 
-    highp vec2 worldCell = floor(worldPosition / max(giTexelWorldSize, 0.0001));
-    highp float stableRotation = hash12(worldCell + vec2(cascadeIndex + 13.17, 91.7)) * TWO_PI;
-    highp float temporalRotation = hash12(worldCell + vec2(frameIndex * 13.17, frameIndex * 7.31) + vec2(cascadeIndex * 37.0)) * TWO_PI / max(rays, 1.0);
-    highp float randomRotation = stableRotation + temporalRotation * temporalJitter;
-    highp vec3 gathered = vec3(0.0);
+    highp vec2 probeUv = (probeCoord + vec2(0.5)) / probeSize;
+    highp vec2 worldPosition = (uvToWorld * vec3(probeUv, 1.0)).xy;
 
-    for (int i = 0; i < 256; i++)
+    if (!uvInside(probeUv) || fovVisibility(worldPosition) <= 0.001)
     {
-        if (float(i) >= rays)
-            break;
-
-        highp float angle = (float(i) / max(rays, 1.0)) * TWO_PI + randomRotation;
-        highp vec2 direction = vec2(cos(angle), sin(angle));
-        gathered += traceInterval(direction);
+        COLOR = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
     }
 
-    gathered = gathered / max(rays, 1.0) * bounceDecay;
+    highp vec2 direction = directionFromIndex(directionIndex, directionCount);
+    highp vec4 nearInterval = traceInterval(worldPosition, direction);
+    highp vec2 intervalEndWorld = worldPosition + direction * intervalEnd;
+    highp vec4 farInterval = sampleHigherCascadeCone(intervalEndWorld, directionIndex);
 
-    if (isFinalCascade > 0.5)
-    {
-        highp vec3 previousHere = samplePreviousGiAtWorld(worldPosition);
-        gathered = mix(gathered, previousHere, historyWeight);
-    }
-
-    COLOR = vec4(gathered, 1.0);
+    highp vec3 mergedRadiance = nearInterval.rgb + nearInterval.a * farInterval.rgb;
+    highp float mergedTransmittance = nearInterval.a * farInterval.a;
+    COLOR = vec4(mergedRadiance, mergedTransmittance);
 }

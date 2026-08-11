@@ -61,6 +61,7 @@ namespace Robust.Client.Graphics.Clyde
         private ClydeHandle _giJfaJumpShaderHandle;
         private ClydeHandle _giTraceShaderHandle;
         private ClydeHandle _giRadianceCascadeShaderHandle;
+        private ClydeHandle _giRadianceResolveShaderHandle;
         private ClydeHandle _giCombineShaderHandle;
         private ClydeHandle _giDebugShaderHandle;
 
@@ -133,10 +134,10 @@ namespace Robust.Client.Graphics.Clyde
         private GiBackend _giBackend = GiBackend.Raymarch;
         private float _giScale = 0.25f;
         private int _giRays = 8;
-        private int _giSteps = 16;
-        private float _giHistoryWeight = 0.85f;
+        private int _giSteps = 64;
+        private float _giHistoryWeight = 0.0f;
         private float _giBounceDecay = 0.65f;
-        private float _giIntensity = 2.0f;
+        private float _giIntensity = 1.0f;
         private float _giTemporalJitter;
         private int _giRadianceCascades = 3;
         private int _giRadianceCascadeBaseRays = 4;
@@ -286,6 +287,7 @@ namespace Robust.Client.Graphics.Clyde
             _giJfaJumpShaderHandle = LoadShaderHandle("/Shaders/Internal/gi-jfa-jump.swsl");
             _giTraceShaderHandle = LoadShaderHandle("/Shaders/Internal/gi-trace.swsl");
             _giRadianceCascadeShaderHandle = LoadShaderHandle("/Shaders/Internal/gi-radiance-cascade.swsl");
+            _giRadianceResolveShaderHandle = LoadShaderHandle("/Shaders/Internal/gi-radiance-resolve.swsl");
             _giCombineShaderHandle = LoadShaderHandle("/Shaders/Internal/gi-combine.swsl");
             _giDebugShaderHandle = LoadShaderHandle("/Shaders/Internal/gi-debug.swsl");
         }
@@ -647,17 +649,22 @@ namespace Robust.Client.Graphics.Clyde
                 CombineGlobalIllumination(viewport);
             }
 
-            if (_cfg.GetCVar(CVars.LightBlur))
+            var isolateRadianceCascade = giActive && _giBackend == GiBackend.RadianceCascades;
+
+            if (!isolateRadianceCascade && _cfg.GetCVar(CVars.LightBlur))
                 BlurRenderTarget(viewport, viewport.LightRenderTarget, viewport.LightBlurTarget, eye, 14f);
 
-            using (_prof.Group("BlurOntoWalls"))
+            if (!isolateRadianceCascade)
             {
-                BlurOntoWalls(viewport, eye);
-            }
+                using (_prof.Group("BlurOntoWalls"))
+                {
+                    BlurOntoWalls(viewport, eye);
+                }
 
-            using (_prof.Group("MergeWallLayer"))
-            {
-                MergeWallLayer(viewport);
+                using (_prof.Group("MergeWallLayer"))
+                {
+                    MergeWallLayer(viewport);
+                }
             }
 
             if (giActive && _giDebugMode != (int) GiDebugMode.Disabled)
@@ -1092,12 +1099,15 @@ namespace Robust.Client.Graphics.Clyde
         private bool AreGiRadianceCascadeTargetsValid(Viewport viewport)
         {
             var expectedCount = Math.Max(0, _giRadianceCascades - 1);
+            if (_giBackend == GiBackend.RadianceCascades)
+                expectedCount = Math.Max(0, _giRadianceCascades);
+
             if (viewport.GiRadianceCascadeTargets.Length != expectedCount)
                 return false;
 
             for (var i = 0; i < viewport.GiRadianceCascadeTargets.Length; i++)
             {
-                if (viewport.GiRadianceCascadeTargets[i].Size != GetGiRadianceCascadeMapSize(viewport.Size, i + 1))
+                if (viewport.GiRadianceCascadeTargets[i].Size != GetGiRadianceCascadeAtlasSize(viewport.Size, i))
                     return false;
             }
 
@@ -1110,7 +1120,7 @@ namespace Robust.Client.Graphics.Clyde
                 && IsShaderAvailable(_giJfaSeedShaderHandle)
                 && IsShaderAvailable(_giJfaJumpShaderHandle)
                 && (_giBackend != GiBackend.Raymarch || IsShaderAvailable(_giTraceShaderHandle))
-                && (_giBackend != GiBackend.RadianceCascades || IsShaderAvailable(_giRadianceCascadeShaderHandle))
+                && (_giBackend != GiBackend.RadianceCascades || (IsShaderAvailable(_giRadianceCascadeShaderHandle) && IsShaderAvailable(_giRadianceResolveShaderHandle)))
                 && IsShaderAvailable(_giCombineShaderHandle)
                 && IsShaderAvailable(_giDebugShaderHandle))
             {
@@ -1128,7 +1138,10 @@ namespace Robust.Client.Graphics.Clyde
                     AddMissingShader(missingShaders, _giTraceShaderHandle, "/Shaders/Internal/gi-trace.swsl");
 
                 if (_giBackend == GiBackend.RadianceCascades)
+                {
                     AddMissingShader(missingShaders, _giRadianceCascadeShaderHandle, "/Shaders/Internal/gi-radiance-cascade.swsl");
+                    AddMissingShader(missingShaders, _giRadianceResolveShaderHandle, "/Shaders/Internal/gi-radiance-resolve.swsl");
+                }
 
                 AddMissingShader(missingShaders, _giCombineShaderHandle, "/Shaders/Internal/gi-combine.swsl");
                 AddMissingShader(missingShaders, _giDebugShaderHandle, "/Shaders/Internal/gi-debug.swsl");
@@ -1177,7 +1190,7 @@ namespace Robust.Client.Graphics.Clyde
                 var historyValid = ValidateGiHistory(viewport, eye);
 
                 RenderGiOcclusionMask(viewport);
-                RenderGiJfa(viewport);
+                RenderGiJfa(viewport, uvToWorld);
 
                 if (!historyValid)
                     ClearRenderTexture(viewport.GiPrevious, Color.Black, clearStencil: false);
@@ -1238,7 +1251,7 @@ namespace Robust.Client.Graphics.Clyde
             _debugStats.LastGLDrawCalls += 1;
         }
 
-        private void RenderGiJfa(Viewport viewport)
+        private void RenderGiJfa(Viewport viewport, Matrix3x2 uvToWorld)
         {
             DebugTools.AssertNotNull(viewport.GiOcclusionMask);
             DebugTools.AssertNotNull(viewport.GiJfaA);
@@ -1246,6 +1259,9 @@ namespace Robust.Client.Graphics.Clyde
             using var _ = DebugGroup(nameof(RenderGiJfa));
 
             var size = viewport.GiJfaA!.Size;
+            var uvWorldSize = new Vector2(
+                new Vector2(uvToWorld.M11, uvToWorld.M12).Length(),
+                new Vector2(uvToWorld.M21, uvToWorld.M22).Length());
             CalcScreenMatrices(size, out var proj, out var view);
             SetProjViewBuffer(proj, view);
             GL.Viewport(0, 0, size.X, size.Y);
@@ -1268,14 +1284,14 @@ namespace Robust.Client.Graphics.Clyde
 
             while (step > 0)
             {
-                RenderGiJfaJump(source, destination, jumpShader, step, size);
+                RenderGiJfaJump(source, destination, jumpShader, step, size, uvWorldSize);
                 (source, destination) = (destination, source);
                 step /= 2;
             }
 
             if (!ReferenceEquals(source, viewport.GiJfaA))
             {
-                RenderGiJfaJump(source, viewport.GiJfaA, jumpShader, 0, size);
+                RenderGiJfaJump(source, viewport.GiJfaA, jumpShader, 0, size, uvWorldSize);
             }
         }
 
@@ -1284,7 +1300,8 @@ namespace Robust.Client.Graphics.Clyde
             RenderTexture destination,
             GLShaderProgram shader,
             int step,
-            Vector2i size)
+            Vector2i size,
+            Vector2 uvWorldSize)
         {
             shader.Use();
             SetupGlobalUniformsImmediate(shader, source.Texture);
@@ -1292,6 +1309,7 @@ namespace Robust.Client.Graphics.Clyde
             shader.SetUniformTextureMaybe(UniIMainTexture, TextureUnit.Texture0);
             shader.SetUniformMaybe("targetSize", (Vector2)size);
             shader.SetUniformMaybe("jumpStep", (float)step);
+            shader.SetUniformMaybe("uvWorldSize", uvWorldSize);
 
             BindRenderTargetFull(destination);
             _drawQuad(Vector2.Zero, size, Matrix3x2.Identity, shader);
@@ -1371,15 +1389,30 @@ namespace Robust.Client.Graphics.Clyde
             DebugTools.AssertNotNull(viewport.GiJfaA);
             DebugTools.AssertNotNull(viewport.GiCurrent);
             DebugTools.AssertNotNull(viewport.GiPrevious);
+            DebugTools.Assert(viewport.GiRadianceCascadeTargets.Length >= _giRadianceCascades);
             using var _ = DebugGroup(nameof(RenderGiRadianceCascades));
 
             var shader = _loadedShaders[_giRadianceCascadeShaderHandle].Program;
-            RenderTexture? previousCascade = null;
+            RenderTexture? higherCascade = null;
 
             for (var cascade = _giRadianceCascades - 1; cascade >= 0; cascade--)
             {
                 var target = GetGiRadianceCascadeTarget(viewport, cascade);
                 var size = target.Size;
+                var probeSize = GetGiRadianceCascadeProbeSize(viewport.Size, cascade);
+                var directionCount = GetGiRadianceCascadeRayCount(cascade);
+                var directionGrid = GetGiRadianceCascadeDirectionGrid(directionCount);
+                var higherCascadeIndex = cascade + 1;
+                var higherProbeSize = higherCascadeIndex < _giRadianceCascades
+                    ? GetGiRadianceCascadeProbeSize(viewport.Size, higherCascadeIndex)
+                    : Vector2i.One;
+                var higherDirectionCount = higherCascadeIndex < _giRadianceCascades
+                    ? GetGiRadianceCascadeRayCount(higherCascadeIndex)
+                    : 0;
+                var higherDirectionGrid = higherDirectionCount > 0
+                    ? GetGiRadianceCascadeDirectionGrid(higherDirectionCount)
+                    : Vector2i.One;
+                var higherAtlasSize = higherCascade?.Size ?? Vector2i.One;
 
                 CalcScreenMatrices(size, out var proj, out var view);
                 SetProjViewBuffer(proj, view);
@@ -1400,48 +1433,89 @@ namespace Robust.Client.Graphics.Clyde
                 SetTexture(TextureUnit.Texture2, viewport.GiPrevious!.Texture);
                 SetTexture(TextureUnit.Texture3, FovTexture);
                 SetTexture(TextureUnit.Texture4, viewport.GiOcclusionMask!.Texture);
-                SetTexture(TextureUnit.Texture5, previousCascade?.Texture ?? viewport.GiPrevious.Texture);
+                SetTexture(TextureUnit.Texture5, higherCascade?.Texture ?? viewport.GiPrevious.Texture);
 
                 shader.SetUniformTextureMaybe("jfaTexture", TextureUnit.Texture0);
                 shader.SetUniformTextureMaybe("directTexture", TextureUnit.Texture1);
                 shader.SetUniformTextureMaybe("previousGiTexture", TextureUnit.Texture2);
                 shader.SetUniformTextureMaybe("fovTexture", TextureUnit.Texture3);
                 shader.SetUniformTextureMaybe("occlusionTexture", TextureUnit.Texture4);
-                shader.SetUniformTextureMaybe("previousCascadeTexture", TextureUnit.Texture5);
+                shader.SetUniformTextureMaybe("higherCascadeTexture", TextureUnit.Texture5);
                 shader.SetUniformMaybe("targetSize", (Vector2)size);
+                shader.SetUniformMaybe("probeSize", (Vector2)probeSize);
+                shader.SetUniformMaybe("directionGrid", (Vector2)directionGrid);
+                shader.SetUniformMaybe("directionCount", (float)directionCount);
+                shader.SetUniformMaybe("higherProbeSize", (Vector2)higherProbeSize);
+                shader.SetUniformMaybe("higherDirectionGrid", (Vector2)higherDirectionGrid);
+                shader.SetUniformMaybe("higherDirectionCount", (float)higherDirectionCount);
+                shader.SetUniformMaybe("higherAtlasSize", (Vector2)higherAtlasSize);
                 shader.SetUniformMaybe("uvToWorld", uvToWorld);
                 shader.SetUniformMaybe("worldToUv", worldToUv);
                 shader.SetUniformMaybe("previousWorldToUv", viewport.GiPreviousWorldToUv);
                 shader.SetUniformMaybe("eyePosition", eye.Position.Position);
                 shader.SetUniformMaybe("fovEnabled", eye.DrawFov ? 1f : 0f);
-                shader.SetUniformMaybe("rays", (float)GetGiRadianceCascadeRayCount(cascade));
                 shader.SetUniformMaybe("steps", (float)_giSteps);
-                shader.SetUniformMaybe("historyWeight", cascade == 0 && historyValid ? _giHistoryWeight : 0f);
-                shader.SetUniformMaybe("bounceDecay", _giBounceDecay);
                 shader.SetUniformMaybe("frameIndex", (float)_giFrameIndex);
                 shader.SetUniformMaybe("giTexelWorldSize", giTexelWorldSize);
                 shader.SetUniformMaybe("temporalJitter", _giTemporalJitter);
                 shader.SetUniformMaybe("cascadeIndex", (float)cascade);
                 shader.SetUniformMaybe("intervalStart", GetGiRadianceCascadeIntervalStart(cascade, giTexelWorldSize));
                 shader.SetUniformMaybe("intervalEnd", GetGiRadianceCascadeIntervalEnd(cascade, giTexelWorldSize));
-                shader.SetUniformMaybe("hasPreviousCascade", previousCascade != null ? 1f : 0f);
-                shader.SetUniformMaybe("isFinalCascade", cascade == 0 ? 1f : 0f);
+                shader.SetUniformMaybe("hasHigherCascade", higherCascade != null ? 1f : 0f);
 
                 _drawQuad(Vector2.Zero, size, Matrix3x2.Identity, shader);
-                previousCascade = target;
+                higherCascade = target;
             }
+
+            RenderGiRadianceCascadeResolve(viewport, historyValid);
         }
 
         private RenderTexture GetGiRadianceCascadeTarget(Viewport viewport, int cascade)
         {
             DebugTools.Assert(cascade >= 0);
+            DebugTools.Assert(cascade < viewport.GiRadianceCascadeTargets.Length);
+            return viewport.GiRadianceCascadeTargets[cascade];
+        }
+
+        private void RenderGiRadianceCascadeResolve(Viewport viewport, bool historyValid)
+        {
             DebugTools.AssertNotNull(viewport.GiCurrent);
+            DebugTools.Assert(viewport.GiRadianceCascadeTargets.Length > 0);
+            using var _ = DebugGroup(nameof(RenderGiRadianceCascadeResolve));
 
-            if (cascade == 0)
-                return viewport.GiCurrent!;
+            var target = viewport.GiCurrent!;
+            var size = target.Size;
+            var cascade0 = viewport.GiRadianceCascadeTargets[0];
+            var directionCount = GetGiRadianceCascadeRayCount(0);
+            var directionGrid = GetGiRadianceCascadeDirectionGrid(directionCount);
 
-            DebugTools.Assert(cascade - 1 < viewport.GiRadianceCascadeTargets.Length);
-            return viewport.GiRadianceCascadeTargets[cascade - 1];
+            CalcScreenMatrices(size, out var proj, out var view);
+            SetProjViewBuffer(proj, view);
+
+            BindRenderTargetFull(target);
+            GL.Viewport(0, 0, size.X, size.Y);
+            CheckGlError();
+
+            GLClearColor(Color.Black);
+            GL.Clear(ClearBufferMask.ColorBufferBit);
+            CheckGlError();
+
+            var shader = _loadedShaders[_giRadianceResolveShaderHandle].Program;
+            shader.Use();
+            SetupGlobalUniformsImmediate(shader, cascade0.Texture);
+
+            SetTexture(TextureUnit.Texture0, cascade0.Texture);
+            SetTexture(TextureUnit.Texture1, viewport.GiPrevious!.Texture);
+            shader.SetUniformTextureMaybe("cascadeTexture", TextureUnit.Texture0);
+            shader.SetUniformTextureMaybe("previousGiTexture", TextureUnit.Texture1);
+            shader.SetUniformMaybe("targetSize", (Vector2)size);
+            shader.SetUniformMaybe("cascadeAtlasSize", (Vector2)cascade0.Size);
+            shader.SetUniformMaybe("directionGrid", (Vector2)directionGrid);
+            shader.SetUniformMaybe("directionCount", (float)directionCount);
+            shader.SetUniformMaybe("historyWeight", 0f);
+            shader.SetUniformMaybe("bounceDecay", _giBounceDecay);
+
+            _drawQuad(Vector2.Zero, size, Matrix3x2.Identity, shader);
         }
 
         private int GetGiRadianceCascadeRayCount(int cascade)
@@ -1450,18 +1524,41 @@ namespace Robust.Client.Graphics.Clyde
             for (var i = 0; i < cascade; i++)
                 multiplier *= 4;
 
-            return Math.Clamp(_giRadianceCascadeBaseRays * multiplier, 1, 256);
+            return Math.Clamp(_giRadianceCascadeBaseRays * multiplier, 1, 4096);
+        }
+
+        private Vector2i GetGiRadianceCascadeProbeSize(Vector2i screenSize, int cascade)
+        {
+            var baseSize = GetGiMapSize(screenSize);
+            return Robust.Client.Graphics.Lighting.GlobalIlluminationReference.RadianceCascadeProbeSize(baseSize, cascade);
+        }
+
+        private Vector2i GetGiRadianceCascadeDirectionGrid(int directionCount)
+        {
+            return Robust.Client.Graphics.Lighting.GlobalIlluminationReference.RadianceCascadeDirectionGrid(directionCount);
+        }
+
+        private Vector2i GetGiRadianceCascadeAtlasSize(Vector2i screenSize, int cascade)
+        {
+            var probeSize = GetGiRadianceCascadeProbeSize(screenSize, cascade);
+            var directionGrid = GetGiRadianceCascadeDirectionGrid(GetGiRadianceCascadeRayCount(cascade));
+            return new Vector2i(
+                probeSize.X * directionGrid.X,
+                probeSize.Y * directionGrid.Y);
         }
 
         private float GetGiRadianceCascadeIntervalStart(int cascade, float giTexelWorldSize)
         {
-            return 0f;
+            return Robust.Client.Graphics.Lighting.GlobalIlluminationReference.RadianceCascadeIntervalStart(
+                giTexelWorldSize * _giSteps,
+                cascade);
         }
 
         private float GetGiRadianceCascadeIntervalEnd(int cascade, float giTexelWorldSize)
         {
-            var intervalBase = giTexelWorldSize * _giSteps;
-            return intervalBase * (MathF.Pow(2f, cascade + 1) - 1f);
+            return Robust.Client.Graphics.Lighting.GlobalIlluminationReference.RadianceCascadeIntervalEnd(
+                giTexelWorldSize * _giSteps,
+                cascade);
         }
 
         private void CombineGlobalIllumination(Viewport viewport)
@@ -1624,18 +1721,21 @@ namespace Robust.Client.Graphics.Clyde
             out Matrix3x2 worldToUv,
             out float giTexelWorldSize)
         {
-            var world0 = viewport.LocalToWorld(Vector2.Zero).Position;
-            var worldX = viewport.LocalToWorld(new Vector2(viewport.Size.X, 0)).Position - world0;
-            var worldY = viewport.LocalToWorld(new Vector2(0, viewport.Size.Y)).Position - world0;
+            var worldTopLeft = viewport.LocalToWorld(Vector2.Zero).Position;
+            var worldTopRight = viewport.LocalToWorld(new Vector2(viewport.Size.X, 0)).Position;
+            var worldBottomLeft = viewport.LocalToWorld(new Vector2(0, viewport.Size.Y)).Position;
 
-            uvToWorld = new Matrix3x2(worldX.X, worldX.Y, worldY.X, worldY.Y, world0.X, world0.Y);
+            uvToWorld = Robust.Client.Graphics.Lighting.GlobalIlluminationReference.CreateScreenUvToWorldMatrix(
+                worldTopLeft,
+                worldTopRight,
+                worldBottomLeft);
 
             if (!Matrix3x2.Invert(uvToWorld, out worldToUv))
                 worldToUv = Matrix3x2.Identity;
 
             var giSize = viewport.GiCurrent?.Size ?? GetGiMapSize(viewport.Size);
-            var texelX = worldX.Length() / Math.Max(1, giSize.X);
-            var texelY = worldY.Length() / Math.Max(1, giSize.Y);
+            var texelX = (worldTopRight - worldTopLeft).Length() / Math.Max(1, giSize.X);
+            var texelY = (worldTopLeft - worldBottomLeft).Length() / Math.Max(1, giSize.Y);
             giTexelWorldSize = Math.Max(texelX, texelY);
         }
 
@@ -2659,6 +2759,9 @@ namespace Robust.Client.Graphics.Clyde
             var giJfaFormat = _hasGLFloatFramebuffers
                 ? RenderTargetColorFormat.Rgba16F
                 : RenderTargetColorFormat.Rgba8;
+            var giCascadeFormat = _hasGLFloatFramebuffers
+                ? RenderTargetColorFormat.Rgba16F
+                : RenderTargetColorFormat.Rgba8;
 
             viewport.WallMaskRenderTarget = CreateRenderTarget(viewport.Size, RenderTargetColorFormat.R8,
                 name: $"{viewport.Name}-{nameof(viewport.WallMaskRenderTarget)}");
@@ -2700,15 +2803,14 @@ namespace Robust.Client.Graphics.Clyde
 
                 if (_giBackend == GiBackend.RadianceCascades)
                 {
-                    viewport.GiRadianceCascadeTargets = new RenderTexture[Math.Max(0, _giRadianceCascades - 1)];
+                    viewport.GiRadianceCascadeTargets = new RenderTexture[Math.Max(0, _giRadianceCascades)];
                     for (var i = 0; i < viewport.GiRadianceCascadeTargets.Length; i++)
                     {
-                        var cascade = i + 1;
                         viewport.GiRadianceCascadeTargets[i] = CreateRenderTarget(
-                            GetGiRadianceCascadeMapSize(viewport.Size, cascade),
-                            new RenderTargetFormatParameters(lightMapColorFormat),
+                            GetGiRadianceCascadeAtlasSize(viewport.Size, i),
+                            new RenderTargetFormatParameters(giCascadeFormat),
                             lightMapSampleParameters,
-                            $"{viewport.Name}-{nameof(viewport.GiRadianceCascadeTargets)}{cascade}");
+                            $"{viewport.Name}-{nameof(viewport.GiRadianceCascadeTargets)}{i}");
                     }
                 }
             }
@@ -2752,15 +2854,6 @@ namespace Robust.Client.Graphics.Clyde
         private Vector2i GetGiMapSize(Vector2i screenSize)
         {
             return Robust.Client.Graphics.Lighting.GlobalIlluminationReference.ScaledTargetSize(screenSize, _giScale);
-        }
-
-        private Vector2i GetGiRadianceCascadeMapSize(Vector2i screenSize, int cascade)
-        {
-            var baseSize = GetGiMapSize(screenSize);
-            var divisor = 1 << Math.Clamp(cascade, 0, 8);
-            return new Vector2i(
-                Math.Max(1, (baseSize.X + divisor - 1) / divisor),
-                Math.Max(1, (baseSize.Y + divisor - 1) / divisor));
         }
 
         private void LightResolutionScaleChanged(float newValue)
