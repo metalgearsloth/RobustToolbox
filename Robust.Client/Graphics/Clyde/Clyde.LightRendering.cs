@@ -36,6 +36,10 @@ namespace Robust.Client.Graphics.Clyde
         private const float SharedOccluderEdgeTolerance = 0.001f;
         private const float SharedOccluderEdgeToleranceSquared = SharedOccluderEdgeTolerance * SharedOccluderEdgeTolerance;
         private const float SharedOccluderNeighbourQueryPadding = 1f + SharedOccluderEdgeTolerance;
+        private const float GiHistoryMaxCameraDelta = 4f;
+        private const float GiHistoryMaxCameraDeltaSquared = GiHistoryMaxCameraDelta * GiHistoryMaxCameraDelta;
+        private const float GiHistoryMaxZoomDeltaSquared = 0.01f;
+        private const double GiHistoryMaxRotationDelta = Math.PI / 18.0;
         // Horizontal width, in pixels, of the shadow maps used to render FOV.
         // I figured this was more accuracy sensitive than lights so resolution is significantly higher.
         private const int FovMapSize = 2048;
@@ -52,6 +56,13 @@ namespace Robust.Client.Graphics.Clyde
         private ClydeHandle _wallBleedBlurShaderHandle;
         private ClydeHandle _lightBlurShaderHandle;
         private ClydeHandle _mergeWallLayerShaderHandle;
+        private ClydeHandle _giOcclusionMaskShaderHandle;
+        private ClydeHandle _giJfaSeedShaderHandle;
+        private ClydeHandle _giJfaJumpShaderHandle;
+        private ClydeHandle _giTraceShaderHandle;
+        private ClydeHandle _giRadianceCascadeShaderHandle;
+        private ClydeHandle _giCombineShaderHandle;
+        private ClydeHandle _giDebugShaderHandle;
 
         // Sampler used to sample the FovTexture with linear filtering, used in the lighting FOV pass
         // (it uses VSM unlike final FOV).
@@ -117,6 +128,44 @@ namespace Robust.Client.Graphics.Clyde
         private readonly List<bool> _occluderRenderSharedEdges = new();
 
         private float _maxLightRadius;
+
+        private bool _giEnabled;
+        private GiBackend _giBackend = GiBackend.Raymarch;
+        private float _giScale = 0.25f;
+        private int _giRays = 8;
+        private int _giSteps = 16;
+        private float _giHistoryWeight = 0.85f;
+        private float _giBounceDecay = 0.65f;
+        private float _giIntensity = 2.0f;
+        private float _giTemporalJitter;
+        private int _giRadianceCascades = 3;
+        private int _giRadianceCascadeBaseRays = 4;
+        private int _giDebugMode;
+        private uint _giFrameIndex;
+        private int _giSettingsVersion;
+        private ulong _occlusionMaskGeometryHash;
+        private bool _giUnavailableWarned;
+
+        private enum GiBackend
+        {
+            Raymarch = 0,
+            RadianceCascades = 1
+        }
+
+        private enum GiDebugMode
+        {
+            Disabled = 0,
+            OcclusionMask = 1,
+            JfaNearestSeed = 2,
+            SdfDistance = 3,
+            DirectLighting = 4,
+            GiCurrent = 5,
+            GiHistory = 6,
+            FinalCombined = 7,
+            RadianceCascade1 = 8,
+            RadianceCascade2 = 9,
+            RadianceCascade3 = 10
+        }
 
         private unsafe void InitLighting()
         {
@@ -232,6 +281,13 @@ namespace Robust.Client.Graphics.Clyde
             _wallBleedBlurShaderHandle = LoadShaderHandle("/Shaders/Internal/wall-bleed-blur.swsl");
             _lightBlurShaderHandle = LoadShaderHandle("/Shaders/Internal/light-blur.swsl");
             _mergeWallLayerShaderHandle = LoadShaderHandle("/Shaders/Internal/wall-merge.swsl");
+            _giOcclusionMaskShaderHandle = LoadShaderHandle("/Shaders/Internal/gi-occlusion-mask.swsl");
+            _giJfaSeedShaderHandle = LoadShaderHandle("/Shaders/Internal/gi-jfa-seed.swsl");
+            _giJfaJumpShaderHandle = LoadShaderHandle("/Shaders/Internal/gi-jfa-jump.swsl");
+            _giTraceShaderHandle = LoadShaderHandle("/Shaders/Internal/gi-trace.swsl");
+            _giRadianceCascadeShaderHandle = LoadShaderHandle("/Shaders/Internal/gi-radiance-cascade.swsl");
+            _giCombineShaderHandle = LoadShaderHandle("/Shaders/Internal/gi-combine.swsl");
+            _giDebugShaderHandle = LoadShaderHandle("/Shaders/Internal/gi-debug.swsl");
         }
 
         private void DrawFov(Viewport viewport, IEye eye)
@@ -418,6 +474,11 @@ namespace Robust.Client.Graphics.Clyde
             GL.Viewport(0, 0, lightW, lightH);
             CheckGlError();
 
+            var giActive = _giEnabled && AreGiShadersAvailable() && EnsureGiTargets(viewport);
+            var directLightTarget = giActive
+                ? viewport.DirectLightTarget!
+                : viewport.LightRenderTarget;
+
             BindRenderTargetImmediate(RtToLoaded(viewport.LightRenderTarget));
             DebugTools.Assert(_currentBoundRenderTarget.TextureHandle.Equals(viewport.LightRenderTarget.Texture.TextureId));
             CheckGlError();
@@ -450,6 +511,21 @@ namespace Robust.Client.Graphics.Clyde
             DebugTools.Assert(_currentBoundRenderTarget.TextureHandle.Equals(viewport.LightRenderTarget.Texture.TextureId));
 
             ApplyLightingFovToBuffer(viewport, eye);
+
+            if (giActive)
+            {
+                BindRenderTargetImmediate(RtToLoaded(directLightTarget));
+                DebugTools.Assert(_currentBoundRenderTarget.TextureHandle.Equals(directLightTarget.Texture.TextureId));
+                CheckGlError();
+
+                GLClearColor(Color.Black);
+                GL.ClearStencil(0xFF);
+                GL.StencilMask(0xFF);
+                GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.StencilBufferBit);
+                CheckGlError();
+
+                ApplyLightingFovToBuffer(viewport, eye);
+            }
 
             var lightShader = _loadedShaders[_enableSoftShadows ? _lightSoftShaderHandle : _lightHardShaderHandle]
                 .Program;
@@ -565,6 +641,12 @@ namespace Robust.Client.Graphics.Clyde
 
             CheckGlError();
 
+            if (giActive)
+            {
+                RenderGlobalIllumination(viewport, eye);
+                CombineGlobalIllumination(viewport);
+            }
+
             if (_cfg.GetCVar(CVars.LightBlur))
                 BlurRenderTarget(viewport, viewport.LightRenderTarget, viewport.LightBlurTarget, eye, 14f);
 
@@ -576,6 +658,11 @@ namespace Robust.Client.Graphics.Clyde
             using (_prof.Group("MergeWallLayer"))
             {
                 MergeWallLayer(viewport);
+            }
+
+            if (giActive && _giDebugMode != (int) GiDebugMode.Disabled)
+            {
+                ApplyGiDebugMode(viewport);
             }
 
             BindRenderTargetFull(viewport.RenderTarget);
@@ -975,6 +1062,627 @@ namespace Robust.Client.Graphics.Clyde
             CheckGlError();
 
             IsBlending = true;
+        }
+
+        private bool EnsureGiTargets(Viewport viewport)
+        {
+            if (viewport.DirectLightTarget != null
+                && viewport.GiOcclusionMask != null
+                && viewport.GiJfaA != null
+                && viewport.GiJfaB != null
+                && viewport.GiCurrent != null
+                && viewport.GiPrevious != null
+                && viewport.GiCurrent.Size == GetGiMapSize(viewport.Size)
+                && (!_giEnabled || _giBackend != GiBackend.RadianceCascades || AreGiRadianceCascadeTargetsValid(viewport)))
+            {
+                return true;
+            }
+
+            RegenLightRts(viewport);
+
+            return viewport.DirectLightTarget != null
+                && viewport.GiOcclusionMask != null
+                && viewport.GiJfaA != null
+                && viewport.GiJfaB != null
+                && viewport.GiCurrent != null
+                && viewport.GiPrevious != null
+                && (!_giEnabled || _giBackend != GiBackend.RadianceCascades || AreGiRadianceCascadeTargetsValid(viewport));
+        }
+
+        private bool AreGiRadianceCascadeTargetsValid(Viewport viewport)
+        {
+            var expectedCount = Math.Max(0, _giRadianceCascades - 1);
+            if (viewport.GiRadianceCascadeTargets.Length != expectedCount)
+                return false;
+
+            for (var i = 0; i < viewport.GiRadianceCascadeTargets.Length; i++)
+            {
+                if (viewport.GiRadianceCascadeTargets[i].Size != GetGiRadianceCascadeMapSize(viewport.Size, i + 1))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private bool AreGiShadersAvailable()
+        {
+            if (IsShaderAvailable(_giOcclusionMaskShaderHandle)
+                && IsShaderAvailable(_giJfaSeedShaderHandle)
+                && IsShaderAvailable(_giJfaJumpShaderHandle)
+                && (_giBackend != GiBackend.Raymarch || IsShaderAvailable(_giTraceShaderHandle))
+                && (_giBackend != GiBackend.RadianceCascades || IsShaderAvailable(_giRadianceCascadeShaderHandle))
+                && IsShaderAvailable(_giCombineShaderHandle)
+                && IsShaderAvailable(_giDebugShaderHandle))
+            {
+                return true;
+            }
+
+            if (!_giUnavailableWarned)
+            {
+                _giUnavailableWarned = true;
+                var missingShaders = new List<string>();
+                AddMissingShader(missingShaders, _giOcclusionMaskShaderHandle, "/Shaders/Internal/gi-occlusion-mask.swsl");
+                AddMissingShader(missingShaders, _giJfaSeedShaderHandle, "/Shaders/Internal/gi-jfa-seed.swsl");
+                AddMissingShader(missingShaders, _giJfaJumpShaderHandle, "/Shaders/Internal/gi-jfa-jump.swsl");
+                if (_giBackend == GiBackend.Raymarch)
+                    AddMissingShader(missingShaders, _giTraceShaderHandle, "/Shaders/Internal/gi-trace.swsl");
+
+                if (_giBackend == GiBackend.RadianceCascades)
+                    AddMissingShader(missingShaders, _giRadianceCascadeShaderHandle, "/Shaders/Internal/gi-radiance-cascade.swsl");
+
+                AddMissingShader(missingShaders, _giCombineShaderHandle, "/Shaders/Internal/gi-combine.swsl");
+                AddMissingShader(missingShaders, _giDebugShaderHandle, "/Shaders/Internal/gi-debug.swsl");
+
+                _clydeSawmill.Warning($"Experimental GI requested, but one or more GI shaders are unavailable ({string.Join(", ", missingShaders)}). Falling back to the normal lighting path.");
+            }
+
+            return false;
+        }
+
+        private bool IsShaderAvailable(ClydeHandle handle)
+        {
+            return handle != default && _loadedShaders.ContainsKey(handle);
+        }
+
+        private void AddMissingShader(List<string> missingShaders, ClydeHandle handle, string path)
+        {
+            if (!IsShaderAvailable(handle))
+                missingShaders.Add(path);
+        }
+
+        private void RenderGlobalIllumination(Viewport viewport, IEye eye)
+        {
+            if (viewport.DirectLightTarget == null
+                || viewport.GiOcclusionMask == null
+                || viewport.GiJfaA == null
+                || viewport.GiJfaB == null
+                || viewport.GiCurrent == null
+                || viewport.GiPrevious == null)
+            {
+                return;
+            }
+
+            using var _ = DebugGroup(nameof(RenderGlobalIllumination));
+            using var _p = _prof.Group("GlobalIllumination");
+
+            var state = PushRenderStateFull();
+            var oldBlending = IsBlending;
+            var oldStencilling = IsStencilling;
+            IsBlending = false;
+            IsStencilling = false;
+
+            try
+            {
+                GetGiUvWorldMatrices(viewport, out var uvToWorld, out var worldToUv, out var giTexelWorldSize);
+                var historyValid = ValidateGiHistory(viewport, eye);
+
+                RenderGiOcclusionMask(viewport);
+                RenderGiJfa(viewport);
+
+                if (!historyValid)
+                    ClearRenderTexture(viewport.GiPrevious, Color.Black, clearStencil: false);
+
+                switch (_giBackend)
+                {
+                    case GiBackend.Raymarch:
+                        RenderGiTrace(viewport, eye, uvToWorld, worldToUv, giTexelWorldSize, historyValid);
+                        break;
+                    case GiBackend.RadianceCascades:
+                        RenderGiRadianceCascades(viewport, eye, uvToWorld, worldToUv, giTexelWorldSize, historyValid);
+                        break;
+                    default:
+                        RenderGiTrace(viewport, eye, uvToWorld, worldToUv, giTexelWorldSize, historyValid);
+                        break;
+                }
+
+                CopyRenderTexture(viewport.GiCurrent, viewport.GiPrevious);
+                StoreGiHistoryState(viewport, eye, uvToWorld, worldToUv);
+
+                unchecked
+                {
+                    _giFrameIndex++;
+                }
+            }
+            finally
+            {
+                IsBlending = oldBlending;
+                IsStencilling = oldStencilling;
+                PopRenderStateFull(state);
+            }
+        }
+
+        private void RenderGiOcclusionMask(Viewport viewport)
+        {
+            DebugTools.AssertNotNull(viewport.GiOcclusionMask);
+            using var _ = DebugGroup(nameof(RenderGiOcclusionMask));
+
+            var target = viewport.GiOcclusionMask!;
+            BindRenderTargetFull(target);
+            GL.Viewport(0, 0, target.Size.X, target.Size.Y);
+            CheckGlError();
+
+            GLClearColor(Color.Black);
+            GL.Clear(ClearBufferMask.ColorBufferBit);
+            CheckGlError();
+
+            var shader = _loadedShaders[_giOcclusionMaskShaderHandle].Program;
+            shader.Use();
+            SetupGlobalUniformsImmediate(shader, false);
+
+            BindVertexArray(_occlusionMaskVao.Handle);
+            CheckGlError();
+
+            GL.DrawElements(PrimitiveType.Triangles, _occlusionMaskDataLength, DrawElementsType.UnsignedShort,
+                IntPtr.Zero);
+            CheckGlError();
+            _debugStats.LastGLDrawCalls += 1;
+        }
+
+        private void RenderGiJfa(Viewport viewport)
+        {
+            DebugTools.AssertNotNull(viewport.GiOcclusionMask);
+            DebugTools.AssertNotNull(viewport.GiJfaA);
+            DebugTools.AssertNotNull(viewport.GiJfaB);
+            using var _ = DebugGroup(nameof(RenderGiJfa));
+
+            var size = viewport.GiJfaA!.Size;
+            CalcScreenMatrices(size, out var proj, out var view);
+            SetProjViewBuffer(proj, view);
+            GL.Viewport(0, 0, size.X, size.Y);
+            CheckGlError();
+
+            var seedShader = _loadedShaders[_giJfaSeedShaderHandle].Program;
+            seedShader.Use();
+            SetupGlobalUniformsImmediate(seedShader, viewport.GiOcclusionMask!.Texture);
+            SetTexture(TextureUnit.Texture0, viewport.GiOcclusionMask.Texture);
+            seedShader.SetUniformTextureMaybe(UniIMainTexture, TextureUnit.Texture0);
+            seedShader.SetUniformMaybe("targetSize", (Vector2)size);
+
+            BindRenderTargetFull(viewport.GiJfaA);
+            _drawQuad(Vector2.Zero, size, Matrix3x2.Identity, seedShader);
+
+            var source = viewport.GiJfaA;
+            var destination = viewport.GiJfaB!;
+            var jumpShader = _loadedShaders[_giJfaJumpShaderHandle].Program;
+            var step = InitialJumpFloodStep(Math.Max(size.X, size.Y));
+
+            while (step > 0)
+            {
+                RenderGiJfaJump(source, destination, jumpShader, step, size);
+                (source, destination) = (destination, source);
+                step /= 2;
+            }
+
+            if (!ReferenceEquals(source, viewport.GiJfaA))
+            {
+                RenderGiJfaJump(source, viewport.GiJfaA, jumpShader, 0, size);
+            }
+        }
+
+        private void RenderGiJfaJump(
+            RenderTexture source,
+            RenderTexture destination,
+            GLShaderProgram shader,
+            int step,
+            Vector2i size)
+        {
+            shader.Use();
+            SetupGlobalUniformsImmediate(shader, source.Texture);
+            SetTexture(TextureUnit.Texture0, source.Texture);
+            shader.SetUniformTextureMaybe(UniIMainTexture, TextureUnit.Texture0);
+            shader.SetUniformMaybe("targetSize", (Vector2)size);
+            shader.SetUniformMaybe("jumpStep", (float)step);
+
+            BindRenderTargetFull(destination);
+            _drawQuad(Vector2.Zero, size, Matrix3x2.Identity, shader);
+        }
+
+        private void RenderGiTrace(
+            Viewport viewport,
+            IEye eye,
+            Matrix3x2 uvToWorld,
+            Matrix3x2 worldToUv,
+            float giTexelWorldSize,
+            bool historyValid)
+        {
+            DebugTools.AssertNotNull(viewport.DirectLightTarget);
+            DebugTools.AssertNotNull(viewport.GiOcclusionMask);
+            DebugTools.AssertNotNull(viewport.GiJfaA);
+            DebugTools.AssertNotNull(viewport.GiCurrent);
+            DebugTools.AssertNotNull(viewport.GiPrevious);
+            using var _ = DebugGroup(nameof(RenderGiTrace));
+
+            var target = viewport.GiCurrent!;
+            var size = target.Size;
+
+            CalcScreenMatrices(size, out var proj, out var view);
+            SetProjViewBuffer(proj, view);
+
+            BindRenderTargetFull(target);
+            GL.Viewport(0, 0, size.X, size.Y);
+            CheckGlError();
+
+            GLClearColor(Color.Black);
+            GL.Clear(ClearBufferMask.ColorBufferBit);
+            CheckGlError();
+
+            var shader = _loadedShaders[_giTraceShaderHandle].Program;
+            shader.Use();
+            SetupGlobalUniformsImmediate(shader, viewport.DirectLightTarget!.Texture);
+
+            SetTexture(TextureUnit.Texture0, viewport.GiJfaA!.Texture);
+            SetTexture(TextureUnit.Texture1, viewport.DirectLightTarget.Texture);
+            SetTexture(TextureUnit.Texture2, viewport.GiPrevious!.Texture);
+            SetTexture(TextureUnit.Texture3, FovTexture);
+            SetTexture(TextureUnit.Texture4, viewport.GiOcclusionMask!.Texture);
+
+            shader.SetUniformTextureMaybe("jfaTexture", TextureUnit.Texture0);
+            shader.SetUniformTextureMaybe("directTexture", TextureUnit.Texture1);
+            shader.SetUniformTextureMaybe("previousGiTexture", TextureUnit.Texture2);
+            shader.SetUniformTextureMaybe("fovTexture", TextureUnit.Texture3);
+            shader.SetUniformTextureMaybe("occlusionTexture", TextureUnit.Texture4);
+            shader.SetUniformMaybe("targetSize", (Vector2)size);
+            shader.SetUniformMaybe("uvToWorld", uvToWorld);
+            shader.SetUniformMaybe("worldToUv", worldToUv);
+            shader.SetUniformMaybe("previousWorldToUv", viewport.GiPreviousWorldToUv);
+            shader.SetUniformMaybe("eyePosition", eye.Position.Position);
+            shader.SetUniformMaybe("fovEnabled", eye.DrawFov ? 1f : 0f);
+            shader.SetUniformMaybe("rays", (float)_giRays);
+            shader.SetUniformMaybe("steps", (float)_giSteps);
+            shader.SetUniformMaybe("historyWeight", historyValid ? _giHistoryWeight : 0f);
+            shader.SetUniformMaybe("bounceDecay", _giBounceDecay);
+            shader.SetUniformMaybe("frameIndex", (float)_giFrameIndex);
+            shader.SetUniformMaybe("giTexelWorldSize", giTexelWorldSize);
+            shader.SetUniformMaybe("temporalJitter", _giTemporalJitter);
+
+            _drawQuad(Vector2.Zero, size, Matrix3x2.Identity, shader);
+        }
+
+        private void RenderGiRadianceCascades(
+            Viewport viewport,
+            IEye eye,
+            Matrix3x2 uvToWorld,
+            Matrix3x2 worldToUv,
+            float giTexelWorldSize,
+            bool historyValid)
+        {
+            DebugTools.AssertNotNull(viewport.DirectLightTarget);
+            DebugTools.AssertNotNull(viewport.GiOcclusionMask);
+            DebugTools.AssertNotNull(viewport.GiJfaA);
+            DebugTools.AssertNotNull(viewport.GiCurrent);
+            DebugTools.AssertNotNull(viewport.GiPrevious);
+            using var _ = DebugGroup(nameof(RenderGiRadianceCascades));
+
+            var shader = _loadedShaders[_giRadianceCascadeShaderHandle].Program;
+            RenderTexture? previousCascade = null;
+
+            for (var cascade = _giRadianceCascades - 1; cascade >= 0; cascade--)
+            {
+                var target = GetGiRadianceCascadeTarget(viewport, cascade);
+                var size = target.Size;
+
+                CalcScreenMatrices(size, out var proj, out var view);
+                SetProjViewBuffer(proj, view);
+
+                BindRenderTargetFull(target);
+                GL.Viewport(0, 0, size.X, size.Y);
+                CheckGlError();
+
+                GLClearColor(Color.Black);
+                GL.Clear(ClearBufferMask.ColorBufferBit);
+                CheckGlError();
+
+                shader.Use();
+                SetupGlobalUniformsImmediate(shader, viewport.DirectLightTarget!.Texture);
+
+                SetTexture(TextureUnit.Texture0, viewport.GiJfaA!.Texture);
+                SetTexture(TextureUnit.Texture1, viewport.DirectLightTarget.Texture);
+                SetTexture(TextureUnit.Texture2, viewport.GiPrevious!.Texture);
+                SetTexture(TextureUnit.Texture3, FovTexture);
+                SetTexture(TextureUnit.Texture4, viewport.GiOcclusionMask!.Texture);
+                SetTexture(TextureUnit.Texture5, previousCascade?.Texture ?? viewport.GiPrevious.Texture);
+
+                shader.SetUniformTextureMaybe("jfaTexture", TextureUnit.Texture0);
+                shader.SetUniformTextureMaybe("directTexture", TextureUnit.Texture1);
+                shader.SetUniformTextureMaybe("previousGiTexture", TextureUnit.Texture2);
+                shader.SetUniformTextureMaybe("fovTexture", TextureUnit.Texture3);
+                shader.SetUniformTextureMaybe("occlusionTexture", TextureUnit.Texture4);
+                shader.SetUniformTextureMaybe("previousCascadeTexture", TextureUnit.Texture5);
+                shader.SetUniformMaybe("targetSize", (Vector2)size);
+                shader.SetUniformMaybe("uvToWorld", uvToWorld);
+                shader.SetUniformMaybe("worldToUv", worldToUv);
+                shader.SetUniformMaybe("previousWorldToUv", viewport.GiPreviousWorldToUv);
+                shader.SetUniformMaybe("eyePosition", eye.Position.Position);
+                shader.SetUniformMaybe("fovEnabled", eye.DrawFov ? 1f : 0f);
+                shader.SetUniformMaybe("rays", (float)GetGiRadianceCascadeRayCount(cascade));
+                shader.SetUniformMaybe("steps", (float)_giSteps);
+                shader.SetUniformMaybe("historyWeight", cascade == 0 && historyValid ? _giHistoryWeight : 0f);
+                shader.SetUniformMaybe("bounceDecay", _giBounceDecay);
+                shader.SetUniformMaybe("frameIndex", (float)_giFrameIndex);
+                shader.SetUniformMaybe("giTexelWorldSize", giTexelWorldSize);
+                shader.SetUniformMaybe("temporalJitter", _giTemporalJitter);
+                shader.SetUniformMaybe("cascadeIndex", (float)cascade);
+                shader.SetUniformMaybe("intervalStart", GetGiRadianceCascadeIntervalStart(cascade, giTexelWorldSize));
+                shader.SetUniformMaybe("intervalEnd", GetGiRadianceCascadeIntervalEnd(cascade, giTexelWorldSize));
+                shader.SetUniformMaybe("hasPreviousCascade", previousCascade != null ? 1f : 0f);
+                shader.SetUniformMaybe("isFinalCascade", cascade == 0 ? 1f : 0f);
+
+                _drawQuad(Vector2.Zero, size, Matrix3x2.Identity, shader);
+                previousCascade = target;
+            }
+        }
+
+        private RenderTexture GetGiRadianceCascadeTarget(Viewport viewport, int cascade)
+        {
+            DebugTools.Assert(cascade >= 0);
+            DebugTools.AssertNotNull(viewport.GiCurrent);
+
+            if (cascade == 0)
+                return viewport.GiCurrent!;
+
+            DebugTools.Assert(cascade - 1 < viewport.GiRadianceCascadeTargets.Length);
+            return viewport.GiRadianceCascadeTargets[cascade - 1];
+        }
+
+        private int GetGiRadianceCascadeRayCount(int cascade)
+        {
+            var multiplier = 1;
+            for (var i = 0; i < cascade; i++)
+                multiplier *= 4;
+
+            return Math.Clamp(_giRadianceCascadeBaseRays * multiplier, 1, 256);
+        }
+
+        private float GetGiRadianceCascadeIntervalStart(int cascade, float giTexelWorldSize)
+        {
+            return 0f;
+        }
+
+        private float GetGiRadianceCascadeIntervalEnd(int cascade, float giTexelWorldSize)
+        {
+            var intervalBase = giTexelWorldSize * _giSteps;
+            return intervalBase * (MathF.Pow(2f, cascade + 1) - 1f);
+        }
+
+        private void CombineGlobalIllumination(Viewport viewport)
+        {
+            DebugTools.AssertNotNull(viewport.DirectLightTarget);
+            DebugTools.AssertNotNull(viewport.GiCurrent);
+            using var _ = DebugGroup(nameof(CombineGlobalIllumination));
+
+            var size = viewport.LightRenderTarget.Size;
+            CalcScreenMatrices(size, out var proj, out var view);
+            SetProjViewBuffer(proj, view);
+
+            BindRenderTargetFull(viewport.LightRenderTarget);
+            GL.Viewport(0, 0, size.X, size.Y);
+            CheckGlError();
+
+            IsBlending = true;
+            GL.BlendFunc(BlendingFactor.One, BlendingFactor.One);
+            CheckGlError();
+
+            IsStencilling = true;
+            GL.StencilMask(0x00);
+            GL.StencilFunc(StencilFunction.Equal, 0xFF, 0xFF);
+            GL.StencilOp(TKStencilOp.Keep, TKStencilOp.Keep, TKStencilOp.Keep);
+            CheckGlError();
+
+            var shader = _loadedShaders[_giCombineShaderHandle].Program;
+            shader.Use();
+            SetupGlobalUniformsImmediate(shader, viewport.DirectLightTarget!.Texture);
+
+            SetTexture(TextureUnit.Texture0, viewport.DirectLightTarget.Texture);
+            SetTexture(TextureUnit.Texture1, viewport.GiCurrent!.Texture);
+            shader.SetUniformTextureMaybe("directTexture", TextureUnit.Texture0);
+            shader.SetUniformTextureMaybe("giTexture", TextureUnit.Texture1);
+            shader.SetUniformMaybe("giIntensity", _giIntensity);
+
+            _drawQuad(Vector2.Zero, size, Matrix3x2.Identity, shader);
+
+            ResetBlendFunc();
+            GL.StencilMask(0xFF);
+            CheckGlError();
+            IsStencilling = false;
+            SetProjViewBuffer(_currentMatrixProj, _currentMatrixView);
+        }
+
+        private void ApplyGiDebugMode(Viewport viewport)
+        {
+            if (_giDebugMode == (int)GiDebugMode.FinalCombined)
+                return;
+
+            DebugTools.AssertNotNull(viewport.DirectLightTarget);
+            DebugTools.AssertNotNull(viewport.GiOcclusionMask);
+            DebugTools.AssertNotNull(viewport.GiJfaA);
+            DebugTools.AssertNotNull(viewport.GiCurrent);
+            DebugTools.AssertNotNull(viewport.GiPrevious);
+            using var _ = DebugGroup(nameof(ApplyGiDebugMode));
+
+            var size = viewport.LightRenderTarget.Size;
+            CalcScreenMatrices(size, out var proj, out var view);
+            SetProjViewBuffer(proj, view);
+
+            BindRenderTargetFull(viewport.LightRenderTarget);
+            GL.Viewport(0, 0, size.X, size.Y);
+            CheckGlError();
+
+            var oldBlending = IsBlending;
+            IsBlending = false;
+            GLClearColor(Color.Black);
+            GL.Clear(ClearBufferMask.ColorBufferBit);
+            CheckGlError();
+
+            GetGiUvWorldMatrices(viewport, out var uvToWorld, out var unusedWorldToUv, out var unusedTexelWorldSize);
+
+            var shader = _loadedShaders[_giDebugShaderHandle].Program;
+            shader.Use();
+            SetupGlobalUniformsImmediate(shader, viewport.GiOcclusionMask!.Texture);
+
+            SetTexture(TextureUnit.Texture0, viewport.GiOcclusionMask.Texture);
+            SetTexture(TextureUnit.Texture1, viewport.GiJfaA!.Texture);
+            SetTexture(TextureUnit.Texture2, viewport.DirectLightTarget!.Texture);
+            SetTexture(TextureUnit.Texture3, viewport.GiCurrent!.Texture);
+            SetTexture(TextureUnit.Texture4, viewport.GiPrevious!.Texture);
+            SetTexture(TextureUnit.Texture5, GetGiDebugRadianceCascadeTexture(viewport, 1));
+            SetTexture(TextureUnit.Texture6, GetGiDebugRadianceCascadeTexture(viewport, 2));
+            SetTexture(TextureUnit.Texture7, GetGiDebugRadianceCascadeTexture(viewport, 3));
+            shader.SetUniformTextureMaybe("occlusionTexture", TextureUnit.Texture0);
+            shader.SetUniformTextureMaybe("jfaTexture", TextureUnit.Texture1);
+            shader.SetUniformTextureMaybe("directTexture", TextureUnit.Texture2);
+            shader.SetUniformTextureMaybe("giCurrentTexture", TextureUnit.Texture3);
+            shader.SetUniformTextureMaybe("giPreviousTexture", TextureUnit.Texture4);
+            shader.SetUniformTextureMaybe("radianceCascade1Texture", TextureUnit.Texture5);
+            shader.SetUniformTextureMaybe("radianceCascade2Texture", TextureUnit.Texture6);
+            shader.SetUniformTextureMaybe("radianceCascade3Texture", TextureUnit.Texture7);
+            shader.SetUniformMaybe("mode", (float)_giDebugMode);
+            shader.SetUniformMaybe("uvToWorld", uvToWorld);
+
+            _drawQuad(Vector2.Zero, size, Matrix3x2.Identity, shader);
+            SetProjViewBuffer(_currentMatrixProj, _currentMatrixView);
+            IsBlending = oldBlending;
+        }
+
+        private ClydeTexture GetGiDebugRadianceCascadeTexture(Viewport viewport, int cascade)
+        {
+            if (_giBackend == GiBackend.RadianceCascades
+                && cascade > 0
+                && cascade - 1 < viewport.GiRadianceCascadeTargets.Length)
+            {
+                return viewport.GiRadianceCascadeTargets[cascade - 1].Texture;
+            }
+
+            return viewport.GiCurrent!.Texture;
+        }
+
+        private bool ValidateGiHistory(Viewport viewport, IEye eye)
+        {
+            if (!viewport.GiHistoryValid)
+                return false;
+
+            if (viewport.GiPreviousSettingsVersion != _giSettingsVersion)
+                return false;
+
+            if (viewport.GiPreviousOcclusionHash != _occlusionMaskGeometryHash)
+                return false;
+
+            if (viewport.GiPreviousMap != eye.Position.MapId)
+                return false;
+
+            if ((viewport.GiPreviousEyePosition - eye.Position.Position).LengthSquared() > GiHistoryMaxCameraDeltaSquared)
+                return false;
+
+            if ((viewport.GiPreviousEyeZoom - eye.Zoom).LengthSquared() > GiHistoryMaxZoomDeltaSquared)
+                return false;
+
+            if (Math.Abs(Angle.ShortestDistance(viewport.GiPreviousEyeRotation, eye.Rotation).Theta) > GiHistoryMaxRotationDelta)
+                return false;
+
+            return true;
+        }
+
+        private void StoreGiHistoryState(
+            Viewport viewport,
+            IEye eye,
+            Matrix3x2 uvToWorld,
+            Matrix3x2 worldToUv)
+        {
+            viewport.GiHistoryValid = true;
+            viewport.GiPreviousUvToWorld = uvToWorld;
+            viewport.GiPreviousWorldToUv = worldToUv;
+            viewport.GiPreviousEyePosition = eye.Position.Position;
+            viewport.GiPreviousEyeZoom = eye.Zoom;
+            viewport.GiPreviousEyeRotation = eye.Rotation;
+            viewport.GiPreviousMap = eye.Position.MapId;
+            viewport.GiPreviousSettingsVersion = _giSettingsVersion;
+            viewport.GiPreviousOcclusionHash = _occlusionMaskGeometryHash;
+        }
+
+        private void GetGiUvWorldMatrices(
+            Viewport viewport,
+            out Matrix3x2 uvToWorld,
+            out Matrix3x2 worldToUv,
+            out float giTexelWorldSize)
+        {
+            var world0 = viewport.LocalToWorld(Vector2.Zero).Position;
+            var worldX = viewport.LocalToWorld(new Vector2(viewport.Size.X, 0)).Position - world0;
+            var worldY = viewport.LocalToWorld(new Vector2(0, viewport.Size.Y)).Position - world0;
+
+            uvToWorld = new Matrix3x2(worldX.X, worldX.Y, worldY.X, worldY.Y, world0.X, world0.Y);
+
+            if (!Matrix3x2.Invert(uvToWorld, out worldToUv))
+                worldToUv = Matrix3x2.Identity;
+
+            var giSize = viewport.GiCurrent?.Size ?? GetGiMapSize(viewport.Size);
+            var texelX = worldX.Length() / Math.Max(1, giSize.X);
+            var texelY = worldY.Length() / Math.Max(1, giSize.Y);
+            giTexelWorldSize = Math.Max(texelX, texelY);
+        }
+
+        private void ClearRenderTexture(RenderTexture target, Color color, bool clearStencil)
+        {
+            BindRenderTargetFull(target);
+            GLClearColor(color);
+            var mask = ClearBufferMask.ColorBufferBit;
+            if (clearStencil)
+            {
+                GL.ClearStencil(0xFF);
+                GL.StencilMask(0xFF);
+                mask |= ClearBufferMask.StencilBufferBit;
+            }
+
+            GL.Clear(mask);
+            CheckGlError();
+        }
+
+        private void CopyRenderTexture(RenderTexture source, RenderTexture destination)
+        {
+            var size = destination.Size;
+            CalcScreenMatrices(size, out var proj, out var view);
+            SetProjViewBuffer(proj, view);
+
+            BindRenderTargetFull(destination);
+            GL.Viewport(0, 0, size.X, size.Y);
+            CheckGlError();
+
+            IsBlending = false;
+
+            var shader = _loadedShaders[_mergeWallLayerShaderHandle].Program;
+            shader.Use();
+            SetupGlobalUniformsImmediate(shader, source.Texture);
+            SetTexture(TextureUnit.Texture0, source.Texture);
+            shader.SetUniformTextureMaybe(UniIMainTexture, TextureUnit.Texture0);
+
+            _drawQuad(Vector2.Zero, size, Matrix3x2.Identity, shader);
+        }
+
+        private static int InitialJumpFloodStep(int size)
+        {
+            var step = 1;
+            while (step < size)
+                step <<= 1;
+
+            return step >> 1;
         }
 
         private void ApplyFovToBuffer(Viewport viewport, IEye eye)
@@ -1570,6 +2278,36 @@ namespace Robust.Client.Graphics.Clyde
             return area * 0.5f;
         }
 
+        private static ulong HashOcclusionMaskGeometry(ReadOnlySpan<Vector2> vertices, ReadOnlySpan<ushort> indices)
+        {
+            const ulong offsetBasis = 14695981039346656037UL;
+            const ulong prime = 1099511628211UL;
+
+            var hash = offsetBasis;
+
+            void Add(uint value)
+            {
+                hash ^= value;
+                hash *= prime;
+            }
+
+            Add((uint) vertices.Length);
+            Add((uint) indices.Length);
+
+            foreach (var vertex in vertices)
+            {
+                Add(BitConverter.SingleToUInt32Bits(vertex.X));
+                Add(BitConverter.SingleToUInt32Bits(vertex.Y));
+            }
+
+            foreach (var index in indices)
+            {
+                Add(index);
+            }
+
+            return hash;
+        }
+
         private static Vector4 EdgeToVector4(Vector2 a, Vector2 b)
         {
             return new Vector4(a.X, a.Y, b.X, b.Y);
@@ -1754,6 +2492,7 @@ namespace Robust.Client.Graphics.Clyde
                 }
 
                 _occlusionMaskDataLength = imi;
+                _occlusionMaskGeometryHash = HashOcclusionMaskGeometry(arrayMaskBuffer.AsSpan(0, ami), indexMaskBuffer.AsSpan(0, imi));
 
                 BindVertexArray(_occlusionMaskVao.Handle);
                 CheckGlError();
@@ -1889,15 +2628,37 @@ namespace Robust.Client.Graphics.Clyde
 
             var lightMapSize = GetLightMapSize(viewport.Size);
             var lightMapSizeQuart = GetLightMapSize(viewport.Size, true);
+            var giMapSize = GetGiMapSize(viewport.Size);
 
             viewport.LightRenderTarget?.Dispose();
+            viewport.DirectLightTarget?.Dispose();
+            viewport.GiOcclusionMask?.Dispose();
+            viewport.GiJfaA?.Dispose();
+            viewport.GiJfaB?.Dispose();
+            viewport.GiCurrent?.Dispose();
+            viewport.GiPrevious?.Dispose();
+            foreach (var target in viewport.GiRadianceCascadeTargets)
+                target.Dispose();
+
             viewport.WallMaskRenderTarget?.Dispose();
+            viewport.LightBlurTarget?.Dispose();
             viewport.WallBleedIntermediateRenderTarget1?.Dispose();
             viewport.WallBleedIntermediateRenderTarget2?.Dispose();
+            viewport.DirectLightTarget = null;
+            viewport.GiOcclusionMask = null;
+            viewport.GiJfaA = null;
+            viewport.GiJfaB = null;
+            viewport.GiCurrent = null;
+            viewport.GiPrevious = null;
+            viewport.GiRadianceCascadeTargets = Array.Empty<RenderTexture>();
+            viewport.GiHistoryValid = false;
             var lightMapColorFormat = _hasGLFloatFramebuffers
                 ? RenderTargetColorFormat.R11FG11FB10F
                 : RenderTargetColorFormat.Rgba8;
             var lightMapSampleParameters = new TextureSampleParameters { Filter = true };
+            var giJfaFormat = _hasGLFloatFramebuffers
+                ? RenderTargetColorFormat.Rgba16F
+                : RenderTargetColorFormat.Rgba8;
 
             viewport.WallMaskRenderTarget = CreateRenderTarget(viewport.Size, RenderTargetColorFormat.R8,
                 name: $"{viewport.Name}-{nameof(viewport.WallMaskRenderTarget)}");
@@ -1909,6 +2670,48 @@ namespace Robust.Client.Graphics.Clyde
                 new RenderTargetFormatParameters(lightMapColorFormat),
                 lightMapSampleParameters,
                 $"{viewport.Name}-{nameof(viewport.LightBlurTarget)}");
+
+            if (_giEnabled)
+            {
+                viewport.DirectLightTarget = (RenderTexture) CreateLightRenderTarget(lightMapSize,
+                    $"{viewport.Name}-{nameof(viewport.DirectLightTarget)}");
+
+                viewport.GiOcclusionMask = CreateRenderTarget(giMapSize,
+                    new RenderTargetFormatParameters(RenderTargetColorFormat.R8),
+                    name: $"{viewport.Name}-{nameof(viewport.GiOcclusionMask)}");
+
+                viewport.GiJfaA = CreateRenderTarget(giMapSize,
+                    new RenderTargetFormatParameters(giJfaFormat),
+                    name: $"{viewport.Name}-{nameof(viewport.GiJfaA)}");
+
+                viewport.GiJfaB = CreateRenderTarget(giMapSize,
+                    new RenderTargetFormatParameters(giJfaFormat),
+                    name: $"{viewport.Name}-{nameof(viewport.GiJfaB)}");
+
+                viewport.GiCurrent = CreateRenderTarget(giMapSize,
+                    new RenderTargetFormatParameters(lightMapColorFormat),
+                    lightMapSampleParameters,
+                    $"{viewport.Name}-{nameof(viewport.GiCurrent)}");
+
+                viewport.GiPrevious = CreateRenderTarget(giMapSize,
+                    new RenderTargetFormatParameters(lightMapColorFormat),
+                    lightMapSampleParameters,
+                    $"{viewport.Name}-{nameof(viewport.GiPrevious)}");
+
+                if (_giBackend == GiBackend.RadianceCascades)
+                {
+                    viewport.GiRadianceCascadeTargets = new RenderTexture[Math.Max(0, _giRadianceCascades - 1)];
+                    for (var i = 0; i < viewport.GiRadianceCascadeTargets.Length; i++)
+                    {
+                        var cascade = i + 1;
+                        viewport.GiRadianceCascadeTargets[i] = CreateRenderTarget(
+                            GetGiRadianceCascadeMapSize(viewport.Size, cascade),
+                            new RenderTargetFormatParameters(lightMapColorFormat),
+                            lightMapSampleParameters,
+                            $"{viewport.Name}-{nameof(viewport.GiRadianceCascadeTargets)}{cascade}");
+                    }
+                }
+            }
 
             viewport.WallBleedIntermediateRenderTarget1 = CreateRenderTarget(lightMapSizeQuart,
                 new RenderTargetFormatParameters(lightMapColorFormat),
@@ -1946,10 +2749,132 @@ namespace Robust.Client.Graphics.Clyde
             return (w, h);
         }
 
+        private Vector2i GetGiMapSize(Vector2i screenSize)
+        {
+            return Robust.Client.Graphics.Lighting.GlobalIlluminationReference.ScaledTargetSize(screenSize, _giScale);
+        }
+
+        private Vector2i GetGiRadianceCascadeMapSize(Vector2i screenSize, int cascade)
+        {
+            var baseSize = GetGiMapSize(screenSize);
+            var divisor = 1 << Math.Clamp(cascade, 0, 8);
+            return new Vector2i(
+                Math.Max(1, (baseSize.X + divisor - 1) / divisor),
+                Math.Max(1, (baseSize.Y + divisor - 1) / divisor));
+        }
+
         private void LightResolutionScaleChanged(float newValue)
         {
             _lightResolutionScale = newValue > 0.05f ? newValue : 0.05f;
             RegenAllLightRts();
+        }
+
+        private void GiEnabledChanged(bool newValue)
+        {
+            if (_giEnabled == newValue)
+                return;
+
+            _giEnabled = newValue;
+            InvalidateGiSettings();
+            RegenAllLightRts();
+        }
+
+        private void GiBackendChanged(int newValue)
+        {
+            var backend = (GiBackend)Math.Clamp(newValue, 0, 1);
+            if (_giBackend == backend)
+                return;
+
+            _giBackend = backend;
+            _giUnavailableWarned = false;
+            InvalidateGiSettings();
+            RegenAllLightRts();
+        }
+
+        private void GiScaleChanged(float newValue)
+        {
+            var clamped = Math.Clamp(newValue, 0.05f, 1f);
+            if (MathHelper.CloseToPercent(_giScale, clamped))
+                return;
+
+            _giScale = clamped;
+            InvalidateGiSettings();
+            RegenAllLightRts();
+        }
+
+        private void GiRaysChanged(int newValue)
+        {
+            _giRays = Math.Clamp(newValue, 1, 64);
+            InvalidateGiSettings();
+        }
+
+        private void GiStepsChanged(int newValue)
+        {
+            _giSteps = Math.Clamp(newValue, 1, 128);
+            InvalidateGiSettings();
+        }
+
+        private void GiHistoryWeightChanged(float newValue)
+        {
+            _giHistoryWeight = Math.Clamp(newValue, 0f, 0.98f);
+            InvalidateGiSettings();
+        }
+
+        private void GiBounceDecayChanged(float newValue)
+        {
+            _giBounceDecay = Math.Clamp(newValue, 0f, 1f);
+            InvalidateGiSettings();
+        }
+
+        private void GiIntensityChanged(float newValue)
+        {
+            _giIntensity = Math.Clamp(newValue, 0f, 8f);
+        }
+
+        private void GiTemporalJitterChanged(float newValue)
+        {
+            _giTemporalJitter = Math.Clamp(newValue, 0f, 1f);
+            InvalidateGiSettings();
+        }
+
+        private void GiRadianceCascadesChanged(int newValue)
+        {
+            var clamped = Math.Clamp(newValue, 1, 4);
+            if (_giRadianceCascades == clamped)
+                return;
+
+            _giRadianceCascades = clamped;
+            InvalidateGiSettings();
+            RegenAllLightRts();
+        }
+
+        private void GiRadianceCascadeBaseRaysChanged(int newValue)
+        {
+            var clamped = Math.Clamp(newValue, 1, 16);
+            if (_giRadianceCascadeBaseRays == clamped)
+                return;
+
+            _giRadianceCascadeBaseRays = clamped;
+            InvalidateGiSettings();
+        }
+
+        private void GiDebugModeChanged(int newValue)
+        {
+            _giDebugMode = Math.Clamp(newValue, 0, 10);
+        }
+
+        private void InvalidateGiSettings()
+        {
+            unchecked
+            {
+                _giSettingsVersion++;
+            }
+
+            foreach (var viewportRef in _viewports.Values)
+            {
+                if (viewportRef.TryGetTarget(out var viewport))
+                    viewport.GiHistoryValid = false;
+            }
         }
 
         private void MaxShadowcastingLightsChanged(int newValue)

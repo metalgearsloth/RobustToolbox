@@ -1,0 +1,43 @@
+preset raw;
+
+uniform highp vec2 targetSize;
+uniform highp float jumpStep;
+
+varying highp vec2 pos;
+
+void vertex()
+{
+    VERTEX = apply_mvp(VERTEX);
+    pos = (VERTEX + vec2(1.0)) / 2.0;
+}
+
+void fragment()
+{
+    highp vec2 texel = vec2(jumpStep) / targetSize;
+    highp vec4 bestSeed = vec4(-1.0, -1.0, 0.0, 1.0);
+    highp float bestDistance = 1000000.0;
+
+    for (int y = -1; y <= 1; y++)
+    {
+        for (int x = -1; x <= 1; x++)
+        {
+            highp vec2 sampleUv = pos + vec2(float(x), float(y)) * texel;
+            if (sampleUv.x < 0.0 || sampleUv.y < 0.0 || sampleUv.x > 1.0 || sampleUv.y > 1.0)
+                continue;
+
+            highp vec4 candidate = zTexture(sampleUv);
+            if (candidate.z >= 0.5)
+            {
+                highp vec2 diff = candidate.xy - pos;
+                highp float dist = dot(diff, diff);
+                if (dist < bestDistance)
+                {
+                    bestDistance = dist;
+                    bestSeed = candidate;
+                }
+            }
+        }
+    }
+
+    COLOR = bestSeed;
+}

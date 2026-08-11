@@ -1,0 +1,78 @@
+preset raw;
+
+uniform sampler2D occlusionTexture;
+uniform sampler2D jfaTexture;
+uniform sampler2D directTexture;
+uniform sampler2D giCurrentTexture;
+uniform sampler2D giPreviousTexture;
+uniform sampler2D radianceCascade1Texture;
+uniform sampler2D radianceCascade2Texture;
+uniform sampler2D radianceCascade3Texture;
+
+uniform highp float mode;
+uniform highp mat3 uvToWorld;
+
+varying highp vec2 pos;
+
+void vertex()
+{
+    VERTEX = apply_mvp(VERTEX);
+    pos = (VERTEX + vec2(1.0)) / 2.0;
+}
+
+void fragment()
+{
+    if (mode < 1.5)
+    {
+        highp float mask = texture2D(occlusionTexture, pos).r;
+        COLOR = vec4(vec3(mask), 1.0);
+    }
+    else if (mode < 2.5)
+    {
+        highp vec4 seed = texture2D(jfaTexture, pos);
+        COLOR = seed.z > 0.5 ? vec4(seed.xy, 0.0, 1.0) : vec4(0.0, 0.0, 0.0, 1.0);
+    }
+    else if (mode < 3.5)
+    {
+        highp vec4 seed = texture2D(jfaTexture, pos);
+        if (seed.z < 0.5)
+        {
+            COLOR = vec4(0.0, 0.0, 0.2, 1.0);
+            return;
+        }
+
+        highp vec2 world = (uvToWorld * vec3(pos, 1.0)).xy;
+        highp vec2 seedWorld = (uvToWorld * vec3(seed.xy, 1.0)).xy;
+        highp float dist = length(world - seedWorld);
+        highp float shade = clamp(dist / 8.0, 0.0, 1.0);
+        COLOR = vec4(vec3(shade), 1.0);
+    }
+    else if (mode < 4.5)
+    {
+        COLOR = vec4(texture2D(directTexture, pos).rgb, 1.0);
+    }
+    else if (mode < 5.5)
+    {
+        COLOR = vec4(texture2D(giCurrentTexture, pos).rgb, 1.0);
+    }
+    else if (mode < 6.5)
+    {
+        COLOR = vec4(texture2D(giPreviousTexture, pos).rgb, 1.0);
+    }
+    else if (mode < 7.5)
+    {
+        COLOR = vec4(texture2D(giCurrentTexture, pos).rgb + texture2D(directTexture, pos).rgb, 1.0);
+    }
+    else if (mode < 8.5)
+    {
+        COLOR = vec4(texture2D(radianceCascade1Texture, pos).rgb, 1.0);
+    }
+    else if (mode < 9.5)
+    {
+        COLOR = vec4(texture2D(radianceCascade2Texture, pos).rgb, 1.0);
+    }
+    else
+    {
+        COLOR = vec4(texture2D(radianceCascade3Texture, pos).rgb, 1.0);
+    }
+}

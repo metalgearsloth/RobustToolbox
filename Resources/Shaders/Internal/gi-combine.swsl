@@ -1,0 +1,20 @@
+preset raw;
+
+uniform sampler2D directTexture;
+uniform sampler2D giTexture;
+uniform highp float giIntensity;
+
+varying highp vec2 pos;
+
+void vertex()
+{
+    VERTEX = apply_mvp(VERTEX);
+    pos = (VERTEX + vec2(1.0)) / 2.0;
+}
+
+void fragment()
+{
+    highp vec3 direct = texture2D(directTexture, pos).rgb;
+    highp vec3 gi = texture2D(giTexture, pos).rgb * giIntensity;
+    COLOR = vec4(direct + gi, 1.0);
+}

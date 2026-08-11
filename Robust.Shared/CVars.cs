@@ -1001,6 +1001,80 @@ namespace Robust.Shared
         public static readonly CVarDef<float> LightBlurFactor =
             CVarDef.Create("light.blur_factor", 0.001f, CVar.CLIENTONLY | CVar.ARCHIVE);
 
+        /// <summary>
+        /// Enables experimental low-resolution screen-space GI/radiosity on top of the normal direct-light pass.
+        /// </summary>
+        public static readonly CVarDef<bool> DisplayGiEnabled =
+            CVarDef.Create("display.gi_enabled", true, CVar.CLIENTONLY | CVar.ARCHIVE);
+
+        /// <summary>
+        /// Experimental GI backend. 0=SDF raymarch, 1=radiance cascades.
+        /// </summary>
+        public static readonly CVarDef<int> DisplayGiBackend =
+            CVarDef.Create("display.gi_backend", 0, CVar.CLIENTONLY | CVar.ARCHIVE);
+
+        /// <summary>
+        /// Scale of the GI buffers relative to the viewport framebuffer size.
+        /// </summary>
+        public static readonly CVarDef<float> DisplayGiScale =
+            CVarDef.Create("display.gi_scale", 0.25f, CVar.CLIENTONLY | CVar.ARCHIVE);
+
+        /// <summary>
+        /// Number of directions traced per GI pixel.
+        /// </summary>
+        public static readonly CVarDef<int> DisplayGiRays =
+            CVarDef.Create("display.gi_rays", 8, CVar.CLIENTONLY | CVar.ARCHIVE);
+
+        /// <summary>
+        /// Maximum SDF raymarch steps per GI ray.
+        /// </summary>
+        public static readonly CVarDef<int> DisplayGiSteps =
+            CVarDef.Create("display.gi_steps", 16, CVar.CLIENTONLY | CVar.ARCHIVE);
+
+        /// <summary>
+        /// Amount of previous-frame GI retained during temporal accumulation.
+        /// </summary>
+        public static readonly CVarDef<float> DisplayGiHistoryWeight =
+            CVarDef.Create("display.gi_history_weight", 0.85f, CVar.CLIENTONLY | CVar.ARCHIVE);
+
+        /// <summary>
+        /// Diffuse bounce multiplier applied to direct and previous-frame GI gathered at ray hits.
+        /// </summary>
+        public static readonly CVarDef<float> DisplayGiBounceDecay =
+            CVarDef.Create("display.gi_bounce_decay", 0.65f, CVar.CLIENTONLY | CVar.ARCHIVE);
+
+        /// <summary>
+        /// Multiplier applied when combining the experimental GI buffer into the final light buffer.
+        /// </summary>
+        public static readonly CVarDef<float> DisplayGiIntensity =
+            CVarDef.Create("display.gi_intensity", 2.0f, CVar.CLIENTONLY | CVar.ARCHIVE);
+
+        /// <summary>
+        /// Amount of per-frame angular jitter applied to GI rays. 0 is stable, 1 uses full temporal jitter.
+        /// </summary>
+        public static readonly CVarDef<float> DisplayGiTemporalJitter =
+            CVarDef.Create("display.gi_temporal_jitter", 0.0f, CVar.CLIENTONLY | CVar.ARCHIVE);
+
+        /// <summary>
+        /// Number of radiance cascade levels used when <c>display.gi_backend</c> is 1.
+        /// </summary>
+        public static readonly CVarDef<int> DisplayGiRadianceCascades =
+            CVarDef.Create("display.gi_radiance_cascades", 3, CVar.CLIENTONLY | CVar.ARCHIVE);
+
+        /// <summary>
+        /// Number of directions traced per radiance-cascade probe. Total far-field angular resolution grows per cascade.
+        /// </summary>
+        public static readonly CVarDef<int> DisplayGiRadianceCascadeBaseRays =
+            CVarDef.Create("display.gi_radiance_cascade_base_rays", 4, CVar.CLIENTONLY | CVar.ARCHIVE);
+
+        /// <summary>
+        /// Debug visualization for GI buffers. 0=disabled, 1=occlusion, 2=JFA seeds, 3=SDF,
+        /// 4=direct light, 5=GI current, 6=GI history, 7=final combined lighting,
+        /// 8-10=radiance cascade levels 1-3.
+        /// </summary>
+        public static readonly CVarDef<int> DisplayGiDebug =
+            CVarDef.Create("display.gi_debug", 0, CVar.CLIENTONLY | CVar.ARCHIVE);
+
         /*
          * Lookup
          */

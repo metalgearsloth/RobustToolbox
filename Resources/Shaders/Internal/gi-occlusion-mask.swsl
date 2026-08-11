@@ -1,0 +1,12 @@
+preset raw;
+
+void vertex()
+{
+    highp vec3 transformed = projectionMatrix * viewMatrix * vec3(VERTEX, 1.0);
+    VERTEX = transformed.xy;
+}
+
+void fragment()
+{
+    COLOR = vec4(1.0);
+}

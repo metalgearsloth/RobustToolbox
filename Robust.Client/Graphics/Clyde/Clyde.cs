@@ -122,6 +122,18 @@ namespace Robust.Client.Graphics.Clyde
             _cfg.OnValueChanged(CVars.LightSoftShadows, SoftShadowsChanged, true);
             _cfg.OnValueChanged(CVars.MaxLightCount, MaxLightsChanged, true);
             _cfg.OnValueChanged(CVars.MaxOccluderCount, MaxOccludersChanged, true);
+            _cfg.OnValueChanged(CVars.DisplayGiEnabled, GiEnabledChanged, true);
+            _cfg.OnValueChanged(CVars.DisplayGiBackend, GiBackendChanged, true);
+            _cfg.OnValueChanged(CVars.DisplayGiScale, GiScaleChanged, true);
+            _cfg.OnValueChanged(CVars.DisplayGiRays, GiRaysChanged, true);
+            _cfg.OnValueChanged(CVars.DisplayGiSteps, GiStepsChanged, true);
+            _cfg.OnValueChanged(CVars.DisplayGiHistoryWeight, GiHistoryWeightChanged, true);
+            _cfg.OnValueChanged(CVars.DisplayGiBounceDecay, GiBounceDecayChanged, true);
+            _cfg.OnValueChanged(CVars.DisplayGiIntensity, GiIntensityChanged, true);
+            _cfg.OnValueChanged(CVars.DisplayGiTemporalJitter, GiTemporalJitterChanged, true);
+            _cfg.OnValueChanged(CVars.DisplayGiRadianceCascades, GiRadianceCascadesChanged, true);
+            _cfg.OnValueChanged(CVars.DisplayGiRadianceCascadeBaseRays, GiRadianceCascadeBaseRaysChanged, true);
+            _cfg.OnValueChanged(CVars.DisplayGiDebug, GiDebugModeChanged, true);
             _cfg.OnValueChanged(CVars.RenderTileEdges, RenderTileEdgesChanges, true);
             // I can't be bothered to tear down and set these threads up in a cvar change handler.
 

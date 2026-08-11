@@ -115,6 +115,14 @@ namespace Robust.Client.Graphics.Clyde
             // Lighting is drawn into this. This then gets sampled later while rendering world-space stuff.
             public RenderTexture LightRenderTarget = default!;
 
+            public RenderTexture? DirectLightTarget;
+            public RenderTexture? GiOcclusionMask;
+            public RenderTexture? GiJfaA;
+            public RenderTexture? GiJfaB;
+            public RenderTexture? GiCurrent;
+            public RenderTexture? GiPrevious;
+            public RenderTexture[] GiRadianceCascadeTargets = Array.Empty<RenderTexture>();
+
             public RenderTexture LightBlurTarget = default!;
 
             // Unused, to be removed.
@@ -124,6 +132,16 @@ namespace Robust.Client.Graphics.Clyde
             // We need two of them because efficient blur works in two stages and also we're doing multiple iterations.
             public RenderTexture WallBleedIntermediateRenderTarget1 = default!;
             public RenderTexture WallBleedIntermediateRenderTarget2 = default!;
+
+            public bool GiHistoryValid;
+            public Matrix3x2 GiPreviousUvToWorld;
+            public Matrix3x2 GiPreviousWorldToUv;
+            public Vector2 GiPreviousEyePosition;
+            public Vector2 GiPreviousEyeZoom;
+            public Angle GiPreviousEyeRotation;
+            public MapId GiPreviousMap;
+            public int GiPreviousSettingsVersion;
+            public ulong GiPreviousOcclusionHash;
 
             public string? Name { get; }
 
@@ -222,6 +240,16 @@ namespace Robust.Client.Graphics.Clyde
 
                 RenderTarget.Dispose();
                 LightRenderTarget.Dispose();
+                DirectLightTarget?.Dispose();
+                GiOcclusionMask?.Dispose();
+                GiJfaA?.Dispose();
+                GiJfaB?.Dispose();
+                GiCurrent?.Dispose();
+                GiPrevious?.Dispose();
+                foreach (var target in GiRadianceCascadeTargets)
+                    target.Dispose();
+
+                LightBlurTarget.Dispose();
                 WallMaskRenderTarget.Dispose();
                 WallBleedIntermediateRenderTarget1.Dispose();
                 WallBleedIntermediateRenderTarget2.Dispose();

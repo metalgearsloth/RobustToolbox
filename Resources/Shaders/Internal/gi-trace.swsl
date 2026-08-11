@@ -1,0 +1,164 @@
+preset raw;
+
+#include "/Shaders/Internal/shadow_cast_shared.swsl"
+
+const highp float g_MinVariance = 0.0;
+const highp float TWO_PI = 6.28318530717958647692;
+
+uniform sampler2D jfaTexture;
+uniform sampler2D directTexture;
+uniform sampler2D previousGiTexture;
+uniform sampler2D fovTexture;
+uniform sampler2D occlusionTexture;
+
+uniform highp vec2 targetSize;
+uniform highp mat3 uvToWorld;
+uniform highp mat3 worldToUv;
+uniform highp mat3 previousWorldToUv;
+uniform highp vec2 eyePosition;
+uniform highp float fovEnabled;
+uniform highp float rays;
+uniform highp float steps;
+uniform highp float historyWeight;
+uniform highp float bounceDecay;
+uniform highp float frameIndex;
+uniform highp float giTexelWorldSize;
+uniform highp float temporalJitter;
+
+varying highp vec2 pos;
+varying highp vec2 worldPosition;
+
+void vertex()
+{
+    VERTEX = apply_mvp(VERTEX);
+    pos = (VERTEX + vec2(1.0)) / 2.0;
+    worldPosition = (uvToWorld * vec3(pos, 1.0)).xy;
+}
+
+highp float hash12(highp vec2 p)
+{
+    highp vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+bool uvInside(highp vec2 uv)
+{
+    return uv.x >= 0.0 && uv.y >= 0.0 && uv.x <= 1.0 && uv.y <= 1.0;
+}
+
+highp float fovVisibility(highp vec2 world)
+{
+    if (fovEnabled < 0.5)
+        return 1.0;
+
+    highp vec2 diff = world - eyePosition;
+    highp float dist = length(diff);
+    return ChebyshevUpperBound(occludeDepth(diff, fovTexture, 0.25), dist);
+}
+
+highp vec3 samplePreviousGiAtWorld(highp vec2 world)
+{
+    highp vec2 previousUv = (previousWorldToUv * vec3(world, 1.0)).xy;
+    if (!uvInside(previousUv))
+        return vec3(0.0);
+
+    return texture2D(previousGiTexture, previousUv).rgb;
+}
+
+highp vec3 sampleRadianceAtWorld(highp vec2 world)
+{
+    if (fovVisibility(world) <= 0.001)
+        return vec3(0.0);
+
+    highp vec2 uv = (worldToUv * vec3(world, 1.0)).xy;
+    if (!uvInside(uv))
+        return vec3(0.0);
+
+    highp vec3 direct = texture2D(directTexture, uv).rgb;
+    highp vec3 previous = samplePreviousGiAtWorld(world);
+    return direct + previous;
+}
+
+highp vec3 traceRay(highp vec2 direction)
+{
+    highp vec2 rayWorld = worldPosition + direction * giTexelWorldSize;
+    highp float traveled = giTexelWorldSize;
+    highp float hitDistance = giTexelWorldSize * 1.5;
+    highp float minimumStep = giTexelWorldSize * 0.5;
+    highp vec3 bestRadiance = vec3(0.0);
+    highp float bestScore = 0.0;
+
+    for (int i = 0; i < 128; i++)
+    {
+        if (float(i) >= steps)
+            break;
+
+        highp vec2 rayUv = (worldToUv * vec3(rayWorld, 1.0)).xy;
+        if (!uvInside(rayUv))
+            break;
+
+        highp vec3 rayRadiance = sampleRadianceAtWorld(rayWorld);
+        highp float rayLuma = dot(rayRadiance, vec3(0.2126, 0.7152, 0.0722));
+        highp float rayScore = rayLuma / (1.0 + traveled * 0.35);
+        if (rayScore > bestScore)
+        {
+            bestScore = rayScore;
+            bestRadiance = rayRadiance / (1.0 + traveled * 0.35);
+        }
+
+        highp float occluder = texture2D(occlusionTexture, rayUv).r;
+        highp vec4 seed = texture2D(jfaTexture, rayUv);
+        highp float distanceToWall = 1000000.0;
+        if (seed.z >= 0.5)
+        {
+            highp vec2 seedWorld = (uvToWorld * vec3(seed.xy, 1.0)).xy;
+            distanceToWall = length(seedWorld - rayWorld);
+        }
+
+        if (occluder > 0.5 || distanceToWall <= hitDistance)
+        {
+            highp vec2 hitUv = occluder > 0.5 ? rayUv : seed.xy;
+            highp vec2 hitWorld = (uvToWorld * vec3(hitUv, 1.0)).xy;
+            highp vec3 surfaceRadiance = sampleRadianceAtWorld(hitWorld - direction * giTexelWorldSize);
+            return max(bestRadiance, surfaceRadiance) * fovVisibility(hitWorld);
+        }
+
+        highp float stepLength = max(distanceToWall - hitDistance, minimumStep);
+        rayWorld += direction * stepLength;
+        traveled += stepLength;
+    }
+
+    return bestRadiance;
+}
+
+void fragment()
+{
+    if (!uvInside(pos) || fovVisibility(worldPosition) <= 0.001)
+    {
+        COLOR = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
+
+    highp vec2 worldCell = floor(worldPosition / max(giTexelWorldSize, 0.0001));
+    highp float stableRotation = hash12(worldCell) * TWO_PI;
+    highp float temporalRotation = hash12(worldCell + vec2(frameIndex * 13.17, frameIndex * 7.31)) * TWO_PI / max(rays, 1.0);
+    highp float randomRotation = stableRotation + temporalRotation * temporalJitter;
+    highp vec3 gathered = vec3(0.0);
+
+    for (int i = 0; i < 64; i++)
+    {
+        if (float(i) >= rays)
+            break;
+
+        highp float angle = (float(i) / max(rays, 1.0)) * TWO_PI + randomRotation;
+        highp vec2 direction = vec2(cos(angle), sin(angle));
+        gathered += traceRay(direction);
+    }
+
+    gathered = gathered / max(rays, 1.0) * bounceDecay;
+
+    highp vec3 previousHere = samplePreviousGiAtWorld(worldPosition);
+    highp vec3 accumulated = mix(gathered, previousHere, historyWeight);
+    COLOR = vec4(accumulated, 1.0);
+}
