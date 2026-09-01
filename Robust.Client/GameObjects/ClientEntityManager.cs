@@ -74,6 +74,16 @@ namespace Robust.Client.GameObjects
             return base.CreateEntity(prototypeName, out metadata);
         }
 
+        EntityUid IClientEntityManagerInternal.CreateEntity(string? prototypeName, NetEntity netEntity, out MetaDataComponent metadata)
+        {
+            return CreateEntity(prototypeName, netEntity, out metadata);
+        }
+
+        internal EntityUid CreateEntity(string? prototypeName, NetEntity netEntity, out MetaDataComponent metadata)
+        {
+            return base.CreateEntity(prototypeName, netEntity, out metadata);
+        }
+
         /// <inheritdoc />
         public override void DirtyEntity(EntityUid uid, MetaDataComponent? meta = null)
         {

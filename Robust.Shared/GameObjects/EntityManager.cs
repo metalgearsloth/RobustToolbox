@@ -942,6 +942,11 @@ namespace Robust.Shared.GameObjects
         /// </summary>
         private EntityUid AllocEntity(out MetaDataComponent metadata)
         {
+            return AllocEntity(NetEntity.Invalid, out metadata);
+        }
+
+        private EntityUid AllocEntity(NetEntity netEntity, out MetaDataComponent metadata)
+        {
             ThreadCheck();
 
             var uid = GenerateEntityUid();
@@ -961,7 +966,9 @@ namespace Robust.Shared.GameObjects
                 EntityLastModifiedTick = _gameTiming.CurTick
             };
 
-            var netEntity = GenerateNetEntity();
+            if (netEntity == NetEntity.Invalid)
+                netEntity = GenerateNetEntity();
+
             SetNetEntity(uid, netEntity, metadata);
 
             // we want this called before adding components
@@ -996,6 +1003,17 @@ namespace Robust.Shared.GameObjects
             return CreateEntity(prototype, out metadata, context);
         }
 
+        internal virtual EntityUid CreateEntity(string? prototypeName, NetEntity netEntity, out MetaDataComponent metadata, IEntityLoadContext? context = null)
+        {
+            if (prototypeName == null)
+                return AllocEntity(netEntity, out metadata);
+
+            if (!PrototypeManager.TryIndex<EntityPrototype>(prototypeName, out var prototype))
+                throw new EntityCreationException($"Attempted to spawn an entity with an invalid prototype: {prototypeName}");
+
+            return CreateEntity(prototype, netEntity, out metadata, context);
+        }
+
         /// <summary>
         ///     Allocates an entity and loads components but does not do initialization.
         /// </summary>
@@ -1011,6 +1029,24 @@ namespace Robust.Shared.GameObjects
             {
                 // Exception during entity loading.
                 // Need to delete the entity to avoid corrupt state causing crashes later.
+                DeleteEntity(entity);
+                throw new EntityCreationException($"Exception inside CreateEntity with prototype {prototype.ID}", e);
+            }
+        }
+
+        private protected EntityUid CreateEntity(EntityPrototype prototype, NetEntity netEntity, out MetaDataComponent metadata, IEntityLoadContext? context = null)
+        {
+            var entity = AllocEntity(netEntity, out metadata);
+            metadata._entityPrototype = prototype;
+            Dirty(entity, metadata, metadata);
+
+            try
+            {
+                EntityPrototype.LoadEntity((entity, metadata), ComponentFactory, this, _serManager, context);
+                return entity;
+            }
+            catch (Exception e)
+            {
                 DeleteEntity(entity);
                 throw new EntityCreationException($"Exception inside CreateEntity with prototype {prototype.ID}", e);
             }

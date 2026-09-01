@@ -7,5 +7,6 @@ namespace Robust.Client.GameObjects
         // These methods are used by the Game State Manager.
 
         EntityUid CreateEntity(string? prototypeName, out MetaDataComponent metadata);
+        EntityUid CreateEntity(string? prototypeName, NetEntity netEntity, out MetaDataComponent metadata);
     }
 }

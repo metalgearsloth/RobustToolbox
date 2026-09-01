@@ -481,36 +481,29 @@ Had full state: {LastFullState != null}"
             LastFullStateRequested = null;
         }
 
-        public void MergeImplicitData(Dictionary<NetEntity, Dictionary<ushort, IComponentState?>> implicitData)
+        public void MergeImplicitData(NetEntity netEntity, ushort netId, IComponentState? implicitState)
         {
-            foreach (var (netEntity, implicitEntState) in implicitData)
+            DebugTools.Assert(implicitState is not IComponentDeltaState);
+
+            var fullRep = _lastStateFullRep[netEntity];
+            ref var serverState = ref CollectionsMarshal.GetValueRefOrAddDefault(fullRep, netId, out var exists);
+
+            if (!exists)
             {
-                var fullRep = _lastStateFullRep[netEntity];
-                fullRep.EnsureCapacity(implicitEntState.Count);
-
-                foreach (var (netId, implicitCompState) in implicitEntState)
-                {
-                    DebugTools.Assert(implicitCompState is not IComponentDeltaState);
-                    ref var serverState = ref CollectionsMarshal.GetValueRefOrAddDefault(fullRep, netId, out var exists);
-
-                    if (!exists)
-                    {
-                        serverState = implicitCompState;
-                        continue;
-                    }
-
-                    if (serverState is not IComponentDeltaState serverDelta)
-                        continue;
-
-                    DebugTools.AssertNotNull(implicitCompState);
-
-                    // Server sent an initial delta state. This is fine as long as the client can infer an initial full
-                    // state from the entity prototype.
-                    serverDelta.ApplyToFullState(implicitCompState!);
-                    serverState = implicitCompState;
-                    DebugTools.Assert(serverState is not IComponentDeltaState);
-                }
+                serverState = implicitState;
+                return;
             }
+
+            if (serverState is not IComponentDeltaState serverDelta)
+                return;
+
+            DebugTools.AssertNotNull(implicitState);
+
+            // Server sent an initial delta state. This is fine as long as the client can infer an initial full
+            // state from the entity prototype.
+            serverDelta.ApplyToFullState(implicitState!);
+            serverState = implicitState;
+            DebugTools.Assert(serverState is not IComponentDeltaState);
         }
 
         public Dictionary<ushort, IComponentState?> GetLastServerStates(NetEntity netEntity)

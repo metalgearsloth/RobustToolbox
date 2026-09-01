@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using JetBrains.Annotations;
-using Microsoft.Extensions.ObjectPool;
 using Robust.Client.GameObjects;
 using Robust.Client.Input;
 using Robust.Client.Physics;
@@ -53,7 +52,6 @@ namespace Robust.Client.GameStates
         private readonly HashSet<NetEntity> _stateEnts = new();
         private readonly List<EntityUid> _toDelete = new();
         private readonly List<IComponent> _toRemove = new();
-        private readonly Dictionary<NetEntity, Dictionary<ushort, IComponentState?>> _outputData = new();
         private readonly List<(EntityUid, TransformComponent)> _queuedBroadphaseUpdates = new();
         private readonly HashSet<EntityUid> _sorted = new();
         private readonly List<NetEntity> _created = new();
@@ -73,9 +71,6 @@ namespace Robust.Client.GameStates
             EntityState? CurState,
             EntityState? NextState,
             HashSet<ushort>? PendingReapply);
-
-        private readonly ObjectPool<Dictionary<ushort, IComponentState?>> _compDataPool =
-            new DefaultObjectPool<Dictionary<ushort, IComponentState?>>(new DictPolicy<ushort, IComponentState?>(), 256);
 
         private uint _metaCompNetId;
         private uint _xformCompNetId;
@@ -182,7 +177,6 @@ namespace Robust.Client.GameStates
             _conHost.RegisterCommand("localdelete", Loc.GetString("cmd-local-delete-desc"), Loc.GetString("cmd-local-delete-help"), LocalDeleteEntCommand);
             _conHost.RegisterCommand("fullstatereset", Loc.GetString("cmd-full-state-reset-desc"), Loc.GetString("cmd-full-state-reset-help"), (_, _, _) => RequestFullState());
 
-            _entities.ComponentAdded += OnComponentAdded;
             _entitySystemManager.SystemLoaded += OnEntitySystemLoaded;
             _entitySystemManager.SystemUnloaded += OnEntitySystemUnloaded;
             if (_entitySystemManager.TryGetEntitySystem(out ClientChunkEntitySystem? chunkEntities))
@@ -661,6 +655,7 @@ namespace Robust.Client.GameStates
                 try
                 {
                     _resettingPredictedEntities = true;
+                    _entities.ComponentAdded += OnComponentAdded;
 
                     if (predictedDetached)
                         meta.Flags &= ~MetaDataFlags.Detached;
@@ -709,6 +704,7 @@ namespace Robust.Client.GameStates
                 }
                 finally
                 {
+                    _entities.ComponentAdded -= OnComponentAdded;
                     _resettingPredictedEntities = false;
                 }
 
@@ -787,28 +783,23 @@ namespace Robust.Client.GameStates
 #endif
                 }
 
-                var compData = _compDataPool.Get();
-                _outputData.Add(netEntity, compData);
+                var fullRep = _processor.GetLastServerStates(netEntity);
 
                 foreach (var (netId, component) in meta.NetComponents)
                 {
                     DebugTools.Assert(component.NetSyncEnabled);
 
-                    var state = _entities.GetComponentState(bus, component, null, GameTick.Zero);
-                    DebugTools.Assert(state is not IComponentDeltaState);
-                    compData.Add(netId, state);
+                    ref var serverState = ref CollectionsMarshal.GetValueRefOrNullRef(fullRep, netId);
+                    if (!System.Runtime.CompilerServices.Unsafe.IsNullRef(ref serverState) && serverState is not IComponentDeltaState)
+                        continue;
+
+                    var implicitState = _entities.GetComponentState(bus, component, null, GameTick.Zero);
+                    DebugTools.Assert(implicitState is not IComponentDeltaState);
+                    _processor.MergeImplicitData(netEntity, netId, implicitState);
                 }
             }
 
             _created.Clear();
-            _processor.MergeImplicitData(_outputData);
-
-            foreach (var data in _outputData.Values)
-            {
-                _compDataPool.Return(data);
-            }
-
-            _outputData.Clear();
         }
 
         private void AckGameState(GameTick sequence)
@@ -1103,19 +1094,10 @@ namespace Robust.Client.GameStates
                 metaChange.State is not MetaDataComponentState metaState)
                 throw new MissingMetadataException(state.NetEntity);
 
-            // record the entity we created to the profiler
-            using var group = _prof.Group($"Create entity {metaState.PrototypeId}");
-
-            var uid = _entities.CreateEntity(metaState.PrototypeId, out var newMeta);
+            var uid = _entities.CreateEntity(metaState.PrototypeId, state.NetEntity, out var newMeta);
             _toApply.Add(uid, new(uid, state.NetEntity, newMeta, true, false, GameTick.Zero, state, null, null));
             _created.Add(state.NetEntity);
 
-            // Client creates a client-side net entity for the newly created entity.
-            // We need to clear this mapping before assigning the real net id.
-            // TODO NetEntity Jank: prevent the client from creating this in the first place.
-            _entities.ClearNetEntity(newMeta.NetEntity);
-
-            _entities.SetNetEntity(uid, state.NetEntity, newMeta);
             newMeta.LastStateApplied = toTick;
 
             // Check if there's any component states awaiting this entity.

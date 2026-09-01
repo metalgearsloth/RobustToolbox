@@ -79,11 +79,7 @@ namespace Robust.Client.GameStates
         ///     that can be inferred from entity creation on new entity states.
         ///     This data thus has to be re-constructed client-side and merged with this method.
         /// </remarks>
-        /// <param name="data">
-        ///     The data to merge.
-        ///     It's a dictionary of entity ID -> (component net ID -> ComponentState)
-        /// </param>
-        void MergeImplicitData(Dictionary<NetEntity, Dictionary<ushort, IComponentState?>> data);
+        void MergeImplicitData(NetEntity netEntity, ushort netId, IComponentState? implicitState);
 
         /// <summary>
         ///     Get the last state data from the server for an entity.
