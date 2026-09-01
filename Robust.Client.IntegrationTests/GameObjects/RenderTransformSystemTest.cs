@@ -535,6 +535,54 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
     }
 
     [Test]
+    public void RapidPredictedContainerCycleClearsStaleVerticalPoseAndVelocity()
+    {
+        var (maps, _, _) = CreateZNetwork(2, new Vector2(0f, 0.7f));
+        var holder = _entities.SpawnEntity(null, new EntityCoordinates(maps[1], Vector2.Zero));
+        var item = _entities.SpawnEntity(null, new EntityCoordinates(maps[1], Vector2.Zero));
+        var holderPresentation = _entities.AddComponent<ZLevelPresentationComponent>(holder);
+        var itemPhysics = _entities.AddComponent<ZLevelPhysicsComponent>(item);
+        var itemPresentation = _entities.GetComponent<ZLevelPresentationComponent>(item);
+        var slot = _containers.EnsureContainer<ContainerSlot>(holder, "hand");
+        _zPresentation.SetLocalHeight((holder, holderPresentation), 0.2f);
+        _zPresentation.SetLocalHeight((item, itemPresentation), -0.4f);
+        itemPhysics.Velocity = -6f;
+        _timing.CurTick = new GameTick(_timing.LastRealTick.Value + 2);
+
+        Assert.That(_containers.Insert(item, slot, force: true), Is.True);
+        Assert.Multiple(() =>
+        {
+            Assert.That(itemPresentation.LocalHeight, Is.EqualTo(0.2f).Within(0.0001f));
+            Assert.That(itemPhysics.Velocity, Is.Zero);
+        });
+
+        Assert.That(_containers.Remove(
+            item,
+            slot,
+            force: true,
+            destination: new EntityCoordinates(maps[1], Vector2.Zero)), Is.True);
+        _transforms.SnapRenderPose(item);
+        Assert.That(_transforms.GetRenderWorldPose(item).AbsoluteZ, Is.EqualTo(1.2f).Within(0.0001f));
+
+        _zPresentation.SetLocalHeight((item, itemPresentation), -0.1f);
+        itemPhysics.Velocity = -3f;
+        Assert.That(_containers.Insert(item, slot, force: true), Is.True);
+        Assert.That(_containers.Remove(
+            item,
+            slot,
+            force: true,
+            destination: new EntityCoordinates(maps[1], Vector2.Zero)), Is.True);
+        _transforms.SnapRenderPose(item);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(itemPresentation.LocalHeight, Is.EqualTo(0.2f).Within(0.0001f));
+            Assert.That(itemPhysics.Velocity, Is.Zero);
+            Assert.That(_transforms.GetRenderWorldPose(item).AbsoluteZ, Is.EqualTo(1.2f).Within(0.0001f));
+        });
+    }
+
+    [Test]
     public void CompatibilityHookAllowsCrossMapInterpolation()
     {
         var (mapA, mapAId) = CreateMap();
