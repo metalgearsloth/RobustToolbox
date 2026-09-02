@@ -13,31 +13,13 @@ public abstract class SharedZLevelPresentationSystem : EntitySystem
         if (!Resolve(entity, ref entity.Comp) || !float.IsFinite(height) || entity.Comp.LocalHeight.Equals(height))
             return;
 
-        var oldHeight = entity.Comp.LocalHeight + entity.Comp.VisualHeight;
+        var oldHeight = entity.Comp.LocalHeight;
         entity.Comp.LocalHeight = height;
         DirtyField(entity.Owner, entity.Comp, nameof(ZLevelPresentationComponent.LocalHeight));
 
         OnLocalHeightChanged(entity.Owner, height);
-        var ev = new ZLevelPresentationChangedEvent(oldHeight, height + entity.Comp.VisualHeight);
+        var ev = new ZLevelPresentationChangedEvent(oldHeight, height);
         RaiseLocalEvent(entity.Owner, ref ev);
-    }
-
-    /// <summary>
-    /// Sets a transient visual-only height without changing authoritative vertical physics.
-    /// </summary>
-    public void SetVisualHeight(Entity<ZLevelPresentationComponent?> entity, float height)
-    {
-        if (!float.IsFinite(height))
-            return;
-
-        var presentation = EnsureComp<ZLevelPresentationComponent>(entity.Owner);
-        if (presentation.VisualHeight.Equals(height))
-            return;
-
-        var oldHeight = presentation.LocalHeight + presentation.VisualHeight;
-        presentation.VisualHeight = height;
-        var changed = new ZLevelPresentationChangedEvent(oldHeight, presentation.LocalHeight + height);
-        RaiseLocalEvent(entity.Owner, ref changed);
     }
 
     protected virtual void OnLocalHeightChanged(EntityUid uid, float height)

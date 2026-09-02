@@ -1132,7 +1132,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
         {
             var localHeight = localHeightOverride;
             if (localHeight == null && _zPresentationQuery.TryComp(uid, out var presentation))
-                localHeight = presentation.LocalHeight + presentation.VisualHeight;
+                localHeight = presentation.LocalHeight;
 
             if (localHeight is { } height)
                 absoluteZ = ZLevelProjection.GetAbsoluteZ(depth.Value, height);
@@ -1150,7 +1150,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
             return null;
         }
 
-        return ZLevelProjection.GetAbsoluteZ(depth.Value, presentation.LocalHeight + presentation.VisualHeight);
+        return ZLevelProjection.GetAbsoluteZ(depth.Value, presentation.LocalHeight);
     }
 
     private float GetMapDepth(EntityUid renderSpace)
