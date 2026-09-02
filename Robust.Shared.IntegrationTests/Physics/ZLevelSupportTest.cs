@@ -323,6 +323,29 @@ internal sealed class ZLevelSupportTest
         });
     }
 
+    [Test]
+    public void SameProviderDoesNotBypassAuthoritativeStepDownLimit()
+    {
+        var world = CreateWorld(1);
+        var platform = SpawnPlatform(world, 0, new Vector2(0.5f), 0.2f, new Vector2(0.5f), solidVolume: false);
+        var body = SpawnMob(world, 0, new Vector2(0.5f), 0.2f);
+        GroundAtCurrentHeight(world, body);
+        var originalMap = world.Transform.GetMap(body.Uid);
+
+        var highGround = world.Entities.GetComponent<ZLevelHighGroundComponent>(platform);
+        SetField(highGround, nameof(ZLevelHighGroundComponent.Height), -0.2f);
+        world.ZPhysics.RefreshSupport((body.Uid, body.Physics));
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(body.Physics.SupportProvider, Is.EqualTo(platform));
+            Assert.That(body.Physics.GroundState, Is.EqualTo(ZLevelGroundState.Airborne),
+                "reusing the same provider must not snap through the maximum step-down distance");
+            Assert.That(body.Presentation.LocalHeight, Is.EqualTo(0.2f).Within(0.001f));
+            Assert.That(world.Transform.GetMap(body.Uid), Is.EqualTo(originalMap));
+        });
+    }
+
     [TestCase(0f)]
     [TestCase(0.7f)]
     public void ProjectedSurfaceAndFootContactUseTheSameProjection(float offsetY)

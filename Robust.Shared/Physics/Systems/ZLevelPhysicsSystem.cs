@@ -21,14 +21,6 @@ namespace Robust.Shared.Physics.Systems;
 /// </summary>
 public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
 {
-    public const float DefaultGravity = 9.8f;
-    public const float DefaultVelocityLimit = 20f;
-    public const float DefaultImpactVelocity = 3.5f;
-    public const float DefaultAirborneHeight = 0.15f;
-    public const float DefaultMaxStepUp = 0.25f;
-    public const float DefaultMaxStepDown = 0.25f;
-    public const float DefaultGroundSnapDistance = 0.25f;
-
     private const int MaxStepsPerUpdate = 240;
     private const int MaxEventsPerStep = 256;
     private const float TimeEpsilon = 0.000001f;
@@ -60,13 +52,19 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
 
     private TimeSpan _fixedTimestep;
     private TimeSpan _accumulatedTime = TimeSpan.Zero;
-    private float _gravity = DefaultGravity;
-    private float _velocityLimit = DefaultVelocityLimit;
-    private float _impactVelocity = DefaultImpactVelocity;
-    private float _airborneHeight = DefaultAirborneHeight;
-    private float _maxStepUp = DefaultMaxStepUp;
-    private float _maxStepDown = DefaultMaxStepDown;
-    private float _groundSnapDistance = DefaultGroundSnapDistance;
+    private float _gravity;
+    private float _velocityLimit;
+    private float _impactVelocity;
+    private float _airborneHeight;
+    private float _maxStepUp;
+    private float _maxStepDown;
+    private float _groundSnapDistance;
+    private float _restitution;
+    private float _sleepVelocityThreshold;
+    private float _sleepTime;
+    private float _groundTolerance;
+    private float _fallbackFootprintRadius;
+    private float _supportRefreshRange;
 
     /// <summary>
     /// Bodies currently participating in vertical simulation.
@@ -101,6 +99,12 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
     public float MaxStepUp => _maxStepUp;
     public float MaxStepDown => _maxStepDown;
     public float GroundSnapDistance => _groundSnapDistance;
+    public float Restitution => _restitution;
+    public float SleepVelocityThreshold => _sleepVelocityThreshold;
+    public float SleepTime => _sleepTime;
+    public float GroundTolerance => _groundTolerance;
+    public float FallbackFootprintRadius => _fallbackFootprintRadius;
+    public float SupportRefreshRange => _supportRefreshRange;
 
     /// <inheritdoc/>
     public override void Initialize()
@@ -117,6 +121,12 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
         Subs.CVar(_configuration, CVars.PhysicsZLevelMaxStepUp, value => _maxStepUp = MathF.Max(0f, value), true);
         Subs.CVar(_configuration, CVars.PhysicsZLevelMaxStepDown, value => _maxStepDown = MathF.Max(0f, value), true);
         Subs.CVar(_configuration, CVars.PhysicsZLevelGroundSnapDistance, value => _groundSnapDistance = MathF.Max(0f, value), true);
+        Subs.CVar(_configuration, CVars.PhysicsZLevelRestitution, value => _restitution = MathF.Max(0f, value), true);
+        Subs.CVar(_configuration, CVars.PhysicsZLevelSleepVelocityThreshold, value => _sleepVelocityThreshold = MathF.Max(0f, value), true);
+        Subs.CVar(_configuration, CVars.PhysicsZLevelSleepTime, value => _sleepTime = MathF.Max(0f, value), true);
+        Subs.CVar(_configuration, CVars.PhysicsZLevelGroundTolerance, value => _groundTolerance = MathF.Max(0f, value), true);
+        Subs.CVar(_configuration, CVars.PhysicsZLevelFallbackFootprintRadius, value => _fallbackFootprintRadius = MathF.Max(0f, value), true);
+        Subs.CVar(_configuration, CVars.PhysicsZLevelSupportRefreshRange, value => _supportRefreshRange = MathF.Max(0f, value), true);
 
         SubscribeLocalEvent<ZLevelPhysicsComponent, EntGotInsertedIntoContainerMessage>(OnInsertedIntoContainer);
         SubscribeLocalEvent<ZLevelPhysicsComponent, EntGotRemovedFromContainerMessage>(OnRemovedFromContainer);
@@ -364,11 +374,11 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
             return;
 
         var worldPosition = _transform.GetWorldPosition(groundXform);
-        RefreshBodiesNearMapPosition(mapUid, worldPosition, 2f);
+        RefreshBodiesNearMapPosition(mapUid, worldPosition, _supportRefreshRange);
 
         if (_zLevels.TryGetMapAbove(mapUid, out var aboveMap) &&
             aboveMap is { } aboveMapUid)
-            RefreshBodiesNearMapPosition(aboveMapUid, worldPosition, 2f);
+            RefreshBodiesNearMapPosition(aboveMapUid, worldPosition, _supportRefreshRange);
     }
 
     private void RefreshBodiesNearMapPosition(EntityUid mapUid, Vector2 worldPosition, float range)
@@ -585,7 +595,7 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
             nextEvent,
             limitReached);
 
-        if (MathF.Abs(oldVelocity - zPhysics.Velocity) > 0.001f)
+        if (MathF.Abs(oldVelocity - zPhysics.Velocity) > VelocityEpsilon)
             DirtyField(entity.Owner, zPhysics, nameof(ZLevelPhysicsComponent.Velocity));
 
         if (zPhysics.VelocityGravity)
@@ -766,8 +776,10 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
         var landing = new ZLevelLandingEvent(impactSpeed, surface);
         RaiseLocalEvent(uid, ref landing);
 
-        component.Velocity = -component.Velocity * MathF.Max(0f, component.Bounciness);
-        if (MathF.Abs(component.Velocity) < MathF.Max(0f, component.SleepThreshold))
+        var restitution = component.Bounciness ?? _restitution;
+        var sleepThreshold = component.SleepThreshold ?? _sleepVelocityThreshold;
+        component.Velocity = -component.Velocity * MathF.Max(0f, restitution);
+        if (MathF.Abs(component.Velocity) < MathF.Max(0f, sleepThreshold))
             component.Velocity = 0f;
 
         if (surface == ZLevelImpactSurface.Floor)
@@ -820,8 +832,10 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
         var distance = entity.Comp.SupportSurface == ZLevelSupportSurface.None
             ? float.PositiveInfinity
             : presentation.LocalHeight - GetLocalSupportHeight(entity);
-        var almostStopped = MathF.Abs(entity.Comp.Velocity) < MathF.Max(0f, entity.Comp.SleepThreshold) &&
-                            MathF.Abs(distance) <= 0.01f;
+        var sleepThreshold = entity.Comp.SleepThreshold ?? _sleepVelocityThreshold;
+        var sleepTime = entity.Comp.TimeToSleep ?? _sleepTime;
+        var almostStopped = MathF.Abs(entity.Comp.Velocity) < MathF.Max(0f, sleepThreshold) &&
+                            MathF.Abs(distance) <= _groundTolerance;
 
         if (!almostStopped)
         {
@@ -830,7 +844,7 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
         }
 
         entity.Comp.SleepTimer += frameTime;
-        if (entity.Comp.SleepTimer >= MathF.Max(0f, entity.Comp.TimeToSleep))
+        if (entity.Comp.SleepTimer >= MathF.Max(0f, sleepTime))
             SleepBody(entity);
     }
 
@@ -870,7 +884,7 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
     {
         // A newly replicated component can arrive before its presentation component state. Keep it eligible for one
         // refresh; settled bodies are removed by SleepUpdate once both states are available.
-        return MathF.Abs(component.Velocity) > 0.001f || !component.Sleeping;
+        return MathF.Abs(component.Velocity) > VelocityEpsilon || !component.Sleeping;
     }
 
     private void UpdateDirtyMovement()

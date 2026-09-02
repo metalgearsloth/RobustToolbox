@@ -140,7 +140,7 @@ namespace Robust.Client.Graphics
         public bool TryGetEntityRenderLayer(EntityUid entity, out RenderLayerSample sample)
         {
             if (_transformSystem != null && MapUid != EntityUid.Invalid)
-                return _transformSystem.TryGetRenderLayerSample(entity, MapUid, out sample);
+                return _transformSystem.TryGetRenderLayerSample(entity, MapUid, out sample, visibleMaps: VisibleMaps);
 
             sample = default;
             return false;

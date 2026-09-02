@@ -15,6 +15,19 @@ namespace Robust.Shared.Map.Components;
 [RegisterComponent, NetworkedComponent, AutoGenerateComponentState(raiseAfterAutoHandleState: true, fieldDeltas: true)]
 public sealed partial class ZLevelPresentationComponent : Component, IComponentDelta
 {
+    /// <summary>
+    /// Authoritative local physics height. This is replicated and is never used for a merely visual incline.
+    /// </summary>
     [DataField, AutoNetworkedField, ViewVariables]
     public float LocalHeight;
+
+    /// <summary>
+    /// Transient, locally derived render-only height added to <see cref="LocalHeight"/>.
+    /// </summary>
+    /// <remarks>
+    /// This deliberately is not serialized or networked. Gameplay features can derive it from predicted XY state
+    /// without changing vertical physics, while the generic render-pose path still keeps sprites and eyes aligned.
+    /// </remarks>
+    [ViewVariables]
+    public float VisualHeight;
 }

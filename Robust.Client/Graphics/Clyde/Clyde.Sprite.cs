@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
@@ -76,6 +77,7 @@ internal partial class Clyde
             List = list,
             Transforms = transforms,
             LayerMap = renderMapUid,
+            VisibleMaps = view.VisibleZMaps,
         };
 
         // We need to batch the actual tree query, or alternatively we need just get the list of sprites and then
@@ -150,7 +152,12 @@ internal partial class Clyde
         ref SpriteQueryState state,
         in ComponentTreeEntry<SpriteComponent> value)
     {
-        if (!state.Transforms.TryGetRenderLayerSample(value.Uid, state.LayerMap, out var sample, value.Transform))
+        if (!state.Transforms.TryGetRenderLayerSample(
+                value.Uid,
+                state.LayerMap,
+                out var sample,
+                value.Transform,
+                state.VisibleMaps))
             return true;
 
         ref var entry = ref state.List.AllocAdd();
@@ -276,6 +283,7 @@ internal partial class Clyde
         public RefList<SpriteData> List;
         public TransformSystem Transforms;
         public EntityUid LayerMap;
+        public IReadOnlySet<EntityUid> VisibleMaps;
     }
 
     private readonly struct BatchData

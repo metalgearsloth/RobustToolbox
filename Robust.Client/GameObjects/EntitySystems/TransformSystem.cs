@@ -701,7 +701,8 @@ public sealed partial class TransformSystem : SharedTransformSystem
     public int GetRenderLayerSamples(
         EntityUid uid,
         Span<RenderLayerSample> samples,
-        TransformComponent? xform = null)
+        TransformComponent? xform = null,
+        IReadOnlySet<EntityUid>? visibleMaps = null)
     {
         if (samples.Length == 0 || !XformQuery.Resolve(uid, ref xform, false))
             return 0;
@@ -717,7 +718,8 @@ public sealed partial class TransformSystem : SharedTransformSystem
         var count = 0;
         if (weights.LowerWeight > 0f &&
             weights.LowerDepth >= 0 &&
-            weights.LowerDepth < network.SortedZLevels.Count)
+            weights.LowerDepth < network.SortedZLevels.Count &&
+            (visibleMaps == null || visibleMaps.Contains(network.SortedZLevels[weights.LowerDepth])))
         {
             var map = network.SortedZLevels[weights.LowerDepth];
             var position = ZLevelProjection.Reproject(
@@ -736,7 +738,8 @@ public sealed partial class TransformSystem : SharedTransformSystem
         if (weights.UpperWeight > 0f &&
             samples.Length > count &&
             weights.UpperDepth >= 0 &&
-            weights.UpperDepth < network.SortedZLevels.Count)
+            weights.UpperDepth < network.SortedZLevels.Count &&
+            (visibleMaps == null || visibleMaps.Contains(network.SortedZLevels[weights.UpperDepth])))
         {
             var map = network.SortedZLevels[weights.UpperDepth];
             var position = ZLevelProjection.Reproject(
@@ -752,8 +755,24 @@ public sealed partial class TransformSystem : SharedTransformSystem
                 weights.UpperDepth);
         }
 
-        if (count == 1 && samples[0].Opacity < 1f)
+        if (visibleMaps != null && count > 0)
+        {
+            var totalOpacity = 0f;
+            for (var i = 0; i < count; i++)
+                totalOpacity += samples[i].Opacity;
+
+            // A z transition is a crossfade only while both samples are actually composited. If one adjacent map is
+            // hidden by the viewport stack, normalize the surviving renderer samples so the entity never fades out.
+            if (totalOpacity > ZLevelProjection.BoundaryEpsilon)
+            {
+                for (var i = 0; i < count; i++)
+                    samples[i] = samples[i] with { Opacity = samples[i].Opacity / totalOpacity };
+            }
+        }
+        else if (count == 1 && samples[0].Opacity < 1f)
+        {
             samples[0] = samples[0] with { Opacity = 1f };
+        }
 
         return count;
     }
@@ -765,10 +784,11 @@ public sealed partial class TransformSystem : SharedTransformSystem
         EntityUid uid,
         EntityUid layerMap,
         out RenderLayerSample sample,
-        TransformComponent? xform = null)
+        TransformComponent? xform = null,
+        IReadOnlySet<EntityUid>? visibleMaps = null)
     {
         Span<RenderLayerSample> samples = stackalloc RenderLayerSample[2];
-        var count = GetRenderLayerSamples(uid, samples, xform);
+        var count = GetRenderLayerSamples(uid, samples, xform, visibleMaps);
         for (var i = 0; i < count; i++)
         {
             if (samples[i].Map == layerMap)
@@ -806,7 +826,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
         }
 
         Span<RenderLayerSample> layerSamples = stackalloc RenderLayerSample[2];
-        var count = GetRenderLayerSamples(uid, layerSamples, xform);
+        var count = GetRenderLayerSamples(uid, layerSamples, xform, visibleMaps);
         var opacity = 0f;
         for (var i = 0; i < count; i++)
         {
@@ -1112,7 +1132,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
         {
             var localHeight = localHeightOverride;
             if (localHeight == null && _zPresentationQuery.TryComp(uid, out var presentation))
-                localHeight = presentation.LocalHeight;
+                localHeight = presentation.LocalHeight + presentation.VisualHeight;
 
             if (localHeight is { } height)
                 absoluteZ = ZLevelProjection.GetAbsoluteZ(depth.Value, height);
@@ -1130,7 +1150,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
             return null;
         }
 
-        return ZLevelProjection.GetAbsoluteZ(depth.Value, presentation.LocalHeight);
+        return ZLevelProjection.GetAbsoluteZ(depth.Value, presentation.LocalHeight + presentation.VisualHeight);
     }
 
     private float GetMapDepth(EntityUid renderSpace)

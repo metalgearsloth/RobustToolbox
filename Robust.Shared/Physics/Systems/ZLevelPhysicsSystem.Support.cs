@@ -4,6 +4,7 @@ using System.Linq;
 using System.Numerics;
 using JetBrains.Annotations;
 using Robust.Shared.GameObjects;
+using Robust.Shared.Configuration;
 using Robust.Shared.IoC;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
@@ -44,8 +45,6 @@ public sealed partial class ZLevelPhysicsSystem
         }
 
         var presentation = EnsureComp<ZLevelPresentationComponent>(entity.Owner);
-        var oldProvider = entity.Comp.SupportProvider;
-        var oldSurface = entity.Comp.SupportSurface;
         var oldGround = entity.Comp.GroundState;
         var currentAbsoluteHeight = ZLevelProjection.GetAbsoluteZ(currentDepth.Value, presentation.LocalHeight);
         var maxRise = oldGround == ZLevelGroundState.Grounded && entity.Comp.AutoStep
@@ -75,7 +74,6 @@ public sealed partial class ZLevelPhysicsSystem
             return;
         }
 
-        var sameSupport = oldProvider == support.Provider && oldSurface == support.Surface;
         ApplySupportResult(entity, support);
 
         if (oldGround != ZLevelGroundState.Grounded)
@@ -83,8 +81,7 @@ public sealed partial class ZLevelPhysicsSystem
 
         var rise = support.AbsoluteHeight - currentAbsoluteHeight;
         var maximumSnapDown = MathF.Min(_maxStepDown, _groundSnapDistance);
-        if (sameSupport ||
-            rise <= _maxStepUp + PositionEpsilon &&
+        if (rise <= _maxStepUp + PositionEpsilon &&
             rise >= -maximumSnapDown - PositionEpsilon)
         {
             SetLocalHeight(
@@ -312,9 +309,9 @@ public sealed partial class ZLevelPhysicsSystem
 public sealed partial class ZLevelSupportSystem : EntitySystem
 {
     private const int MaxSupportDiagnostics = 64;
-    private const float SupportProbeRadius = 0.08f;
     private const float PositionEpsilon = 0.00001f;
 
+    [Dependency] private IConfigurationManager _configuration = default!;
     [Dependency] private IManifoldManager _manifold = default!;
     [Dependency] private EntityLookupSystem _lookup = default!;
     [Dependency] private SharedMapSystem _map = default!;
@@ -329,11 +326,26 @@ public sealed partial class ZLevelSupportSystem : EntitySystem
     [Dependency] private EntityQuery<ZLevelHighGroundComponent> _highGroundQuery = default!;
     [Dependency] private EntityQuery<ZLevelMapComponent> _zMapQuery = default!;
 
-    private readonly PhysShapeCircle _supportProbe = new(SupportProbeRadius);
+    private PhysShapeCircle _supportProbe = new();
+    private float _supportHysteresis;
     private readonly HashSet<Entity<ZLevelHighGroundComponent>> _supportProviders = new();
     private List<Entity<MapGridComponent>> _supportGrids = new();
     private readonly List<ZLevelSupportResult> _supportCandidates = new();
     private readonly Dictionary<EntityUid, List<ZLevelSupportCandidateDebug>> _lastSupportCandidates = new();
+
+    public float SupportHysteresis => _supportHysteresis;
+
+    public override void Initialize()
+    {
+        base.Initialize();
+        Subs.CVar(_configuration, CVars.PhysicsZLevelSupportHysteresis, SetSupportHysteresis, true);
+    }
+
+    private void SetSupportHysteresis(float value)
+    {
+        _supportHysteresis = MathF.Max(0f, value);
+        _supportProbe = new PhysShapeCircle(_supportHysteresis);
+    }
 
     [Pure]
     public bool TryQuerySupport(
@@ -360,7 +372,7 @@ public sealed partial class ZLevelSupportSystem : EntitySystem
         maximumRise = MathF.Max(0f, maximumRise);
         var sample = new SupportSample(
             proposedWorldPosition,
-            Box2.CenteredAround(proposedWorldPosition, new Vector2(SupportProbeRadius * 2f)),
+            Box2.CenteredAround(proposedWorldPosition, new Vector2(_supportHysteresis * 2f)),
             new PhysicsTransform(proposedWorldPosition, Angle.Zero));
 
         for (var floor = 0; floor <= 1; floor++)

@@ -27,9 +27,10 @@ public sealed partial class ZLevelPhysicsComponent : Component, IComponentDelta
 
     /// <summary>
     /// Fraction of vertical speed retained and reversed after an impact.
+    /// Null uses the global z-level restitution CVar.
     /// </summary>
     [DataField, AutoNetworkedField]
-    public float Bounciness;
+    public float? Bounciness;
 
     /// <summary>
     /// Multiplier applied to the global z-level gravity acceleration.
@@ -63,15 +64,17 @@ public sealed partial class ZLevelPhysicsComponent : Component, IComponentDelta
 
     /// <summary>
     /// Vertical speed below which a grounded body can settle and sleep.
+    /// Null uses the global z-level sleep-velocity CVar.
     /// </summary>
     [DataField]
-    public float SleepThreshold = 0.3f;
+    public float? SleepThreshold;
 
     /// <summary>
     /// Time a settled body must remain still before its z-level simulation sleeps.
+    /// Null uses the global z-level sleep-time CVar.
     /// </summary>
     [DataField]
-    public float TimeToSleep = 2f;
+    public float? TimeToSleep;
 
     /// <summary>
     /// Entity that owns the selected support surface. Tile support is owned by its grid.

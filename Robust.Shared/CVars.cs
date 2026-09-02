@@ -1580,6 +1580,48 @@ namespace Robust.Shared
             CVarDef.Create("physics.zlevel_ground_snap_distance", 0.25f, CVar.REPLICATED);
 
         /// <summary>
+        /// Fraction of vertical speed retained and reversed after a z-level impact unless a body overrides it.
+        /// </summary>
+        public static readonly CVarDef<float> PhysicsZLevelRestitution =
+            CVarDef.Create("physics.zlevel_restitution", 0f, CVar.REPLICATED);
+
+        /// <summary>
+        /// Vertical speed below which a supported z-level body can settle.
+        /// </summary>
+        public static readonly CVarDef<float> PhysicsZLevelSleepVelocityThreshold =
+            CVarDef.Create("physics.zlevel_sleep_velocity_threshold", 0.3f, CVar.REPLICATED);
+
+        /// <summary>
+        /// Time a settled z-level body remains still before its vertical simulation sleeps.
+        /// </summary>
+        public static readonly CVarDef<float> PhysicsZLevelSleepTime =
+            CVarDef.Create("physics.zlevel_sleep_time", 2f, CVar.REPLICATED);
+
+        /// <summary>
+        /// Vertical distance from support that still counts as settled for sleeping.
+        /// </summary>
+        public static readonly CVarDef<float> PhysicsZLevelGroundTolerance =
+            CVarDef.Create("physics.zlevel_ground_tolerance", 0.01f, CVar.REPLICATED);
+
+        /// <summary>
+        /// Radius around a body's support point used to retain stable support near surface edges.
+        /// </summary>
+        public static readonly CVarDef<float> PhysicsZLevelSupportHysteresis =
+            CVarDef.Create("physics.zlevel_support_hysteresis", 0.08f, CVar.REPLICATED);
+
+        /// <summary>
+        /// Collision footprint radius used by z transitions for bodies without hard fixtures.
+        /// </summary>
+        public static readonly CVarDef<float> PhysicsZLevelFallbackFootprintRadius =
+            CVarDef.Create("physics.zlevel_fallback_footprint_radius", 0.05f, CVar.REPLICATED);
+
+        /// <summary>
+        /// Radius around a changed high-ground provider in which body support is refreshed.
+        /// </summary>
+        public static readonly CVarDef<float> PhysicsZLevelSupportRefreshRange =
+            CVarDef.Create("physics.zlevel_support_refresh_range", 2f, CVar.REPLICATED);
+
+        /// <summary>
         /// How much to enlarge grids when determining their fixture bounds.
         /// </summary>
         public static readonly CVarDef<float> GridFixtureEnlargement =

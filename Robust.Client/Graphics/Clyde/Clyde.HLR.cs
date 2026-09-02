@@ -373,10 +373,6 @@ namespace Robust.Client.Graphics.Clyde
             float effectStrength)
         {
             effectStrength = Math.Clamp(effectStrength, 0f, 1f);
-            // During a cross-map eye lerp the destination map becomes the coordinate space immediately, while the
-            // presented eye height remains between planes. Do not use the destination-relative layer label to turn
-            // effects off early: the continuous presented height is the source of truth for whether this pass is
-            // still visibly below the eye.
             if (network == null || effectStrength <= float.Epsilon)
                 return new(ZLevelPostShaderSelection.None, 0f, 0f, Color.Transparent, 0f);
 
@@ -397,6 +393,13 @@ namespace Robust.Client.Graphics.Clyde
                     network.LowerTint.A * effectStrength),
                 effectStrength);
         }
+
+        /// <summary>
+        /// The z-level post effect belongs to the layer being composited. It never follows an eye's fractional
+        /// presentation height, because the current map must remain visually unprocessed throughout a transition.
+        /// </summary>
+        internal static float GetZLevelLayerEffectStrength(int relativeDepth)
+            => relativeDepth < 0 ? 1f : 0f;
 
         /// <summary>
         /// Point lights, FOV, map ambient light and the layer post-process sample the map actually being rendered.
@@ -1022,9 +1025,9 @@ namespace Robust.Client.Graphics.Clyde
             if (network?.LowerPostShader is { } shaderId)
                 _proto.TryIndex(shaderId, out gameShader);
 
-            var effectStrength = zMap != null && eye.PresentedAbsoluteZ is { } eyeZ
-                ? Math.Clamp(eyeZ - zMap.Depth, 0f, 1f)
-                : layer.Offset < 0 ? 1f : 0f;
+            // Z-level post effects are properties of the rendered layer, never the eye's interpolated z. The viewed
+            // map is always unprocessed; an actual lower map receives the configured lower-level effect in full.
+            var effectStrength = GetZLevelLayerEffectStrength(layer.Offset);
             var effects = ResolveZLevelLayerEffects(network, layer.Offset, gameShader != null, effectStrength);
             switch (effects.Shader)
             {

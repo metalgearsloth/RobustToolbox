@@ -18,8 +18,6 @@ namespace Robust.Shared.Physics.Systems;
 
 public sealed partial class ZLevelPhysicsSystem
 {
-    private const float DefaultFootprintRadius = 0.05f;
-
     [Dependency] private IManifoldManager _manifold = default!;
     [Dependency] private EntityQuery<FixturesComponent> _fixturesQuery = default!;
     [Dependency] private EntityQuery<MapGridComponent> _gridQuery = default!;
@@ -239,7 +237,7 @@ public sealed partial class ZLevelPhysicsSystem
     private BodyFootprint GetFootprint(EntityUid uid, TransformComponent xform)
     {
         var center = _transform.GetWorldPosition(xform);
-        var bounds = Box2.CenteredAround(center, new Vector2(DefaultFootprintRadius * 2f));
+        var bounds = Box2.CenteredAround(center, new Vector2(_fallbackFootprintRadius * 2f));
         var hasFixtures = false;
         var physicsTransform = _physics.GetPhysicsTransform(uid, xform);
 

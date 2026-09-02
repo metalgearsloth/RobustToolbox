@@ -33,7 +33,9 @@ public sealed class ZLevelPresentationSystem : SharedZLevelPresentationSystem
             return;
 
         _lastHeights[entity.Owner] = entity.Comp.LocalHeight;
-        var ev = new ZLevelPresentationChangedEvent(oldHeight, entity.Comp.LocalHeight);
+        var ev = new ZLevelPresentationChangedEvent(
+            oldHeight + entity.Comp.VisualHeight,
+            entity.Comp.LocalHeight + entity.Comp.VisualHeight);
         RaiseLocalEvent(entity.Owner, ref ev);
     }
 
