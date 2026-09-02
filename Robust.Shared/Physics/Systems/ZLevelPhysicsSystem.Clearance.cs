@@ -4,9 +4,11 @@ using System.Linq;
 using System.Numerics;
 using JetBrains.Annotations;
 using Robust.Shared.GameObjects;
+using Robust.Shared.IoC;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
+using Robust.Shared.Physics.Collision;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Physics.Dynamics;
 using Robust.Shared.Physics.Events;
@@ -16,7 +18,14 @@ namespace Robust.Shared.Physics.Systems;
 
 public sealed partial class ZLevelPhysicsSystem
 {
+    private const float DefaultFootprintRadius = 0.05f;
+
+    [Dependency] private IManifoldManager _manifold = default!;
+    [Dependency] private EntityQuery<FixturesComponent> _fixturesQuery = default!;
+    [Dependency] private EntityQuery<MapGridComponent> _gridQuery = default!;
+
     private readonly HashSet<FixtureProxy> _clearanceFixtures = new();
+    private List<Entity<MapGridComponent>> _clearanceGrids = new();
 
     /// <summary>
     /// Returns true when actual destination fixtures overlap the body's support footprint at a z-map transition.
@@ -137,12 +146,12 @@ public sealed partial class ZLevelPhysicsSystem
 
     private bool HasBlockingTileSurface(MapId mapId, in BodyFootprint footprint)
     {
-        _supportGrids.Clear();
-        _map.FindGridsIntersecting(mapId, footprint.Bounds, ref _supportGrids, approx: false, includeMap: true);
-        _supportGrids.Sort((left, right) => left.Owner.CompareTo(right.Owner));
+        _clearanceGrids.Clear();
+        _map.FindGridsIntersecting(mapId, footprint.Bounds, ref _clearanceGrids, approx: false, includeMap: true);
+        _clearanceGrids.Sort((left, right) => left.Owner.CompareTo(right.Owner));
 
         EntityUid previous = default;
-        foreach (var grid in _supportGrids)
+        foreach (var grid in _clearanceGrids)
         {
             if (grid.Owner == previous)
                 continue;
@@ -200,19 +209,8 @@ public sealed partial class ZLevelPhysicsSystem
         Vector2 worldPoint,
         out float absoluteHeight)
     {
-        absoluteHeight = 0f;
-        if (!_xformQuery.TryComp(provider, out var xform) ||
-            xform.MapUid is not { } map ||
-            !_zLevels.TryGetMapDepth(map, out var depth) ||
-            !TryGetSupportLocalBounds((provider, highGround), out var bounds))
-        {
-            return false;
-        }
-
-        var localPoint = Vector2.Transform(worldPoint, _transform.GetInvWorldMatrix(xform));
-        localPoint = Vector2.Clamp(localPoint, bounds.BottomLeft, bounds.TopRight);
-        absoluteHeight = depth.Value + EvaluateSurfaceHeight(highGround, bounds, localPoint);
-        return float.IsFinite(absoluteHeight);
+        _ = highGround;
+        return TrySampleSupportHeight(provider, ZLevelSupportSurface.HighGround, worldPoint, out absoluteHeight);
     }
 
     private void OnPreventCollide(Entity<ZLevelPhysicsComponent> entity, ref PreventCollideEvent args)
@@ -228,9 +226,7 @@ public sealed partial class ZLevelPhysicsSystem
         }
 
         var absoluteFeet = ZLevelProjection.GetAbsoluteZ(depth.Value, presentation.LocalHeight);
-        var point = entity.Comp.SupportProvider == args.OtherEntity
-            ? entity.Comp.SupportPoint
-            : _transform.GetWorldPosition(entity.Owner);
+        var point = _transform.GetWorldPosition(entity.Owner);
         if (!TryGetVolumeTopHeight(args.OtherEntity, highGround, point, out var topHeight))
             return;
 
@@ -239,4 +235,78 @@ public sealed partial class ZLevelPhysicsSystem
         if (absoluteFeet >= topHeight - _maxStepUp - PositionEpsilon)
             args.Cancelled = true;
     }
+
+    private BodyFootprint GetFootprint(EntityUid uid, TransformComponent xform)
+    {
+        var center = _transform.GetWorldPosition(xform);
+        var bounds = Box2.CenteredAround(center, new Vector2(DefaultFootprintRadius * 2f));
+        var hasFixtures = false;
+        var physicsTransform = _physics.GetPhysicsTransform(uid, xform);
+
+        if (_fixturesQuery.TryComp(uid, out var fixtures))
+        {
+            foreach (var (_, fixture) in fixtures.Fixtures.OrderBy(entry => entry.Key, StringComparer.Ordinal))
+            {
+                if (!fixture.Hard)
+                    continue;
+
+                for (var child = 0; child < fixture.Shape.ChildCount; child++)
+                {
+                    var fixtureBounds = fixture.Shape.ComputeAABB(physicsTransform, child);
+                    bounds = hasFixtures ? Union(bounds, fixtureBounds) : fixtureBounds;
+                    hasFixtures = true;
+                }
+            }
+        }
+
+        return new BodyFootprint(uid, center, bounds, physicsTransform, hasFixtures);
+    }
+
+    private bool FootprintOverlapsShape<TShape>(
+        in BodyFootprint footprint,
+        TShape shape,
+        PhysicsTransform shapeTransform,
+        Box2 shapeBounds)
+        where TShape : Robust.Shared.Physics.Collision.Shapes.IPhysShape
+    {
+        foreach (var (_, bodyFixture) in EnumerateFootprintFixtures(footprint))
+        {
+            for (var child = 0; child < bodyFixture.Shape.ChildCount; child++)
+            {
+                if (_manifold.TestOverlap(
+                        bodyFixture.Shape,
+                        child,
+                        shape,
+                        0,
+                        footprint.Transform,
+                        shapeTransform,
+                        ignoreShapeSkin: true))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return !footprint.HasFixtures && footprint.Bounds.Intersects(shapeBounds);
+    }
+
+    private IEnumerable<KeyValuePair<string, Fixture>> EnumerateFootprintFixtures(in BodyFootprint footprint)
+    {
+        if (!footprint.HasFixtures || !_fixturesQuery.TryComp(footprint.Owner, out var fixtures))
+            return Array.Empty<KeyValuePair<string, Fixture>>();
+
+        return fixtures.Fixtures
+            .Where(entry => entry.Value.Hard)
+            .OrderBy(entry => entry.Key, StringComparer.Ordinal);
+    }
+
+    private static Box2 Union(Box2 left, Box2 right)
+        => new(Vector2.Min(left.BottomLeft, right.BottomLeft), Vector2.Max(left.TopRight, right.TopRight));
+
+    private readonly record struct BodyFootprint(
+        EntityUid Owner,
+        Vector2 Center,
+        Box2 Bounds,
+        PhysicsTransform Transform,
+        bool HasFixtures);
 }

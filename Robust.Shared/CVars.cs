@@ -1580,12 +1580,6 @@ namespace Robust.Shared
             CVarDef.Create("physics.zlevel_ground_snap_distance", 0.25f, CVar.REPLICATED);
 
         /// <summary>
-        /// Height advantage a competing support needs before replacing the confirmed provider.
-        /// </summary>
-        public static readonly CVarDef<float> PhysicsZLevelSupportHysteresis =
-            CVarDef.Create("physics.zlevel_support_hysteresis", 0.05f, CVar.REPLICATED);
-
-        /// <summary>
         /// How much to enlarge grids when determining their fixture bounds.
         /// </summary>
         public static readonly CVarDef<float> GridFixtureEnlargement =

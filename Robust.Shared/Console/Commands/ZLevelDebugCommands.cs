@@ -4,6 +4,7 @@ using Robust.Shared.IoC;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Physics.Components;
+using Robust.Shared.Physics.Systems;
 
 namespace Robust.Shared.Console.Commands;
 
@@ -235,6 +236,8 @@ public sealed partial class ZLevelsListCommand : LocalizedEntityCommands
 public sealed partial class ZPhysicsDebugCommand : LocalizedEntityCommands
 {
     [Dependency] private ZLevelSystem _zLevels = default!;
+    [Dependency] private ZLevelSupportSystem _support = default!;
+    [Dependency] private SharedTransformSystem _transform = default!;
 
     public override string Command => "zphysics_debug";
 
@@ -263,17 +266,22 @@ public sealed partial class ZPhysicsDebugCommand : LocalizedEntityCommands
             ("events", step.Events),
             ("limited", step.IterationLimitReached)));
 
+        var samplePoint = "unavailable";
         var projected = "unavailable";
         if (physics.SupportSurface != ZLevelSupportSurface.None &&
             EntityManager.TryGetComponent(uid.Value, out TransformComponent? xform) &&
-            xform.MapUid is { } viewedMap &&
-            _zLevels.TryProjectAbsolutePosition(
-                viewedMap,
-                physics.SupportPoint,
-                physics.SupportHeight,
-                out var projectedPoint))
+            xform.MapUid is { } viewedMap)
         {
-            projected = projectedPoint.ToString();
+            var point = _transform.GetWorldPosition(xform);
+            samplePoint = point.ToString();
+            if (_zLevels.TryProjectAbsolutePosition(
+                    viewedMap,
+                    point,
+                    physics.SupportHeight,
+                    out var projectedPoint))
+            {
+                projected = projectedPoint.ToString();
+            }
         }
 
         shell.WriteLine(Loc.GetString(
@@ -282,19 +290,17 @@ public sealed partial class ZPhysicsDebugCommand : LocalizedEntityCommands
             ("provider", physics.SupportProvider?.ToString() ?? "none"),
             ("surface", physics.SupportSurface),
             ("height", physics.SupportHeight),
-            ("contact", physics.SupportPoint),
-            ("projected", projected),
-            ("reconciliation", physics.ReconciliationState)));
+            ("sample", samplePoint),
+            ("projected", projected)));
 
-        foreach (var candidate in physics.LastSupportCandidates)
+        foreach (var candidate in _support.GetLastSupportCandidates(uid.Value))
         {
             shell.WriteLine(Loc.GetString(
                 "cmd-zphysics_debug-candidate",
                 ("provider", candidate.Provider),
                 ("surface", candidate.Surface),
-                ("tile", candidate.Tile),
                 ("height", candidate.AbsoluteHeight),
-                ("contact", candidate.ContactPoint),
+                ("sample", candidate.SamplePoint),
                 ("rejection", candidate.Rejection)));
         }
     }

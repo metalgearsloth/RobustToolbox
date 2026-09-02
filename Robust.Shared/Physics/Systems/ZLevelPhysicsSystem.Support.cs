@@ -19,19 +19,14 @@ namespace Robust.Shared.Physics.Systems;
 
 public sealed partial class ZLevelPhysicsSystem
 {
-    private const int MaxSupportDiagnostics = 64;
-    private const float DefaultFootprintRadius = 0.05f;
+    [Dependency] private ZLevelSupportSystem _support = default!;
 
-    [Dependency] private IManifoldManager _manifold = null!;
-    [Dependency] private EntityQuery<FixturesComponent> _fixturesQuery;
-    [Dependency] private EntityQuery<MapGridComponent> _gridQuery;
-
-    private readonly HashSet<Entity<ZLevelHighGroundComponent>> _supportProviders = new();
-    private List<Entity<MapGridComponent>> _supportGrids = new();
-    private readonly List<SupportCandidate> _supportCandidates = new();
+    private readonly Dictionary<EntityUid, HashSet<EntityUid>> _supportedBodiesByProvider = new();
+    private readonly HashSet<EntityUid> _supportRefreshBodies = new();
+    private readonly List<ZLevelSupportCandidateDebug> _supportDiagnosticsScratch = new();
 
     /// <summary>
-    /// Recomputes the deterministic support state beneath a body's complete fixture footprint.
+    /// Recomputes the support state beneath a body's canonical support point.
     /// </summary>
     public void RefreshSupport(Entity<ZLevelPhysicsComponent> entity, bool wake = true)
     {
@@ -41,19 +36,38 @@ public sealed partial class ZLevelPhysicsSystem
             return;
         }
 
-        var hadSupport = entity.Comp.SupportSurface != ZLevelSupportSurface.None;
+        if (!_xformQuery.TryComp(entity.Owner, out var xform) ||
+            xform.MapUid is not { } currentMap ||
+            !_zLevels.TryGetMapDepth(currentMap, out var currentDepth))
+        {
+            return;
+        }
+
+        var presentation = EnsureComp<ZLevelPresentationComponent>(entity.Owner);
         var oldProvider = entity.Comp.SupportProvider;
         var oldSurface = entity.Comp.SupportSurface;
-        var oldTile = entity.Comp.SupportTile;
-        var oldState = entity.Comp.GroundState;
+        var oldGround = entity.Comp.GroundState;
+        var currentAbsoluteHeight = ZLevelProjection.GetAbsoluteZ(currentDepth.Value, presentation.LocalHeight);
+        var maxRise = oldGround == ZLevelGroundState.Grounded && entity.Comp.AutoStep
+            ? _maxStepUp
+            : PositionEpsilon;
 
-        var selected = TrySelectSupport(entity, out var candidate);
+        _supportDiagnosticsScratch.Clear();
+        var selected = _support.TryQuerySupport(
+            entity,
+            _transform.GetWorldPosition(xform),
+            currentAbsoluteHeight,
+            maxRise,
+            out var support,
+            _supportDiagnosticsScratch);
+        _support.SetLastSupportCandidates(entity.Owner, _supportDiagnosticsScratch);
+
         if (!selected)
         {
-            SetSupportState(entity, null, ZLevelSupportSurface.None, default, 0f, default);
-            if (oldState == ZLevelGroundState.Grounded)
+            ApplySupportResult(entity, ZLevelSupportResult.None);
+            if (oldGround == ZLevelGroundState.Grounded)
             {
-                SetGroundState(entity, ZLevelGroundState.Airborne, ZLevelReconciliationState.AuthoritativeFall);
+                SetGroundState(entity, ZLevelGroundState.Airborne);
                 if (wake)
                     WakeBody(entity);
             }
@@ -61,143 +75,73 @@ public sealed partial class ZLevelPhysicsSystem
             return;
         }
 
-        var sameSupport = hadSupport &&
-                          oldProvider == candidate.Provider &&
-                          oldSurface == candidate.Surface &&
-                          oldTile == candidate.Tile;
-        SetSupportState(
-            entity,
-            candidate.Provider,
-            candidate.Surface,
-            candidate.Tile,
-            candidate.AbsoluteHeight,
-            candidate.ContactPoint);
+        var sameSupport = oldProvider == support.Provider && oldSurface == support.Surface;
+        ApplySupportResult(entity, support);
 
-        if (!_net.IsClient &&
-            oldState == ZLevelGroundState.Grounded &&
-            sameSupport &&
-            candidate.Surface == ZLevelSupportSurface.HighGround)
-        {
-            NormalizeGroundedSupportMap(entity, candidate.AbsoluteHeight);
-        }
-
-        if (!_zPresentationQuery.TryComp(entity.Owner, out var presentation) ||
-            Transform(entity).MapUid is not { } currentMap ||
-            !_zLevels.TryGetMapDepth(currentMap, out var currentDepth))
-        {
-            return;
-        }
-
-        var currentAbsoluteHeight = ZLevelProjection.GetAbsoluteZ(currentDepth.Value, presentation.LocalHeight);
-        if (oldState != ZLevelGroundState.Grounded)
+        if (oldGround != ZLevelGroundState.Grounded)
             return;
 
-        var rise = candidate.AbsoluteHeight - currentAbsoluteHeight;
+        var rise = support.AbsoluteHeight - currentAbsoluteHeight;
         var maximumSnapDown = MathF.Min(_maxStepDown, _groundSnapDistance);
-        if (sameSupport || rise <= _maxStepUp + PositionEpsilon && rise >= -maximumSnapDown - PositionEpsilon)
+        if (sameSupport ||
+            rise <= _maxStepUp + PositionEpsilon &&
+            rise >= -maximumSnapDown - PositionEpsilon)
         {
             SetLocalHeight(
                 (entity.Owner, presentation),
-                ZLevelProjection.GetLocalHeight(candidate.AbsoluteHeight, currentDepth.Value));
-            SetGroundState(
-                entity,
-                ZLevelGroundState.Grounded,
-                sameSupport
-                    ? ZLevelReconciliationState.Confirmed
-                    : ZLevelReconciliationState.AuthoritativeSupportChange);
-            entity.Comp.Velocity = 0f;
+                ZLevelProjection.GetLocalHeight(support.AbsoluteHeight, currentDepth.Value));
+            SetGroundState(entity, ZLevelGroundState.Grounded);
+            SetVerticalVelocity(entity, 0f);
+            NormalizeEntityMapFromAbsoluteZ(entity, support.AbsoluteHeight);
             return;
         }
 
-        SetGroundState(entity, ZLevelGroundState.Airborne, ZLevelReconciliationState.AuthoritativeFall);
+        SetGroundState(entity, ZLevelGroundState.Airborne);
         if (wake)
             WakeBody(entity);
     }
 
     /// <summary>
-    /// Predicts only the continuous height of an already-confirmed support provider. Candidate changes, walking off,
-    /// falls, landings, and map reparenting remain server-authoritative.
+    /// Applies a selected support result without changing grounded state, velocity, z height, or map parent.
     /// </summary>
-    private void PredictSameSupportHeight(Entity<ZLevelPhysicsComponent> entity)
+    private void ApplySupportResult(Entity<ZLevelPhysicsComponent> entity, ZLevelSupportResult support)
     {
-        if (entity.Comp.GroundState != ZLevelGroundState.Grounded ||
-            entity.Comp.SupportSurface != ZLevelSupportSurface.HighGround ||
-            entity.Comp.SupportProvider is not { } providerUid ||
-            !_highGroundQuery.TryComp(providerUid, out var provider) ||
-            !_xformQuery.TryComp(providerUid, out var providerXform) ||
-            !_xformQuery.TryComp(entity.Owner, out var bodyXform) ||
-            bodyXform.MapUid is not { } bodyMap ||
-            providerXform.MapUid is not { } providerMap ||
-            !_zLevels.TryGetMapDepth(bodyMap, out var bodyDepth) ||
-            !_zLevels.TryGetMapDepth(providerMap, out var providerDepth) ||
-            !_zLevels.TryGetMapDepthOffset(providerMap, bodyMap, out var mapOffset) ||
-            Math.Abs(mapOffset) > 1 ||
-            _container.IsEntityOrParentInContainer(entity.Owner) ||
-            bodyXform.Anchored ||
-            (bodyXform.ParentUid != bodyXform.GridUid && bodyXform.ParentUid != bodyXform.MapUid) ||
-            !_physicsQuery.TryComp(entity.Owner, out var body) ||
-            (body.BodyType & (BodyType.Dynamic | BodyType.KinematicController)) == 0 ||
-            !TryGetSupportLocalBounds((providerUid, provider), out var localBounds))
+        if (entity.Comp.SupportProvider == support.Provider &&
+            entity.Comp.SupportSurface == support.Surface &&
+            entity.Comp.SupportHeight.Equals(support.AbsoluteHeight))
         {
             return;
         }
 
-        var footprint = GetFootprint(entity.Owner, bodyXform);
-        if (!FootprintOverlapsProvider(footprint, (providerUid, provider), providerXform))
-            return;
-
-        var inverse = _transform.GetInvWorldMatrix(providerXform);
-        var localCenter = Vector2.Transform(footprint.Center, inverse);
-        var localContact = Vector2.Clamp(localCenter, localBounds.BottomLeft, localBounds.TopRight);
-        var absoluteHeight = providerDepth.Value + EvaluateSurfaceHeight(provider, localBounds, localContact);
-        if (!float.IsFinite(absoluteHeight) ||
-            !_zPresentationQuery.TryComp(entity.Owner, out var presentation))
-        {
-            return;
-        }
-
-        var currentAbsoluteHeight = ZLevelProjection.GetAbsoluteZ(bodyDepth.Value, presentation.LocalHeight);
-        var rise = absoluteHeight - currentAbsoluteHeight;
-        var maximumSnapDown = MathF.Min(_maxStepDown, _groundSnapDistance);
-        if (rise > _maxStepUp + PositionEpsilon || rise < -maximumSnapDown - PositionEpsilon)
-            return;
-
-        SetLocalHeight(
-            (entity.Owner, presentation),
-            ZLevelProjection.GetLocalHeight(absoluteHeight, bodyDepth.Value));
+        ReplaceSupportedBodyProvider(entity.Owner, entity.Comp.SupportProvider, support.Provider);
+        entity.Comp.SupportProvider = support.Provider;
+        entity.Comp.SupportSurface = support.Surface;
+        entity.Comp.SupportHeight = support.AbsoluteHeight;
+        DirtyFields(
+            entity.Owner,
+            entity.Comp,
+            null,
+            nameof(ZLevelPhysicsComponent.SupportProvider),
+            nameof(ZLevelPhysicsComponent.SupportSurface),
+            nameof(ZLevelPhysicsComponent.SupportHeight));
     }
 
-    /// <summary>
-    /// Keeps a grounded continuous surface on the nearest canonical map plane. A hysteresis band around each plane
-    /// prevents direction reversals at ramp edges from repeatedly reparenting the body.
-    /// </summary>
-    private void NormalizeGroundedSupportMap(Entity<ZLevelPhysicsComponent> entity, float absoluteHeight)
+    private void SetGroundState(Entity<ZLevelPhysicsComponent> entity, ZLevelGroundState state)
     {
-        if (_supportMapTransitions.Contains(entity.Owner) ||
-            Transform(entity).MapUid is not { } currentMap ||
-            !_zLevels.TryGetMapDepth(currentMap, out var currentDepth))
-        {
-            return;
-        }
-
-        var offset = 0;
-        if (absoluteHeight >= currentDepth.Value + 1f - PositionEpsilon)
-            offset = 1;
-        else if (absoluteHeight < currentDepth.Value - _supportHysteresis - PositionEpsilon)
-            offset = -1;
-
-        if (offset == 0)
+        if (entity.Comp.GroundState == state)
             return;
 
-        _supportMapTransitions.Add(entity.Owner);
-        try
-        {
-            TryMove(entity.Owner, offset);
-        }
-        finally
-        {
-            _supportMapTransitions.Remove(entity.Owner);
-        }
+        entity.Comp.GroundState = state;
+        DirtyField(entity.Owner, entity.Comp, nameof(ZLevelPhysicsComponent.GroundState));
+    }
+
+    private void SetVerticalVelocity(Entity<ZLevelPhysicsComponent> entity, float velocity)
+    {
+        if (entity.Comp.Velocity.Equals(velocity))
+            return;
+
+        entity.Comp.Velocity = velocity;
+        DirtyField(entity.Owner, entity.Comp, nameof(ZLevelPhysicsComponent.Velocity));
     }
 
     [Pure]
@@ -213,25 +157,212 @@ public sealed partial class ZLevelPhysicsSystem
         return ZLevelProjection.GetLocalHeight(entity.Comp.SupportHeight, depth.Value);
     }
 
-    private bool TrySelectSupport(Entity<ZLevelPhysicsComponent> entity, out SupportCandidate selected)
+    /// <summary>
+    /// Reparents a grounded body to the z-map that owns its absolute support height.
+    /// </summary>
+    public bool NormalizeEntityMapFromAbsoluteZ(Entity<ZLevelPhysicsComponent> entity, float absoluteZ)
     {
-        selected = default;
-        _supportCandidates.Clear();
-        entity.Comp.LastSupportCandidates.Clear();
-
-        if (!_xformQuery.TryComp(entity.Owner, out var xform) ||
+        if (!float.IsFinite(absoluteZ) ||
+            !_xformQuery.TryComp(entity.Owner, out var xform) ||
             xform.MapUid is not { } currentMap ||
-            !_zMapQuery.TryComp(currentMap, out var currentZMap) ||
-            !_mapQuery.TryComp(currentMap, out _) ||
+            !_zLevels.TryGetMapData(currentMap, out var currentZMap, out var network))
+        {
+            return false;
+        }
+
+        var targetDepth = Math.Clamp(
+            (int) MathF.Floor(absoluteZ + PositionEpsilon),
+            0,
+            network.SortedZLevels.Count - 1);
+        var offset = targetDepth - currentZMap.Depth;
+        if (offset == 0)
+            return true;
+
+        if (!_zLevels.TryMoveEntityToMapOffset(entity.Owner, offset, out var targetMap) ||
+            targetMap is not { } targetMapUid ||
+            !_zLevels.TryGetMapDepth(targetMapUid, out var targetMapDepth) ||
             !_zPresentationQuery.TryComp(entity.Owner, out var presentation))
         {
             return false;
         }
 
-        var footprint = GetFootprint(entity.Owner, xform);
-        var currentAbsoluteHeight = ZLevelProjection.GetAbsoluteZ(currentZMap.Depth, presentation.LocalHeight);
+        SetLocalHeight(
+            (entity.Owner, presentation),
+            ZLevelProjection.GetLocalHeight(absoluteZ, targetMapDepth.Value));
+        var moved = new ZLevelMapMoveEvent(offset, targetMapUid);
+        RaiseLocalEvent(entity.Owner, ref moved);
+        return true;
+    }
 
-        // One adjacent level is enough: farther floors are reconsidered after each authoritative map transition.
+    /// <summary>
+    /// Replaces an anchored flat support height and refreshes nearby/supported bodies.
+    /// </summary>
+    public void SetSupportHeight(Entity<ZLevelHighGroundComponent> entity, float height)
+    {
+        if (!float.IsFinite(height) || entity.Comp.Height.Equals(height))
+            return;
+
+        entity.Comp.Height = height;
+        DirtyField(entity.Owner, entity.Comp, nameof(ZLevelHighGroundComponent.Height));
+        RefreshBodiesAtHighGround(entity.Owner);
+    }
+
+    public bool TryGetSupportSurfacePoints(
+        Entity<ZLevelHighGroundComponent> provider,
+        Span<ZLevelSupportPoint> points,
+        out int count)
+        => _support.TryGetSupportSurfacePoints(provider, points, out count);
+
+    public bool TrySampleSupportHeight(
+        EntityUid provider,
+        ZLevelSupportSurface surface,
+        Vector2 worldPoint,
+        out float absoluteHeight)
+        => _support.TrySampleSurfaceHeight(provider, surface, worldPoint, out absoluteHeight);
+
+    public bool TryGetSupportLocalBounds(Entity<ZLevelHighGroundComponent> provider, out Box2 bounds)
+        => _support.TryGetSupportLocalBounds(provider, out bounds);
+
+    internal void RefreshSupportsOnMovedGrid(EntityUid grid)
+    {
+        _supportRefreshBodies.Clear();
+        AddSupportedBodies(grid, _supportRefreshBodies);
+
+        foreach (var provider in _supportedBodiesByProvider.Keys.ToArray())
+        {
+            if (provider == grid ||
+                !_xformQuery.TryComp(provider, out var providerXform) ||
+                providerXform.GridUid != grid)
+            {
+                continue;
+            }
+
+            AddSupportedBodies(provider, _supportRefreshBodies);
+        }
+
+        RefreshSupportBodySet(wake: false);
+    }
+
+    private void RefreshSupportedBodiesAtProvider(EntityUid provider)
+    {
+        _supportRefreshBodies.Clear();
+        AddSupportedBodies(provider, _supportRefreshBodies);
+        RefreshSupportBodySet(wake: true);
+    }
+
+    private void RefreshSupportBodySet(bool wake)
+    {
+        foreach (var uid in _supportRefreshBodies)
+        {
+            if (!_zPhysicsQuery.TryComp(uid, out var physics) || !CanSimulateBody((uid, physics)))
+                continue;
+
+            RefreshSupport((uid, physics), wake);
+            if (wake)
+                WakeBody((uid, physics));
+        }
+
+        _supportRefreshBodies.Clear();
+    }
+
+    private void AddSupportedBodies(EntityUid provider, HashSet<EntityUid> bodies)
+    {
+        if (!_supportedBodiesByProvider.TryGetValue(provider, out var supported))
+            return;
+
+        foreach (var body in supported)
+            bodies.Add(body);
+    }
+
+    private void ReplaceSupportedBodyProvider(EntityUid body, EntityUid? oldProvider, EntityUid? newProvider)
+    {
+        if (oldProvider == newProvider)
+            return;
+
+        if (oldProvider is { } oldUid &&
+            _supportedBodiesByProvider.TryGetValue(oldUid, out var oldBodies))
+        {
+            oldBodies.Remove(body);
+            if (oldBodies.Count == 0)
+                _supportedBodiesByProvider.Remove(oldUid);
+        }
+
+        if (newProvider is not { } newUid)
+            return;
+
+        if (!_supportedBodiesByProvider.TryGetValue(newUid, out var newBodies))
+        {
+            newBodies = new HashSet<EntityUid>();
+            _supportedBodiesByProvider.Add(newUid, newBodies);
+        }
+
+        newBodies.Add(body);
+    }
+
+    private void ClearSupportTracking(Entity<ZLevelPhysicsComponent> entity)
+    {
+        ReplaceSupportedBodyProvider(entity.Owner, entity.Comp.SupportProvider, null);
+        _support.ClearLastSupportCandidates(entity.Owner);
+    }
+}
+
+/// <summary>
+/// Pure support-surface queries for flat z-level floors, platforms, and wall tops.
+/// </summary>
+public sealed partial class ZLevelSupportSystem : EntitySystem
+{
+    private const int MaxSupportDiagnostics = 64;
+    private const float SupportProbeRadius = 0.08f;
+    private const float PositionEpsilon = 0.00001f;
+
+    [Dependency] private IManifoldManager _manifold = default!;
+    [Dependency] private EntityLookupSystem _lookup = default!;
+    [Dependency] private SharedMapSystem _map = default!;
+    [Dependency] private SharedPhysicsSystem _physics = default!;
+    [Dependency] private SharedTransformSystem _transform = default!;
+    [Dependency] private ZLevelSystem _zLevels = default!;
+
+    [Dependency] private EntityQuery<FixturesComponent> _fixturesQuery = default!;
+    [Dependency] private EntityQuery<MapComponent> _mapQuery = default!;
+    [Dependency] private EntityQuery<MapGridComponent> _gridQuery = default!;
+    [Dependency] private EntityQuery<TransformComponent> _xformQuery = default!;
+    [Dependency] private EntityQuery<ZLevelHighGroundComponent> _highGroundQuery = default!;
+    [Dependency] private EntityQuery<ZLevelMapComponent> _zMapQuery = default!;
+
+    private readonly PhysShapeCircle _supportProbe = new(SupportProbeRadius);
+    private readonly HashSet<Entity<ZLevelHighGroundComponent>> _supportProviders = new();
+    private List<Entity<MapGridComponent>> _supportGrids = new();
+    private readonly List<ZLevelSupportResult> _supportCandidates = new();
+    private readonly Dictionary<EntityUid, List<ZLevelSupportCandidateDebug>> _lastSupportCandidates = new();
+
+    [Pure]
+    public bool TryQuerySupport(
+        Entity<ZLevelPhysicsComponent> body,
+        Vector2 proposedWorldPosition,
+        float currentAbsoluteHeight,
+        float maximumRise,
+        out ZLevelSupportResult selected,
+        List<ZLevelSupportCandidateDebug>? diagnostics = null)
+    {
+        selected = ZLevelSupportResult.None;
+        _supportCandidates.Clear();
+        diagnostics?.Clear();
+
+        if (!float.IsFinite(currentAbsoluteHeight) ||
+            !_xformQuery.TryComp(body.Owner, out var xform) ||
+            xform.MapUid is not { } currentMap ||
+            !_zMapQuery.TryComp(currentMap, out _) ||
+            !_mapQuery.TryComp(currentMap, out _))
+        {
+            return false;
+        }
+
+        maximumRise = MathF.Max(0f, maximumRise);
+        var sample = new SupportSample(
+            proposedWorldPosition,
+            Box2.CenteredAround(proposedWorldPosition, new Vector2(SupportProbeRadius * 2f)),
+            new PhysicsTransform(proposedWorldPosition, Angle.Zero));
+
         for (var floor = 0; floor <= 1; floor++)
         {
             var checkingMap = currentMap;
@@ -250,18 +381,21 @@ public sealed partial class ZLevelPhysicsSystem
             }
 
             CollectHighGroundCandidates(
-                entity,
+                body.Owner,
                 checkingMap,
                 checkingMapComp.MapId,
                 checkingZMap.Depth,
-                footprint,
-                currentAbsoluteHeight);
+                sample,
+                currentAbsoluteHeight,
+                maximumRise,
+                diagnostics);
             CollectTileCandidates(
-                entity,
                 checkingMapComp.MapId,
                 checkingZMap.Depth,
-                footprint,
-                currentAbsoluteHeight);
+                sample,
+                currentAbsoluteHeight,
+                maximumRise,
+                diagnostics);
         }
 
         if (_supportCandidates.Count == 0)
@@ -269,355 +403,53 @@ public sealed partial class ZLevelPhysicsSystem
 
         _supportCandidates.Sort(CompareSupportCandidates);
         selected = _supportCandidates[0];
-
-        if (entity.Comp.SupportProvider is { } currentProvider)
-        {
-            foreach (var candidate in _supportCandidates)
-            {
-                if (candidate.Provider != currentProvider ||
-                    candidate.Surface != entity.Comp.SupportSurface ||
-                    candidate.Tile != entity.Comp.SupportTile)
-                {
-                    continue;
-                }
-
-                if (selected.AbsoluteHeight - candidate.AbsoluteHeight <= _supportHysteresis)
-                    selected = candidate;
-                break;
-            }
-        }
-
-        for (var i = 0; i < entity.Comp.LastSupportCandidates.Count; i++)
-        {
-            var diagnostic = entity.Comp.LastSupportCandidates[i];
-            if (diagnostic.Rejection != ZLevelSupportRejection.None ||
-                diagnostic.Provider == selected.Provider &&
-                diagnostic.Surface == selected.Surface &&
-                diagnostic.Tile == selected.Tile)
-            {
-                continue;
-            }
-
-            entity.Comp.LastSupportCandidates[i] = diagnostic with { Rejection = ZLevelSupportRejection.Occluded };
-        }
-
         return true;
     }
 
-    internal void RefreshSupportsOnMovedGrid(EntityUid grid)
+    [Pure]
+    public bool TrySampleSurfaceHeight(
+        EntityUid provider,
+        ZLevelSupportSurface surface,
+        Vector2 worldPoint,
+        out float absoluteHeight)
     {
-        var query = EntityQueryEnumerator<ZLevelPhysicsComponent, TransformComponent>();
-        while (query.MoveNext(out var uid, out var physics, out var xform))
+        absoluteHeight = 0f;
+        switch (surface)
         {
-            if (physics.GroundState != ZLevelGroundState.Grounded)
-                continue;
-
-            var providerOnGrid = physics.SupportProvider is { } provider &&
-                                 _xformQuery.TryComp(provider, out var providerXform) &&
-                                 providerXform.GridUid == grid;
-            if (xform.GridUid != grid && !providerOnGrid)
-                continue;
-
-            RefreshSupport((uid, physics), wake: false);
-        }
-    }
-
-    private void CollectHighGroundCandidates(
-        Entity<ZLevelPhysicsComponent> body,
-        EntityUid checkingMap,
-        MapId mapId,
-        int mapDepth,
-        in BodyFootprint footprint,
-        float currentAbsoluteHeight)
-    {
-        _supportProviders.Clear();
-        _lookup.GetEntitiesIntersecting(
-            mapId,
-            footprint.Bounds,
-            _supportProviders,
-            LookupFlags.Static | LookupFlags.Sundries | LookupFlags.Sensors);
-
-        foreach (var provider in _supportProviders.OrderBy(entry => entry.Owner))
-        {
-            if (provider.Owner == body.Owner)
-            {
-                AddSupportDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, default, 0f, default,
-                    ZLevelSupportRejection.Self, body.Comp);
-                continue;
-            }
-
-            if (!_xformQuery.TryComp(provider.Owner, out var providerXform) || providerXform.MapUid != checkingMap)
-            {
-                AddSupportDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, default, 0f, default,
-                    ZLevelSupportRejection.WrongMap, body.Comp);
-                continue;
-            }
-
-            if (provider.Comp.HeightCurve.Count == 0)
-            {
-                AddSupportDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, default, 0f, default,
-                    ZLevelSupportRejection.NoSurface, body.Comp);
-                continue;
-            }
-
-            if (!TryGetSupportLocalBounds(provider, out var localBounds))
-            {
-                AddSupportDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, default, 0f, default,
-                    ZLevelSupportRejection.NoFixture, body.Comp);
-                continue;
-            }
-
-            if (!FootprintOverlapsProvider(footprint, provider, providerXform))
-            {
-                AddSupportDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, default, 0f, default,
-                    ZLevelSupportRejection.OutsideFootprint, body.Comp);
-                continue;
-            }
-
-            var inverse = _transform.GetInvWorldMatrix(providerXform);
-            var localCenter = Vector2.Transform(footprint.Center, inverse);
-            var localContact = Vector2.Clamp(localCenter, localBounds.BottomLeft, localBounds.TopRight);
-            var contactPoint = Vector2.Transform(localContact, _transform.GetWorldMatrix(providerXform));
-            var surfaceHeight = EvaluateSurfaceHeight(provider.Comp, localBounds, localContact);
-            var absoluteHeight = mapDepth + surfaceHeight;
-            if (!float.IsFinite(absoluteHeight))
-            {
-                AddSupportDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, default, absoluteHeight,
-                    contactPoint, ZLevelSupportRejection.NonFiniteHeight, body.Comp);
-                continue;
-            }
-
-            var allowedRise = body.Comp.GroundState == ZLevelGroundState.Grounded && body.Comp.AutoStep
-                ? _maxStepUp
-                : PositionEpsilon;
-            if (absoluteHeight > currentAbsoluteHeight + allowedRise + PositionEpsilon)
-            {
-                AddSupportDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, default, absoluteHeight,
-                    contactPoint, ZLevelSupportRejection.AboveStepLimit, body.Comp);
-                continue;
-            }
-
-            var candidate = new SupportCandidate(
-                provider.Owner,
-                ZLevelSupportSurface.HighGround,
-                default,
-                absoluteHeight,
-                contactPoint,
-                provider.Comp.Priority);
-            _supportCandidates.Add(candidate);
-            AddSupportDiagnostic(candidate, ZLevelSupportRejection.None, body.Comp);
-        }
-    }
-
-    private void CollectTileCandidates(
-        Entity<ZLevelPhysicsComponent> body,
-        MapId mapId,
-        int mapDepth,
-        in BodyFootprint footprint,
-        float currentAbsoluteHeight)
-    {
-        if (mapDepth > currentAbsoluteHeight + PositionEpsilon)
-            return;
-
-        _supportGrids.Clear();
-        _map.FindGridsIntersecting(mapId, footprint.Bounds, ref _supportGrids, approx: false, includeMap: true);
-        _supportGrids.Sort((left, right) => left.Owner.CompareTo(right.Owner));
-
-        EntityUid previous = default;
-        foreach (var grid in _supportGrids)
-        {
-            if (grid.Owner == previous)
-                continue;
-            previous = grid.Owner;
-
-            var inverse = _transform.GetInvWorldMatrix(grid.Owner);
-            var matrix = _transform.GetWorldMatrix(grid.Owner);
-            var localBounds = inverse.TransformBox(footprint.Bounds);
-            var tileSize = grid.Comp.TileSize;
-            var min = new Vector2i(
-                (int) MathF.Floor(localBounds.Left / tileSize),
-                (int) MathF.Floor(localBounds.Bottom / tileSize));
-            var max = new Vector2i(
-                (int) MathF.Floor(localBounds.Right / tileSize),
-                (int) MathF.Floor(localBounds.Top / tileSize));
-
-            for (var x = min.X; x <= max.X; x++)
-            {
-                for (var y = min.Y; y <= max.Y; y++)
+            case ZLevelSupportSurface.Tile:
+                if (!_gridQuery.TryComp(provider, out _) ||
+                    !_xformQuery.TryComp(provider, out var gridXform) ||
+                    gridXform.MapUid is not { } gridMap ||
+                    !_zLevels.TryGetMapDepth(gridMap, out var gridDepth))
                 {
-                    var tileIndex = new Vector2i(x, y);
-                    if (!_map.TryGetTileRef(grid.Owner, grid.Comp, tileIndex, out var tile) || tile.Tile.IsEmpty)
-                        continue;
-
-                    var tileBounds = new Box2(
-                        new Vector2(x * tileSize, y * tileSize),
-                        new Vector2((x + 1) * tileSize, (y + 1) * tileSize));
-                    var tileShape = new SlimPolygon(tileBounds, matrix, out var tileWorldBounds);
-                    if (!FootprintOverlapsShape(footprint, tileShape, PhysicsTransform.Empty, tileWorldBounds))
-                        continue;
-
-                    var localCenter = Vector2.Transform(footprint.Center, inverse);
-                    var localContact = Vector2.Clamp(localCenter, tileBounds.BottomLeft, tileBounds.TopRight);
-                    var contactPoint = Vector2.Transform(localContact, matrix);
-                    var candidate = new SupportCandidate(
-                        grid.Owner,
-                        ZLevelSupportSurface.Tile,
-                        tileIndex,
-                        mapDepth,
-                        contactPoint,
-                        0);
-                    _supportCandidates.Add(candidate);
-                    AddSupportDiagnostic(candidate, ZLevelSupportRejection.None, body.Comp);
-                }
-            }
-        }
-    }
-
-    private BodyFootprint GetFootprint(EntityUid uid, TransformComponent xform)
-    {
-        var center = _transform.GetWorldPosition(xform);
-        var bounds = Box2.CenteredAround(center, new Vector2(DefaultFootprintRadius * 2f));
-        var hasFixtures = false;
-        var physicsTransform = _physics.GetPhysicsTransform(uid, xform);
-
-        if (_fixturesQuery.TryComp(uid, out var fixtures))
-        {
-            foreach (var (_, fixture) in fixtures.Fixtures.OrderBy(entry => entry.Key, StringComparer.Ordinal))
-            {
-                if (!fixture.Hard)
-                    continue;
-
-                for (var child = 0; child < fixture.Shape.ChildCount; child++)
-                {
-                    var fixtureBounds = fixture.Shape.ComputeAABB(physicsTransform, child);
-                    bounds = hasFixtures ? Union(bounds, fixtureBounds) : fixtureBounds;
-                    hasFixtures = true;
-                }
-            }
-        }
-
-        return new BodyFootprint(uid, center, bounds, physicsTransform, hasFixtures);
-    }
-
-    private bool FootprintOverlapsProvider(
-        in BodyFootprint footprint,
-        Entity<ZLevelHighGroundComponent> provider,
-        TransformComponent providerXform)
-    {
-        if (!_fixturesQuery.TryComp(provider.Owner, out var providerFixtures))
-            return false;
-
-        var providerTransform = _physics.GetPhysicsTransform(provider.Owner, providerXform);
-        foreach (var (bodyId, bodyFixture) in EnumerateFootprintFixtures(footprint))
-        {
-            foreach (var (providerId, providerFixture) in providerFixtures.Fixtures.OrderBy(entry => entry.Key, StringComparer.Ordinal))
-            {
-                if (provider.Comp.SurfaceFixture.Length != 0 && provider.Comp.SurfaceFixture != providerId)
-                    continue;
-
-                for (var bodyChild = 0; bodyChild < bodyFixture.Shape.ChildCount; bodyChild++)
-                {
-                    for (var providerChild = 0; providerChild < providerFixture.Shape.ChildCount; providerChild++)
-                    {
-                        if (_manifold.TestOverlap(
-                                bodyFixture.Shape,
-                                bodyChild,
-                                providerFixture.Shape,
-                                providerChild,
-                                footprint.Transform,
-                                providerTransform,
-                                ignoreShapeSkin: true))
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-
-        return !footprint.HasFixtures && _lookup.GetWorldAABB(provider.Owner, providerXform).Intersects(footprint.Bounds);
-    }
-
-    private bool FootprintOverlapsShape<TShape>(
-        in BodyFootprint footprint,
-        TShape shape,
-        PhysicsTransform shapeTransform,
-        Box2 shapeBounds)
-        where TShape : Robust.Shared.Physics.Collision.Shapes.IPhysShape
-    {
-        foreach (var (_, bodyFixture) in EnumerateFootprintFixtures(footprint))
-        {
-            for (var child = 0; child < bodyFixture.Shape.ChildCount; child++)
-            {
-                if (_manifold.TestOverlap(
-                        bodyFixture.Shape,
-                        child,
-                        shape,
-                        0,
-                        footprint.Transform,
-                        shapeTransform,
-                        ignoreShapeSkin: true))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return !footprint.HasFixtures && footprint.Bounds.Intersects(shapeBounds);
-    }
-
-    private IEnumerable<KeyValuePair<string, Fixture>> EnumerateFootprintFixtures(in BodyFootprint footprint)
-    {
-        if (!footprint.HasFixtures || !_fixturesQuery.TryComp(footprint.Owner, out var fixtures))
-            return Array.Empty<KeyValuePair<string, Fixture>>();
-
-        return fixtures.Fixtures
-            .Where(entry => entry.Value.Hard)
-            .OrderBy(entry => entry.Key, StringComparer.Ordinal);
-    }
-
-    /// <summary>
-    /// Gets the authored fixture bounds of a provider's walkable surface in provider-local coordinates.
-    /// </summary>
-    public bool TryGetSupportLocalBounds(Entity<ZLevelHighGroundComponent> provider, out Box2 bounds)
-    {
-        bounds = default;
-        if (!_fixturesQuery.TryComp(provider.Owner, out var fixtures))
-            return false;
-
-        var found = false;
-        foreach (var (id, fixture) in fixtures.Fixtures.OrderBy(entry => entry.Key, StringComparer.Ordinal))
-        {
-            if (provider.Comp.SurfaceFixture.Length != 0 && provider.Comp.SurfaceFixture != id)
-                continue;
-
-            for (var child = 0; child < fixture.Shape.ChildCount; child++)
-            {
-                var childBounds = fixture.Shape.ComputeAABB(PhysicsTransform.Empty, child);
-                if (fixture.Shape is PolygonShape or PhysShapeAabb)
-                {
-                    var radius = fixture.Shape.Radius;
-                    if (childBounds.Width > radius * 2f && childBounds.Height > radius * 2f)
-                    {
-                        childBounds = new Box2(
-                            childBounds.Left + radius,
-                            childBounds.Bottom + radius,
-                            childBounds.Right - radius,
-                            childBounds.Top - radius);
-                    }
+                    return false;
                 }
 
-                bounds = found ? Union(bounds, childBounds) : childBounds;
-                found = true;
-            }
-        }
+                absoluteHeight = gridDepth.Value;
+                return true;
+            case ZLevelSupportSurface.HighGround:
+                if (!_highGroundQuery.TryComp(provider, out var highGround) ||
+                    !_xformQuery.TryComp(provider, out var xform) ||
+                    xform.MapUid is not { } map ||
+                    !_zLevels.TryGetMapDepth(map, out var depth) ||
+                    !float.IsFinite(highGround.Height))
+                {
+                    return false;
+                }
 
-        return found;
+                absoluteHeight = depth.Value + highGround.Height;
+                return true;
+            case ZLevelSupportSurface.NetworkBoundary:
+                if (!_zLevels.TryGetMapDepth(provider, out var mapDepth))
+                    return false;
+
+                absoluteHeight = mapDepth.Value;
+                return true;
+            default:
+                return false;
+        }
     }
 
-    /// <summary>
-    /// Gets the projected-top source polygon as canonical XY/absolute-Z samples for content presentation.
-    /// </summary>
     public bool TryGetSupportSurfacePoints(
         Entity<ZLevelHighGroundComponent> provider,
         Span<ZLevelSupportPoint> points,
@@ -628,12 +460,14 @@ public sealed partial class ZLevelPhysicsSystem
             !TryGetSupportLocalBounds(provider, out var bounds) ||
             !_xformQuery.TryComp(provider.Owner, out var xform) ||
             xform.MapUid is not { } map ||
-            !_zLevels.TryGetMapDepth(map, out var depth))
+            !_zLevels.TryGetMapDepth(map, out var depth) ||
+            !float.IsFinite(provider.Comp.Height))
         {
             return false;
         }
 
         var matrix = _transform.GetWorldMatrix(xform);
+        var absoluteHeight = depth.Value + provider.Comp.Height;
         Span<Vector2> local = stackalloc Vector2[4]
         {
             bounds.BottomLeft,
@@ -643,158 +477,353 @@ public sealed partial class ZLevelPhysicsSystem
         };
 
         for (var i = 0; i < local.Length; i++)
-        {
-            points[i] = new ZLevelSupportPoint(
-                Vector2.Transform(local[i], matrix),
-                depth.Value + EvaluateSurfaceHeight(provider.Comp, bounds, local[i]));
-        }
+            points[i] = new ZLevelSupportPoint(Vector2.Transform(local[i], matrix), absoluteHeight);
 
         count = 4;
         return true;
     }
 
-    private static float EvaluateSurfaceHeight(ZLevelHighGroundComponent component, Box2 bounds, Vector2 localPoint)
+    /// <summary>
+    /// Gets the explicit authored support fixture bounds in provider-local coordinates.
+    /// </summary>
+    [Pure]
+    public bool TryGetSupportLocalBounds(Entity<ZLevelHighGroundComponent> provider, out Box2 bounds)
     {
-        if (component.HeightCurve.Count == 0)
-            return float.NaN;
+        bounds = default;
+        if (!TryGetSupportFixture(provider, out var fixture))
+            return false;
 
-        var width = MathF.Max(bounds.Width, PositionEpsilon);
-        var height = MathF.Max(bounds.Height, PositionEpsilon);
-        var u = Math.Clamp((localPoint.X - bounds.Left) / width, 0f, 1f);
-        var v = Math.Clamp((localPoint.Y - bounds.Bottom) / height, 0f, 1f);
-        // Angle zero is south in Robust. Evaluating in provider-local space makes rotation and moving grids exact.
-        var t = component.Corner ? (1f - u + 1f - v) * 0.5f : 1f - v;
-        return InterpolateHeight(component.HeightCurve, Math.Clamp(t, 0f, 1f));
-    }
-
-    private static float InterpolateHeight(IReadOnlyList<float> curve, float t)
-    {
-        if (curve.Count == 1)
-            return curve[0];
-
-        var scaled = t * (curve.Count - 1);
-        var index = Math.Min((int) scaled, curve.Count - 2);
-        return MathHelper.Lerp(curve[index], curve[index + 1], scaled - index);
-    }
-
-    private void SetSupportState(
-        Entity<ZLevelPhysicsComponent> entity,
-        EntityUid? provider,
-        ZLevelSupportSurface surface,
-        Vector2i tile,
-        float absoluteHeight,
-        Vector2 contactPoint)
-    {
-        if (entity.Comp.SupportProvider == provider &&
-            entity.Comp.SupportSurface == surface &&
-            entity.Comp.SupportTile == tile &&
-            entity.Comp.SupportHeight.Equals(absoluteHeight) &&
-            entity.Comp.SupportPoint.Equals(contactPoint))
+        var found = false;
+        for (var child = 0; child < fixture.Shape.ChildCount; child++)
         {
+            var childBounds = fixture.Shape.ComputeAABB(PhysicsTransform.Empty, child);
+            if (fixture.Shape is PolygonShape or PhysShapeAabb)
+            {
+                var radius = fixture.Shape.Radius;
+                if (childBounds.Width > radius * 2f && childBounds.Height > radius * 2f)
+                {
+                    childBounds = new Box2(
+                        childBounds.Left + radius,
+                        childBounds.Bottom + radius,
+                        childBounds.Right - radius,
+                        childBounds.Top - radius);
+                }
+            }
+
+            bounds = found ? Union(bounds, childBounds) : childBounds;
+            found = true;
+        }
+
+        return found;
+    }
+
+    public IReadOnlyList<ZLevelSupportCandidateDebug> GetLastSupportCandidates(EntityUid body)
+        => _lastSupportCandidates.TryGetValue(body, out var candidates)
+            ? candidates
+            : Array.Empty<ZLevelSupportCandidateDebug>();
+
+    internal void SetLastSupportCandidates(EntityUid body, IReadOnlyList<ZLevelSupportCandidateDebug> candidates)
+    {
+        if (candidates.Count == 0)
+        {
+            _lastSupportCandidates.Remove(body);
             return;
         }
 
-        entity.Comp.SupportProvider = provider;
-        entity.Comp.SupportSurface = surface;
-        entity.Comp.SupportTile = tile;
-        entity.Comp.SupportHeight = absoluteHeight;
-        entity.Comp.SupportPoint = contactPoint;
-        DirtyFields(
-            entity.Owner,
-            entity.Comp,
-            null,
-            nameof(ZLevelPhysicsComponent.SupportProvider),
-            nameof(ZLevelPhysicsComponent.SupportSurface),
-            nameof(ZLevelPhysicsComponent.SupportTile),
-            nameof(ZLevelPhysicsComponent.SupportHeight),
-            nameof(ZLevelPhysicsComponent.SupportPoint));
+        if (!_lastSupportCandidates.TryGetValue(body, out var stored))
+        {
+            stored = new List<ZLevelSupportCandidateDebug>(Math.Min(candidates.Count, MaxSupportDiagnostics));
+            _lastSupportCandidates.Add(body, stored);
+        }
+
+        stored.Clear();
+        var count = Math.Min(candidates.Count, MaxSupportDiagnostics);
+        for (var i = 0; i < count; i++)
+            stored.Add(candidates[i]);
     }
 
-    private void SetGroundState(
-        Entity<ZLevelPhysicsComponent> entity,
-        ZLevelGroundState state,
-        ZLevelReconciliationState reconciliation)
+    internal void ClearLastSupportCandidates(EntityUid body)
     {
-        if (entity.Comp.GroundState == state && entity.Comp.ReconciliationState == reconciliation)
+        _lastSupportCandidates.Remove(body);
+    }
+
+    private void CollectHighGroundCandidates(
+        EntityUid body,
+        EntityUid checkingMap,
+        MapId mapId,
+        int mapDepth,
+        in SupportSample sample,
+        float currentAbsoluteHeight,
+        float maximumRise,
+        List<ZLevelSupportCandidateDebug>? diagnostics)
+    {
+        _supportProviders.Clear();
+        _lookup.GetEntitiesIntersecting(
+            mapId,
+            sample.Bounds,
+            _supportProviders,
+            LookupFlags.Static | LookupFlags.Sundries | LookupFlags.Sensors);
+
+        foreach (var provider in _supportProviders.OrderBy(entry => entry.Owner))
+        {
+            if (provider.Owner == body)
+            {
+                AddDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, 0f, sample.Point,
+                    ZLevelSupportRejection.Self, diagnostics);
+                continue;
+            }
+
+            if (!_xformQuery.TryComp(provider.Owner, out var providerXform) || providerXform.MapUid != checkingMap)
+            {
+                AddDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, 0f, sample.Point,
+                    ZLevelSupportRejection.WrongMap, diagnostics);
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(provider.Comp.SurfaceFixture))
+            {
+                AddDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, 0f, sample.Point,
+                    ZLevelSupportRejection.NoSurface, diagnostics);
+                continue;
+            }
+
+            if (!float.IsFinite(provider.Comp.Height))
+            {
+                AddDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, provider.Comp.Height, sample.Point,
+                    ZLevelSupportRejection.NonFiniteHeight, diagnostics);
+                continue;
+            }
+
+            if (!TryGetSupportFixture(provider, out var fixture))
+            {
+                AddDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, 0f, sample.Point,
+                    ZLevelSupportRejection.NoFixture, diagnostics);
+                continue;
+            }
+
+            if (!SupportSampleOverlapsFixture(sample, provider.Owner, providerXform, fixture))
+            {
+                AddDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, 0f, sample.Point,
+                    ZLevelSupportRejection.OutsideFootprint, diagnostics);
+                continue;
+            }
+
+            var absoluteHeight = mapDepth + provider.Comp.Height;
+            if (absoluteHeight > currentAbsoluteHeight + maximumRise + PositionEpsilon)
+            {
+                AddDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, absoluteHeight, sample.Point,
+                    ZLevelSupportRejection.AboveStepLimit, diagnostics);
+                continue;
+            }
+
+            var candidate = new ZLevelSupportResult(
+                provider.Owner,
+                ZLevelSupportSurface.HighGround,
+                absoluteHeight,
+                sample.Point);
+            _supportCandidates.Add(candidate);
+            AddDiagnostic(candidate, ZLevelSupportRejection.None, diagnostics);
+        }
+    }
+
+    private void CollectTileCandidates(
+        MapId mapId,
+        int mapDepth,
+        in SupportSample sample,
+        float currentAbsoluteHeight,
+        float maximumRise,
+        List<ZLevelSupportCandidateDebug>? diagnostics)
+    {
+        if (mapDepth > currentAbsoluteHeight + maximumRise + PositionEpsilon)
             return;
 
-        entity.Comp.GroundState = state;
-        entity.Comp.ReconciliationState = reconciliation;
-        DirtyFields(
-            entity.Owner,
-            entity.Comp,
-            null,
-            nameof(ZLevelPhysicsComponent.GroundState),
-            nameof(ZLevelPhysicsComponent.ReconciliationState));
+        _supportGrids.Clear();
+        _map.FindGridsIntersecting(mapId, sample.Bounds, ref _supportGrids, approx: false, includeMap: true);
+        _supportGrids.Sort((left, right) => left.Owner.CompareTo(right.Owner));
+
+        EntityUid previous = default;
+        foreach (var grid in _supportGrids)
+        {
+            if (grid.Owner == previous)
+                continue;
+            previous = grid.Owner;
+
+            if (TileSupportOverlapsSample(grid, sample))
+            {
+                var candidate = new ZLevelSupportResult(
+                    grid.Owner,
+                    ZLevelSupportSurface.Tile,
+                    mapDepth,
+                    sample.Point);
+                _supportCandidates.Add(candidate);
+                AddDiagnostic(candidate, ZLevelSupportRejection.None, diagnostics);
+            }
+        }
     }
 
-    private void AddSupportDiagnostic(
-        SupportCandidate candidate,
-        ZLevelSupportRejection rejection,
-        ZLevelPhysicsComponent component)
-        => AddSupportDiagnostic(
-            candidate.Provider,
-            candidate.Surface,
-            candidate.Tile,
-            candidate.AbsoluteHeight,
-            candidate.ContactPoint,
-            rejection,
-            component);
+    private bool TileSupportOverlapsSample(Entity<MapGridComponent> grid, in SupportSample sample)
+    {
+        var inverse = _transform.GetInvWorldMatrix(grid.Owner);
+        var matrix = _transform.GetWorldMatrix(grid.Owner);
+        var localBounds = inverse.TransformBox(sample.Bounds);
+        var tileSize = grid.Comp.TileSize;
+        var min = new Vector2i(
+            (int) MathF.Floor(localBounds.Left / tileSize),
+            (int) MathF.Floor(localBounds.Bottom / tileSize));
+        var max = new Vector2i(
+            (int) MathF.Floor(localBounds.Right / tileSize),
+            (int) MathF.Floor(localBounds.Top / tileSize));
 
-    private static void AddSupportDiagnostic(
+        for (var x = min.X; x <= max.X; x++)
+        {
+            for (var y = min.Y; y <= max.Y; y++)
+            {
+                var tileIndex = new Vector2i(x, y);
+                if (!_map.TryGetTileRef(grid.Owner, grid.Comp, tileIndex, out var tile) || tile.Tile.IsEmpty)
+                    continue;
+
+                var tileBounds = new Box2(
+                    new Vector2(x * tileSize, y * tileSize),
+                    new Vector2((x + 1) * tileSize, (y + 1) * tileSize));
+                var tileShape = new SlimPolygon(tileBounds, matrix, out var tileWorldBounds);
+                if (!tileWorldBounds.Intersects(sample.Bounds))
+                    continue;
+
+                if (_manifold.TestOverlap(
+                        _supportProbe,
+                        0,
+                        tileShape,
+                        0,
+                        sample.Transform,
+                        PhysicsTransform.Empty,
+                        ignoreShapeSkin: true))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool SupportSampleOverlapsFixture(
+        in SupportSample sample,
+        EntityUid provider,
+        TransformComponent providerXform,
+        Fixture fixture)
+    {
+        var providerTransform = _physics.GetPhysicsTransform(provider, providerXform);
+        for (var child = 0; child < fixture.Shape.ChildCount; child++)
+        {
+            if (_manifold.TestOverlap(
+                    _supportProbe,
+                    0,
+                    fixture.Shape,
+                    child,
+                    sample.Transform,
+                    providerTransform,
+                    ignoreShapeSkin: true))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryGetSupportFixture(Entity<ZLevelHighGroundComponent> provider, out Fixture fixture)
+    {
+        fixture = default!;
+        if (string.IsNullOrWhiteSpace(provider.Comp.SurfaceFixture) ||
+            !_fixturesQuery.TryComp(provider.Owner, out var fixtures) ||
+            !fixtures.Fixtures.TryGetValue(provider.Comp.SurfaceFixture, out var found))
+        {
+            return false;
+        }
+
+        fixture = found;
+        return true;
+    }
+
+    private static void AddDiagnostic(
+        ZLevelSupportResult candidate,
+        ZLevelSupportRejection rejection,
+        List<ZLevelSupportCandidateDebug>? diagnostics)
+        => AddDiagnostic(
+            candidate.Provider ?? EntityUid.Invalid,
+            candidate.Surface,
+            candidate.AbsoluteHeight,
+            candidate.SamplePoint,
+            rejection,
+            diagnostics);
+
+    private static void AddDiagnostic(
         EntityUid provider,
         ZLevelSupportSurface surface,
-        Vector2i tile,
         float height,
         Vector2 point,
         ZLevelSupportRejection rejection,
-        ZLevelPhysicsComponent component)
+        List<ZLevelSupportCandidateDebug>? diagnostics)
     {
-        if (component.LastSupportCandidates.Count >= MaxSupportDiagnostics)
+        if (diagnostics == null || diagnostics.Count >= MaxSupportDiagnostics)
             return;
 
-        component.LastSupportCandidates.Add(new(provider, surface, tile, height, point, rejection));
+        diagnostics.Add(new(provider, surface, height, point, rejection));
     }
 
-    private static int CompareSupportCandidates(SupportCandidate left, SupportCandidate right)
+    private static int CompareSupportCandidates(ZLevelSupportResult left, ZLevelSupportResult right)
     {
         var comparison = right.AbsoluteHeight.CompareTo(left.AbsoluteHeight);
         if (comparison != 0)
             return comparison;
 
-        comparison = right.Priority.CompareTo(left.Priority);
+        comparison = right.Surface.CompareTo(left.Surface);
         if (comparison != 0)
             return comparison;
 
-        comparison = left.Surface.CompareTo(right.Surface);
-        if (comparison != 0)
-            return comparison;
-
-        comparison = left.Provider.CompareTo(right.Provider);
-        if (comparison != 0)
-            return comparison;
-
-        comparison = left.Tile.X.CompareTo(right.Tile.X);
-        return comparison != 0 ? comparison : left.Tile.Y.CompareTo(right.Tile.Y);
+        var leftProvider = left.Provider ?? EntityUid.Invalid;
+        var rightProvider = right.Provider ?? EntityUid.Invalid;
+        return leftProvider.CompareTo(rightProvider);
     }
 
     private static Box2 Union(Box2 left, Box2 right)
         => new(Vector2.Min(left.BottomLeft, right.BottomLeft), Vector2.Max(left.TopRight, right.TopRight));
 
-    private readonly record struct BodyFootprint(
-        EntityUid Owner,
-        Vector2 Center,
+    private readonly record struct SupportSample(
+        Vector2 Point,
         Box2 Bounds,
-        PhysicsTransform Transform,
-        bool HasFixtures);
-
-    private readonly record struct SupportCandidate(
-        EntityUid Provider,
-        ZLevelSupportSurface Surface,
-        Vector2i Tile,
-        float AbsoluteHeight,
-        Vector2 ContactPoint,
-        int Priority);
+        PhysicsTransform Transform);
 }
+
+public readonly record struct ZLevelSupportResult(
+    EntityUid? Provider,
+    ZLevelSupportSurface Surface,
+    float AbsoluteHeight,
+    Vector2 SamplePoint)
+{
+    public static readonly ZLevelSupportResult None = new(null, ZLevelSupportSurface.None, 0f, default);
+}
+
+public enum ZLevelSupportRejection : byte
+{
+    None,
+    Self,
+    WrongMap,
+    NoSurface,
+    NoFixture,
+    OutsideFootprint,
+    NonFiniteHeight,
+    AboveStepLimit,
+}
+
+/// <summary>
+/// One accepted or rejected result from the latest deterministic support query.
+/// </summary>
+public readonly record struct ZLevelSupportCandidateDebug(
+    EntityUid Provider,
+    ZLevelSupportSurface Surface,
+    float AbsoluteHeight,
+    Vector2 SamplePoint,
+    ZLevelSupportRejection Rejection);
 
 public readonly record struct ZLevelSupportPoint(Vector2 CanonicalPosition, float AbsoluteHeight);

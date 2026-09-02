@@ -124,6 +124,8 @@ namespace Robust.UnitTesting
 
             systems.LoadExtraSystemType<SharedGridTraversalSystem>();
             systems.LoadExtraSystemType<ZLevelSystem>();
+            systems.LoadExtraSystemType<ZLevelSupportSystem>();
+            systems.LoadExtraSystemType<ZLevelPhysicsSystem>();
             systems.LoadExtraSystemType<FixtureSystem>();
             systems.LoadExtraSystemType<CollisionWakeSystem>();
             systems.LoadExtraSystemType<RecursiveMoveSystem>();

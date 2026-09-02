@@ -361,6 +361,7 @@ namespace Robust.UnitTesting.Server
             entitySystemMan.LoadExtraSystemType<SharedGridTraversalSystem>();
             entitySystemMan.LoadExtraSystemType<ZLevelSystem>();
             entitySystemMan.LoadExtraSystemType<ZLevelGridSyncSystem>();
+            entitySystemMan.LoadExtraSystemType<ZLevelSupportSystem>();
             entitySystemMan.LoadExtraSystemType<ZLevelPhysicsSystem>();
             entitySystemMan.LoadExtraSystemType<Robust.Server.GameObjects.ZLevelPresentationSystem>();
             entitySystemMan.LoadExtraSystemType<ContainerSystem>();

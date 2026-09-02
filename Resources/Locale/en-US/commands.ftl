@@ -363,12 +363,12 @@ cmd-zlevels_list-help = Usage: {$command}
 cmd-zlevels_list-empty = No z-level stacks.
 cmd-zlevels_list-entry = {$network}: {$maps} (bottom to top)
 
-cmd-zphysics_debug-desc = Shows support, projection, reconciliation, and event-loop diagnostics for an entity's latest z-physics step.
+cmd-zphysics_debug-desc = Shows support, projection, and event-loop diagnostics for an entity's latest z-physics step.
 cmd-zphysics_debug-help = Usage: {$command} <entity>
 cmd-zphysics_debug-hint = entity with z-level physics
 cmd-zphysics_debug-result = {$entity}: velocity {$startVelocity} -> {$endVelocity}; next/event {$nextEvent}; remaining {$remaining}s; crossings {$crossings}; events {$events}; iteration-limit {$limited}
-cmd-zphysics_debug-support = ground {$ground}; provider {$provider}; surface {$surface}; absolute-height {$height}; contact {$contact}; projected-safe-point {$projected}; reconciliation {$reconciliation}
-cmd-zphysics_debug-candidate = candidate {$provider}/{$surface} tile {$tile}: height {$height}; contact {$contact}; rejection {$rejection}
+cmd-zphysics_debug-support = ground {$ground}; provider {$provider}; surface {$surface}; absolute-height {$height}; sample {$sample}; projected-safe-point {$projected}
+cmd-zphysics_debug-candidate = candidate {$provider}/{$surface}: height {$height}; sample {$sample}; rejection {$rejection}
 
 cmd-testbed-desc = Loads a physics testbed on the specified map.
 cmd-testbed-help = Usage: {$command} <mapid> <test>

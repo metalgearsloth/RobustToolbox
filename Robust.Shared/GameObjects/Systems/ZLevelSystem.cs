@@ -625,7 +625,7 @@ public sealed partial class ZLevelSystem : EntitySystem
         if (levels.Count == 0)
         {
             if (!TerminatingOrDeleted(network.Owner))
-                QueueDel(network.Owner);
+                PredictedQueueDel(network.Owner);
         }
         else if (!TerminatingOrDeleted(network.Owner))
         {
