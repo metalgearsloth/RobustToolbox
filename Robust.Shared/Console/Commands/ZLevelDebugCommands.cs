@@ -3,6 +3,7 @@ using Robust.Shared.GameObjects;
 using Robust.Shared.IoC;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
+using Robust.Shared.Physics.Components;
 
 namespace Robust.Shared.Console.Commands;
 
@@ -108,6 +109,78 @@ public sealed partial class ZLevelsUnstackCommand : LocalizedEntityCommands
 }
 
 /// <summary>
+/// Links two grids on adjacent z-level maps.
+/// </summary>
+public sealed partial class ZLevelsLinkGridsCommand : LocalizedEntityCommands
+{
+    [Dependency] private ZLevelSystem _zLevels = default!;
+
+    public override string Command => "zlevels_link_grids";
+
+    public override bool RequireServerOrSingleplayer => true;
+
+    public override void Execute(IConsoleShell shell, string argStr, string[] args)
+    {
+        if (args.Length != 2 ||
+            !NetEntity.TryParse(args[0], out var lowerNet) ||
+            !NetEntity.TryParse(args[1], out var upperNet) ||
+            !EntityManager.TryGetEntity(lowerNet, out var lower) ||
+            !EntityManager.TryGetEntity(upperNet, out var upper) ||
+            !_zLevels.TryLinkGrids(lower.Value, upper.Value))
+        {
+            shell.WriteError(Help);
+            return;
+        }
+
+        shell.WriteLine(Loc.GetString("cmd-zlevels_link_grids-success", ("lower", lower), ("upper", upper)));
+    }
+
+    public override CompletionResult GetCompletion(IConsoleShell shell, string[] args)
+    {
+        return args.Length is 1 or 2
+            ? CompletionResult.FromHintOptions(
+                CompletionHelper.Components<MapGridComponent>(args[^1], EntityManager),
+                Loc.GetString("cmd-zlevels_link_grids-hint"))
+            : CompletionResult.Empty;
+    }
+}
+
+/// <summary>
+/// Removes all z-level links connected to a grid.
+/// </summary>
+public sealed partial class ZLevelsUnlinkGridCommand : LocalizedEntityCommands
+{
+    [Dependency] private ZLevelSystem _zLevels = default!;
+
+    public override string Command => "zlevels_unlink_grid";
+
+    public override bool RequireServerOrSingleplayer => true;
+
+    public override void Execute(IConsoleShell shell, string argStr, string[] args)
+    {
+        if (args.Length != 1 ||
+            !NetEntity.TryParse(args[0], out var gridNet) ||
+            !EntityManager.TryGetEntity(gridNet, out var grid) ||
+            !_zLevels.TryUnlinkGrid(grid.Value))
+        {
+            shell.WriteError(Help);
+            return;
+        }
+
+        shell.WriteLine(Loc.GetString("cmd-zlevels_unlink_grid-success", ("grid", grid)));
+    }
+
+    public override CompletionResult GetCompletion(IConsoleShell shell, string[] args)
+    {
+        return args.Length == 1
+            ? CompletionResult.FromHintOptions(
+                CompletionHelper.Components<MapGridComponent>(args[0], EntityManager),
+                Loc.GetString("cmd-zlevels_unlink_grid-hint"))
+            : CompletionResult.Empty;
+    }
+}
+
+/// <summary>
 /// Lists all active z-level map stacks.
 /// </summary>
 public sealed partial class ZLevelsListCommand : LocalizedEntityCommands
@@ -153,5 +226,85 @@ public sealed partial class ZLevelsListCommand : LocalizedEntityCommands
 
             shell.WriteLine(Loc.GetString("cmd-zlevels_list-entry", ("network", network.Owner), ("maps", string.Join(", ", _maps))));
         }
+    }
+}
+
+/// <summary>
+/// Prints the last bounded z-physics step for an entity.
+/// </summary>
+public sealed partial class ZPhysicsDebugCommand : LocalizedEntityCommands
+{
+    [Dependency] private ZLevelSystem _zLevels = default!;
+
+    public override string Command => "zphysics_debug";
+
+    public override bool RequireServerOrSingleplayer => true;
+
+    public override void Execute(IConsoleShell shell, string argStr, string[] args)
+    {
+        if (args.Length != 1 ||
+            !NetEntity.TryParse(args[0], out var netEntity) ||
+            !EntityManager.TryGetEntity(netEntity, out var uid) ||
+            !EntityManager.TryGetComponent(uid.Value, out ZLevelPhysicsComponent? physics))
+        {
+            shell.WriteError(Help);
+            return;
+        }
+
+        var step = physics.LastStep;
+        shell.WriteLine(Loc.GetString(
+            "cmd-zphysics_debug-result",
+            ("entity", uid.Value),
+            ("startVelocity", step.StartVelocity),
+            ("endVelocity", step.EndVelocity),
+            ("nextEvent", step.NextEvent),
+            ("remaining", step.RemainingTime),
+            ("crossings", step.Crossings),
+            ("events", step.Events),
+            ("limited", step.IterationLimitReached)));
+
+        var projected = "unavailable";
+        if (physics.SupportSurface != ZLevelSupportSurface.None &&
+            EntityManager.TryGetComponent(uid.Value, out TransformComponent? xform) &&
+            xform.MapUid is { } viewedMap &&
+            _zLevels.TryProjectAbsolutePosition(
+                viewedMap,
+                physics.SupportPoint,
+                physics.SupportHeight,
+                out var projectedPoint))
+        {
+            projected = projectedPoint.ToString();
+        }
+
+        shell.WriteLine(Loc.GetString(
+            "cmd-zphysics_debug-support",
+            ("ground", physics.GroundState),
+            ("provider", physics.SupportProvider?.ToString() ?? "none"),
+            ("surface", physics.SupportSurface),
+            ("height", physics.SupportHeight),
+            ("contact", physics.SupportPoint),
+            ("projected", projected),
+            ("reconciliation", physics.ReconciliationState)));
+
+        foreach (var candidate in physics.LastSupportCandidates)
+        {
+            shell.WriteLine(Loc.GetString(
+                "cmd-zphysics_debug-candidate",
+                ("provider", candidate.Provider),
+                ("surface", candidate.Surface),
+                ("tile", candidate.Tile),
+                ("height", candidate.AbsoluteHeight),
+                ("contact", candidate.ContactPoint),
+                ("rejection", candidate.Rejection)));
+        }
+    }
+
+    public override CompletionResult GetCompletion(IConsoleShell shell, string[] args)
+    {
+        return args.Length == 1
+            ? CompletionResult.FromHintOptions(
+                CompletionHelper.Components<ZLevelPhysicsComponent>(args[0], EntityManager),
+                Loc.GetString("cmd-zphysics_debug-hint"))
+            : CompletionResult.Empty;
     }
 }

@@ -347,7 +347,7 @@ namespace Robust.Client.Graphics.Clyde
         private readonly List<ZLevelRenderLayer> _zLevelRenderLayers = new();
         private IEye? _zLevelViewEye;
 
-        private readonly record struct ZLevelRenderLayer(MapId MapId, int Offset);
+        internal readonly record struct ZLevelRenderLayer(MapId MapId, int Offset);
 
         internal enum ZLevelPostShaderSelection : byte
         {
@@ -370,10 +370,14 @@ namespace Robust.Client.Graphics.Clyde
             ZLevelMapNetworkComponent? network,
             int relativeDepth,
             bool gameShaderAvailable,
-            float effectStrength = 1f)
+            float effectStrength)
         {
             effectStrength = Math.Clamp(effectStrength, 0f, 1f);
-            if (relativeDepth >= 0 || network == null || effectStrength <= float.Epsilon)
+            // During a cross-map eye lerp the destination map becomes the coordinate space immediately, while the
+            // presented eye height remains between planes. Do not use the destination-relative layer label to turn
+            // effects off early: the continuous presented height is the source of truth for whether this pass is
+            // still visibly below the eye.
+            if (network == null || effectStrength <= float.Epsilon)
                 return new(ZLevelPostShaderSelection.None, 0f, 0f, Color.Transparent, 0f);
 
             var shader = !network.LowerPostShaderEnabled
@@ -393,6 +397,13 @@ namespace Robust.Client.Graphics.Clyde
                     network.LowerTint.A * effectStrength),
                 effectStrength);
         }
+
+        /// <summary>
+        /// Point lights, FOV, map ambient light and the layer post-process sample the map actually being rendered.
+        /// This map stays stable when the controlled entity's simulation parent changes during an eye lerp.
+        /// </summary>
+        internal static MapId ResolveZLevelLightingMap(ZLevelRenderLayer layer)
+            => layer.MapId;
 
         /// <summary>
         ///    Sends SCREEN_TEXTURE to all overlays in the given OverlaySpace that request it.
@@ -927,6 +938,7 @@ namespace Robust.Client.Graphics.Clyde
             ZLevelRenderLayer layer,
             bool isZLevelBackground)
         {
+            var lightingMap = ResolveZLevelLightingMap(layer);
             CalcWorldMatrices(viewport.RenderTarget.Size, viewport.RenderScale, eye, out var proj, out var view);
             SetProjViewFull(proj, view);
 
@@ -935,7 +947,7 @@ namespace Robust.Client.Graphics.Clyde
             using (DebugGroup("Lights"))
             using (_prof.Group("Lights"))
             {
-                DrawLightsAndFov(viewport, layer.MapId, worldBounds, worldAABB, eye, layer.Offset);
+                DrawLightsAndFov(viewport, lightingMap, worldBounds, worldAABB, eye, layer.Offset);
             }
 
             using (_prof.Group("Overlays WSBW"))
@@ -975,7 +987,7 @@ namespace Robust.Client.Graphics.Clyde
             }
 
             if (_lightManager.Enabled && _lightManager.DrawHardFov && eye.DrawLight && eye.DrawFov &&
-                IsMapLightingEnabled(layer.MapId))
+                IsMapLightingEnabled(lightingMap))
             {
                 ApplyFovToBuffer(viewport, eye);
             }
@@ -1001,7 +1013,8 @@ namespace Robust.Client.Graphics.Clyde
             RenderTexture layerTarget,
             RenderTexture finalTarget)
         {
-            var mapUid = _mapSystem.GetMapOrInvalid(layer.MapId);
+            var lightingMap = ResolveZLevelLightingMap(layer);
+            var mapUid = _mapSystem.GetMapOrInvalid(lightingMap);
             var zLevels = _entityManager.System<ZLevelSystem>();
             zLevels.TryGetMapData(mapUid, out var zMap, out var network);
             ShaderInstance? postShader = null;

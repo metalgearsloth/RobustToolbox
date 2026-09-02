@@ -454,7 +454,7 @@ internal sealed class ZLevelPhysicsTest
         SetVelocityGravity(vertical, gravity);
         world.ZPhysics.SetZPosition((uid, vertical), localHeight);
         world.ZPhysics.SetZVelocity((uid, vertical), velocity);
-        world.ZPhysics.RefreshGround((uid, vertical), true);
+        world.ZPhysics.RefreshSupport((uid, vertical));
         world.ZPhysics.RefreshBody((uid, vertical));
         var presentation = world.Entities.GetComponent<ZLevelPresentationComponent>(uid);
         return new TestBody(uid, body, vertical, presentation);

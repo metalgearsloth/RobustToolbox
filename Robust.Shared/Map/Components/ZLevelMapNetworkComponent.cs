@@ -35,6 +35,12 @@ public sealed partial class ZLevelMapNetworkComponent : Component, IComponentDel
     public List<EntityUid> Maps = new();
 
     /// <summary>
+    /// Explicit adjacent grid pairs stored in full saves and restored after their maps have been rebuilt.
+    /// </summary>
+    [DataField]
+    public List<ZLevelGridLink> GridLinks = new();
+
+    /// <summary>
     /// Map-space visual displacement per unit of absolute z. Physics and authored transforms are never displaced.
     /// </summary>
     [DataField, AutoNetworkedField]
@@ -87,4 +93,27 @@ public sealed partial class ZLevelMapNetworkComponent : Component, IComponentDel
     /// </summary>
     [DataField, AutoNetworkedField]
     public Color LowerTint = Color.Transparent;
+}
+
+/// <summary>
+/// A lower-to-upper grid pair belonging to a saved z-level map network.
+/// </summary>
+[DataDefinition]
+public sealed partial class ZLevelGridLink
+{
+    [DataField(required: true)]
+    public EntityUid Lower;
+
+    [DataField(required: true)]
+    public EntityUid Upper;
+
+    public ZLevelGridLink()
+    {
+    }
+
+    public ZLevelGridLink(EntityUid lower, EntityUid upper)
+    {
+        Lower = lower;
+        Upper = upper;
+    }
 }

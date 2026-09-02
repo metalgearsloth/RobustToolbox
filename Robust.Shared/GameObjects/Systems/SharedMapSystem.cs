@@ -231,6 +231,12 @@ namespace Robust.Shared.GameObjects
     }
 
     /// <summary>
+    /// Raised directed at a grid after its canonical world transform changes and map bookkeeping has been updated.
+    /// </summary>
+    [ByRefEvent]
+    public struct MapGridMovedEvent;
+
+    /// <summary>
     /// Data about a single tile that was changed as part of a <see cref="TileChangedEvent"/>.
     /// </summary>
     /// <param name="NewTile">New tile that replaced the old one.</param>

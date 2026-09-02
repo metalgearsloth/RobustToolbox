@@ -209,6 +209,13 @@ namespace Robust.Shared
             CVarDef.Create("net.interp_correction_half_life", 0.1f, CVar.ARCHIVE | CVar.CLIENTONLY);
 
         /// <summary>
+        /// Half-life in seconds for the vertical part of predicted transform correction errors. Authoritative z
+        /// changes use a shorter response than ordinary XY correction so falling does not visibly trail map state.
+        /// </summary>
+        public static readonly CVarDef<float> NetInterpZCorrectionHalfLife =
+            CVarDef.Create("net.interp_z_correction_half_life", 0.05f, CVar.ARCHIVE | CVar.CLIENTONLY);
+
+        /// <summary>
         /// Minimum translation error retained by predicted transform correction.
         /// </summary>
         public static readonly CVarDef<float> NetInterpCorrectionMinTranslation =
@@ -1517,6 +1524,66 @@ namespace Robust.Shared
         /// </summary>
         public static readonly CVarDef<bool> GridSplitting =
             CVarDef.Create("physics.grid_splitting", true, CVar.ARCHIVE | CVar.REPLICATED | CVar.SERVER);
+
+        /// <summary>
+        /// Whether explicitly linked z-level grids receive cross-map soft velocity corrections.
+        /// </summary>
+        public static readonly CVarDef<bool> PhysicsZLevelGridSync =
+            CVarDef.Create("physics.zlevel_grid_sync", true, CVar.REPLICATED);
+
+        /// <summary>
+        /// Fixed update frequency for server-authoritative continuous z-axis physics.
+        /// </summary>
+        public static readonly CVarDef<int> PhysicsZLevelTickRate =
+            CVarDef.Create("physics.zlevel_tick_rate", 60, CVar.REPLICATED);
+
+        /// <summary>
+        /// Acceleration applied to z-level physics bodies with vertical gravity enabled.
+        /// </summary>
+        public static readonly CVarDef<float> PhysicsZLevelGravity =
+            CVarDef.Create("physics.zlevel_gravity", 9.8f, CVar.REPLICATED);
+
+        /// <summary>
+        /// Absolute terminal velocity for z-level physics bodies.
+        /// </summary>
+        public static readonly CVarDef<float> PhysicsZLevelVelocityLimit =
+            CVarDef.Create("physics.zlevel_velocity_limit", 20f, CVar.REPLICATED);
+
+        /// <summary>
+        /// Minimum vertical speed that raises a damage-capable impact event.
+        /// </summary>
+        public static readonly CVarDef<float> PhysicsZLevelImpactVelocity =
+            CVarDef.Create("physics.zlevel_impact_velocity", 3.5f, CVar.REPLICATED);
+
+        /// <summary>
+        /// Distance above support at which a z-level body is considered airborne.
+        /// </summary>
+        public static readonly CVarDef<float> PhysicsZLevelAirborneHeight =
+            CVarDef.Create("physics.zlevel_airborne_height", 0.15f, CVar.REPLICATED);
+
+        /// <summary>
+        /// Largest support rise that a grounded z-level body may step onto.
+        /// </summary>
+        public static readonly CVarDef<float> PhysicsZLevelMaxStepUp =
+            CVarDef.Create("physics.zlevel_max_step_up", 0.25f, CVar.REPLICATED);
+
+        /// <summary>
+        /// Largest support drop that remains a grounded step rather than beginning a fall.
+        /// </summary>
+        public static readonly CVarDef<float> PhysicsZLevelMaxStepDown =
+            CVarDef.Create("physics.zlevel_max_step_down", 0.25f, CVar.REPLICATED);
+
+        /// <summary>
+        /// Maximum downward distance over which a grounded body snaps to support.
+        /// </summary>
+        public static readonly CVarDef<float> PhysicsZLevelGroundSnapDistance =
+            CVarDef.Create("physics.zlevel_ground_snap_distance", 0.25f, CVar.REPLICATED);
+
+        /// <summary>
+        /// Height advantage a competing support needs before replacing the confirmed provider.
+        /// </summary>
+        public static readonly CVarDef<float> PhysicsZLevelSupportHysteresis =
+            CVarDef.Create("physics.zlevel_support_hysteresis", 0.05f, CVar.REPLICATED);
 
         /// <summary>
         /// How much to enlarge grids when determining their fixture bounds.

@@ -331,7 +331,10 @@ namespace Robust.UnitTesting.Server
             compFactory.RegisterClass<GridTreeComponent>();
             compFactory.RegisterClass<ZLevelMapComponent>();
             compFactory.RegisterClass<ZLevelMapNetworkComponent>();
+            compFactory.RegisterClass<ZLevelGridComponent>();
             compFactory.RegisterClass<ZLevelPresentationComponent>();
+            compFactory.RegisterClass<ZLevelPhysicsComponent>();
+            compFactory.RegisterClass<ZLevelHighGroundComponent>();
             compFactory.RegisterClass<JointRelayTargetComponent>();
             compFactory.RegisterClass<BroadphaseComponent>();
             compFactory.RegisterClass<ContainerManagerComponent>();
@@ -357,6 +360,8 @@ namespace Robust.UnitTesting.Server
             entitySystemMan.LoadExtraSystemType<PhysicsSystem>();
             entitySystemMan.LoadExtraSystemType<SharedGridTraversalSystem>();
             entitySystemMan.LoadExtraSystemType<ZLevelSystem>();
+            entitySystemMan.LoadExtraSystemType<ZLevelGridSyncSystem>();
+            entitySystemMan.LoadExtraSystemType<ZLevelPhysicsSystem>();
             entitySystemMan.LoadExtraSystemType<Robust.Server.GameObjects.ZLevelPresentationSystem>();
             entitySystemMan.LoadExtraSystemType<ContainerSystem>();
             entitySystemMan.LoadExtraSystemType<JointSystem>();

@@ -57,6 +57,7 @@ namespace Robust.UnitTesting
                 typeof(GridTreeComponent),
                 typeof(ZLevelMapComponent),
                 typeof(ZLevelMapNetworkComponent),
+                typeof(ZLevelGridComponent),
                 typeof(ZLevelPresentationComponent),
                 typeof(JointRelayTargetComponent),
                 typeof(OccluderComponent),

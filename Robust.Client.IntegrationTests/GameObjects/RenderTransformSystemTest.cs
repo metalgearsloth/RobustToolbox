@@ -995,7 +995,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
             blurRadius: 4f,
             darkenStrength: 0.6f,
             tint: new Color(0.1f, 0.2f, 0.3f, 0.4f));
-        var disabled = Clyde.ResolveZLevelLayerEffects(network.Comp, -1, gameShaderAvailable: true);
+        var disabled = Clyde.ResolveZLevelLayerEffects(network.Comp, -1, gameShaderAvailable: true, effectStrength: 1f);
 
         _zLevels.SetLowerLevelEffects(
             network.Owner,
@@ -1004,14 +1004,14 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
             blurRadius: 4f,
             darkenStrength: 0.6f,
             tint: new Color(0.1f, 0.2f, 0.3f, 0.4f));
-        var game = Clyde.ResolveZLevelLayerEffects(network.Comp, -1, gameShaderAvailable: true);
-        var fallback = Clyde.ResolveZLevelLayerEffects(network.Comp, -1, gameShaderAvailable: false);
+        var game = Clyde.ResolveZLevelLayerEffects(network.Comp, -1, gameShaderAvailable: true, effectStrength: 1f);
+        var fallback = Clyde.ResolveZLevelLayerEffects(network.Comp, -1, gameShaderAvailable: false, effectStrength: 1f);
         var transitioning = Clyde.ResolveZLevelLayerEffects(
             network.Comp,
             -1,
             gameShaderAvailable: false,
             effectStrength: 0.5f);
-        var current = Clyde.ResolveZLevelLayerEffects(network.Comp, 0, gameShaderAvailable: true);
+        var current = Clyde.ResolveZLevelLayerEffects(network.Comp, 0, gameShaderAvailable: true, effectStrength: 0f);
 
         Assert.Multiple(() =>
         {
@@ -1028,6 +1028,123 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
             Assert.That(current.Shader, Is.EqualTo(Clyde.ZLevelPostShaderSelection.None));
             Assert.That(current.Tint, Is.EqualTo(Color.Transparent));
         });
+    }
+
+    [Test]
+    public void ZPhysicsDoesNotChangeChatTwoLayerOrShaderSelection()
+    {
+        var (maps, mapIds, network) = CreateZNetwork(4, new Vector2(0f, 0.7f));
+        _zLevels.SetLowerLevelEffects(
+            network.Owner,
+            enabled: true,
+            shader: "known-good-lower-shader",
+            blurRadius: 3f,
+            darkenStrength: 0.4f,
+            tint: Color.Transparent);
+
+        var belowMaps = new List<MapId>();
+        var aboveMaps = new List<MapId>();
+        _zLevels.CollectRenderableMaps(
+            maps[2],
+            mapIds[2],
+            network.Comp.VisibleLevelsBelow,
+            network.Comp.VisibleLevelsAbove,
+            default,
+            default,
+            belowMaps,
+            aboveMaps);
+        var lowerBefore = Clyde.ResolveZLevelLayerEffects(network.Comp, -1, gameShaderAvailable: true, effectStrength: 1f);
+        var currentBefore = Clyde.ResolveZLevelLayerEffects(network.Comp, 0, gameShaderAvailable: true, effectStrength: 0f);
+        var farthestRenderedLower = belowMaps.Count > 0 ? belowMaps[^1] : mapIds[2];
+
+        var falling = _entities.SpawnEntity(null, new EntityCoordinates(maps[2], Vector2.Zero));
+        var xform = _entities.GetComponent<TransformComponent>(falling);
+        _entities.AddComponent<ZLevelPhysicsComponent>(falling);
+        MakeRemote(falling);
+        ApplyRemote(() =>
+        {
+            _transforms.SetCoordinates(
+                falling,
+                xform,
+                new EntityCoordinates(maps[1], Vector2.Zero),
+                Angle.Zero,
+                false);
+            _zPresentation.SetLocalHeight(falling, 0.25f);
+        });
+        SetHalfTick();
+        _transforms.FrameUpdate(0f);
+
+        var lowerAfter = Clyde.ResolveZLevelLayerEffects(network.Comp, -1, gameShaderAvailable: true, effectStrength: 1f);
+        var currentAfter = Clyde.ResolveZLevelLayerEffects(network.Comp, 0, gameShaderAvailable: true, effectStrength: 0f);
+        Assert.Multiple(() =>
+        {
+            Assert.That(belowMaps, Is.EqualTo(new[] { mapIds[1], mapIds[0] }),
+                "the current map keeps the configured lower-map stack");
+            Assert.That(aboveMaps, Is.Empty, "the default viewport must not include the map immediately above");
+            Assert.That(farthestRenderedLower, Is.EqualTo(mapIds[0]),
+                "background/parallax must be associated with the farthest map in the actual lower render stack");
+            Assert.That(network.Comp.VisibleLevelsAbove, Is.Zero);
+            Assert.That(lowerBefore.Shader, Is.EqualTo(Clyde.ZLevelPostShaderSelection.GameShader));
+            Assert.That(currentBefore.Shader, Is.EqualTo(Clyde.ZLevelPostShaderSelection.None));
+            Assert.That(lowerAfter, Is.EqualTo(lowerBefore),
+                "a received z/map transition must not disable or bypass the configured lower shader");
+            Assert.That(currentAfter, Is.EqualTo(currentBefore));
+        });
+    }
+
+    [Test]
+    public void PresentedDescentKeepsDestinationEffectsOnContinuousTimeline()
+    {
+        var (_, mapIds, network) = CreateZNetwork(2, new Vector2(0f, 0.7f));
+        _zLevels.SetLowerLevelEffects(
+            network.Owner,
+            enabled: true,
+            shader: null,
+            blurRadius: 2f,
+            darkenStrength: 0.4f,
+            tint: Color.Transparent);
+
+        // After a downward reparent the lower destination is relative depth zero, but the presented eye is still
+        // 0.75 planes above it. The effect must fade continuously instead of switching off with the map parent.
+        var beforeReparent = Clyde.ResolveZLevelLayerEffects(network.Comp, -1, false, 0.75f);
+        var afterReparent = Clyde.ResolveZLevelLayerEffects(network.Comp, 0, false, 0.75f);
+        var halfway = Clyde.ResolveZLevelLayerEffects(network.Comp, 0, false, 0.5f);
+        var landed = Clyde.ResolveZLevelLayerEffects(network.Comp, 0, false, 0f);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(
+                Clyde.ResolveZLevelLightingMap(new Clyde.ZLevelRenderLayer(mapIds[0], -1)),
+                Is.EqualTo(mapIds[0]),
+                "ambient and point lights must use the destination layer before reparenting");
+            Assert.That(
+                Clyde.ResolveZLevelLightingMap(new Clyde.ZLevelRenderLayer(mapIds[0], 0)),
+                Is.EqualTo(mapIds[0]),
+                "ambient and point lights must keep using the destination after reparenting");
+            Assert.That(afterReparent, Is.EqualTo(beforeReparent));
+            Assert.That(afterReparent.DarkenStrength, Is.EqualTo(0.3f).Within(0.001f));
+            Assert.That(halfway.DarkenStrength, Is.EqualTo(0.2f).Within(0.001f));
+            Assert.That(landed.Shader, Is.EqualTo(Clyde.ZLevelPostShaderSelection.None));
+            Assert.That(landed.Strength, Is.Zero);
+        });
+
+        for (var repetition = 0; repetition < 3; repetition++)
+        {
+            var descending = new[] { 1f, 0.75f, 0.5f, 0.25f, 0f }
+                .Select(strength => Clyde.ResolveZLevelLayerEffects(network.Comp, 0, false, strength).DarkenStrength)
+                .ToArray();
+            Assert.That(descending, Is.EqualTo(new[] { 0.4f, 0.3f, 0.2f, 0.1f, 0f }).Within(0.001f));
+        }
+
+        _zLevels.SetLowerLevelEffects(
+            network.Owner,
+            enabled: false,
+            shader: null,
+            blurRadius: 2f,
+            darkenStrength: 0.4f,
+            tint: Color.Transparent);
+        var disabled = Clyde.ResolveZLevelLayerEffects(network.Comp, 0, false, 0.75f);
+        Assert.That(disabled.Shader, Is.EqualTo(Clyde.ZLevelPostShaderSelection.None));
     }
 
     [Test]

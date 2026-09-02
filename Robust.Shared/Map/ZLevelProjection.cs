@@ -31,6 +31,26 @@ public static class ZLevelProjection
         Vector2 projectionOffset)
         => projectedPosition - projectionOffset * (absoluteZ - referenceDepth);
 
+    /// <summary>
+    /// Projects a canonical support/contact point at an absolute height into a viewed z-map plane.
+    /// </summary>
+    public static Vector2 ProjectSupportPoint(
+        Vector2 canonicalContactPoint,
+        float absoluteSupportHeight,
+        int viewedMapDepth,
+        Vector2 projectionOffset)
+        => Project(canonicalContactPoint, absoluteSupportHeight, viewedMapDepth, projectionOffset);
+
+    /// <summary>
+    /// Reverses <see cref="ProjectSupportPoint"/> for picking a surface at a known absolute height.
+    /// </summary>
+    public static Vector2 UnprojectSupportPoint(
+        Vector2 projectedContactPoint,
+        float absoluteSupportHeight,
+        int viewedMapDepth,
+        Vector2 projectionOffset)
+        => Unproject(projectedContactPoint, absoluteSupportHeight, viewedMapDepth, projectionOffset);
+
     public static Vector2 Reproject(
         Vector2 projectedPosition,
         int fromReferenceDepth,

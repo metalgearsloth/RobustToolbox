@@ -25,13 +25,16 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
     public const float DefaultVelocityLimit = 20f;
     public const float DefaultImpactVelocity = 3.5f;
     public const float DefaultAirborneHeight = 0.15f;
+    public const float DefaultMaxStepUp = 0.25f;
+    public const float DefaultMaxStepDown = 0.25f;
+    public const float DefaultGroundSnapDistance = 0.25f;
+    public const float DefaultSupportHysteresis = 0.05f;
 
     private const int MaxStepsPerUpdate = 240;
     private const int MaxEventsPerStep = 256;
     private const float TimeEpsilon = 0.000001f;
     private const float PositionEpsilon = 0.00001f;
     private const float VelocityEpsilon = 0.00001f;
-    private const float StickyVelocityLimit = -2f;
 
     [Dependency] private IConfigurationManager _configuration = null!;
     [Dependency] private SharedContainerSystem _container = null!;
@@ -54,6 +57,7 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
     private readonly HashSet<EntityUid> _activeBodySet = new();
     private readonly HashSet<EntityUid> _dirtyMovementBodies = new();
     private readonly HashSet<EntityUid> _pendingBodyRefresh = new();
+    private readonly HashSet<EntityUid> _supportMapTransitions = new();
     private readonly HashSet<Entity<ZLevelPhysicsComponent>> _nearbyBodies = new();
 
     private TimeSpan _fixedTimestep;
@@ -62,6 +66,10 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
     private float _velocityLimit = DefaultVelocityLimit;
     private float _impactVelocity = DefaultImpactVelocity;
     private float _airborneHeight = DefaultAirborneHeight;
+    private float _maxStepUp = DefaultMaxStepUp;
+    private float _maxStepDown = DefaultMaxStepDown;
+    private float _groundSnapDistance = DefaultGroundSnapDistance;
+    private float _supportHysteresis = DefaultSupportHysteresis;
 
     /// <summary>
     /// Bodies currently participating in vertical simulation.
@@ -93,6 +101,11 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
     /// </summary>
     public float AirborneHeight => _airborneHeight;
 
+    public float MaxStepUp => _maxStepUp;
+    public float MaxStepDown => _maxStepDown;
+    public float GroundSnapDistance => _groundSnapDistance;
+    public float SupportHysteresis => _supportHysteresis;
+
     /// <inheritdoc/>
     public override void Initialize()
     {
@@ -105,10 +118,19 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
         Subs.CVar(_configuration, CVars.PhysicsZLevelVelocityLimit, value => _velocityLimit = MathF.Max(0f, value), true);
         Subs.CVar(_configuration, CVars.PhysicsZLevelImpactVelocity, value => _impactVelocity = MathF.Max(0f, value), true);
         Subs.CVar(_configuration, CVars.PhysicsZLevelAirborneHeight, value => _airborneHeight = MathF.Max(0f, value), true);
+        Subs.CVar(_configuration, CVars.PhysicsZLevelMaxStepUp, value => _maxStepUp = MathF.Max(0f, value), true);
+        Subs.CVar(_configuration, CVars.PhysicsZLevelMaxStepDown, value => _maxStepDown = MathF.Max(0f, value), true);
+        Subs.CVar(_configuration, CVars.PhysicsZLevelGroundSnapDistance, value => _groundSnapDistance = MathF.Max(0f, value), true);
+        Subs.CVar(_configuration, CVars.PhysicsZLevelSupportHysteresis, value => _supportHysteresis = MathF.Max(0f, value), true);
 
         SubscribeLocalEvent<ZLevelPhysicsComponent, EntGotInsertedIntoContainerMessage>(OnInsertedIntoContainer);
         SubscribeLocalEvent<ZLevelPhysicsComponent, EntGotRemovedFromContainerMessage>(OnRemovedFromContainer);
+        SubscribeLocalEvent<ZLevelPhysicsComponent, PreventCollideEvent>(OnPreventCollide);
+        SubscribeLocalEvent<MapGridComponent, MapGridMovedEvent>(OnSupportGridMoved);
     }
+
+    private void OnSupportGridMoved(Entity<MapGridComponent> grid, ref MapGridMovedEvent args)
+        => RefreshSupportsOnMovedGrid(grid.Owner);
 
     private void SetPhysicsTickRate(int tickRate)
     {
@@ -143,7 +165,7 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
             return;
         }
 
-        RefreshGround(entity, true);
+        RefreshSupport(entity);
         RefreshBody(entity);
 
         if (!_activeBodySet.Contains(entity.Owner) && HasActiveZState(entity.Comp))
@@ -197,7 +219,12 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
             SetLocalHeight((entity.Owner, presentation), ZLevelProjection.GetLocalHeight(absoluteZ, newDepth.Value));
         }
 
-        RefreshGround(entity, true);
+        // RefreshSupport owns this particular reparent and resumes with the already selected continuous surface.
+        // Re-entering it here (or from TryMove) would recursively select and transition the same ramp.
+        if (_supportMapTransitions.Contains(entity.Owner))
+            return;
+
+        RefreshSupport(entity);
         RefreshBody(entity);
     }
 
@@ -230,8 +257,9 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
         if (_net.IsClient)
             return;
 
-        RefreshGround(entity, true);
-        RefreshBody(entity);
+        // A hand/storage removal that places the item directly on support is initialization, not a fall. Mark it
+        // grounded immediately so the first gravity tick cannot manufacture a zero-distance landing event.
+        InitializeBody(entity);
     }
 
     private void CopyCarrierHeight(Entity<ZLevelPhysicsComponent> entity, EntityUid containerOwner)
@@ -274,7 +302,8 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
 
     private void ResetContainedMotion(Entity<ZLevelPhysicsComponent> entity)
     {
-        entity.Comp.Supported = false;
+        SetSupportState(entity, null, ZLevelSupportSurface.None, default, 0f, default);
+        SetGroundState(entity, ZLevelGroundState.Airborne, ZLevelReconciliationState.Confirmed);
         entity.Comp.LastStep = default;
         if (entity.Comp.Velocity.Equals(0f))
             return;
@@ -286,6 +315,12 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
     [SubscribeLocalEvent]
     private void OnMove(Entity<ZLevelPhysicsComponent> entity, ref MoveEvent args)
     {
+        if (_net.IsClient)
+        {
+            PredictSameSupportHeight(entity);
+            return;
+        }
+
         if (!CanSimulateBody(entity))
             return;
 
@@ -361,7 +396,7 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
                 !CanSimulateBody(body, xform: xform))
                 continue;
 
-            RefreshGround(body, true);
+            RefreshSupport(body);
             WakeBody(body);
         }
     }
@@ -437,20 +472,17 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
 
         zPhysics.Velocity = Math.Clamp(zPhysics.Velocity, -_velocityLimit, _velocityLimit);
 
-        if ((zPhysics.AutoStep || zPhysics.CachedStickyGround) &&
-            presentation.LocalHeight < zPhysics.CachedGroundHeight)
-        {
-            SetLocalHeight((entity.Owner, presentation), zPhysics.CachedGroundHeight);
-        }
-
         var remaining = frameTime;
         var crossings = 0;
         var events = 0;
         var nextEvent = ZLevelStepEvent.None;
         var limitReached = false;
 
-        var initialGroundDistance = presentation.LocalHeight - zPhysics.CachedGroundHeight;
-        if (zPhysics.Supported &&
+        var localSupportHeight = GetLocalSupportHeight((entity.Owner, zPhysics));
+        var initialGroundDistance = zPhysics.SupportSurface == ZLevelSupportSurface.None
+            ? float.PositiveInfinity
+            : presentation.LocalHeight - localSupportHeight;
+        if (zPhysics.GroundState == ZLevelGroundState.Grounded &&
             MathF.Abs(initialGroundDistance) <= PositionEpsilon &&
             zPhysics.Velocity <= VelocityEpsilon &&
             acceleration <= 0f)
@@ -460,7 +492,10 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
         }
         else if (initialGroundDistance > PositionEpsilon || zPhysics.Velocity > VelocityEpsilon)
         {
-            zPhysics.Supported = false;
+            SetGroundState(
+                (entity.Owner, zPhysics),
+                ZLevelGroundState.Airborne,
+                ZLevelReconciliationState.AuthoritativeFall);
         }
 
         while (remaining > TimeEpsilon)
@@ -520,9 +555,12 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
                 case ZLevelStepEvent.MapBoundaryDown:
                     if (TryMove(entity.Owner, -1))
                     {
-                        zPhysics.Supported = false;
+                        SetGroundState(
+                            (entity.Owner, zPhysics),
+                            ZLevelGroundState.Airborne,
+                            ZLevelReconciliationState.AuthoritativeMapTransition);
                         crossings++;
-                        if (!zPhysics.CachedStickyGround && zPhysics.Fallable)
+                        if (zPhysics.Fallable)
                         {
                             var fall = new ZLevelFallMapEvent();
                             RaiseLocalEvent(entity.Owner, ref fall);
@@ -538,7 +576,10 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
                 case ZLevelStepEvent.MapBoundaryUp:
                     if (TryMove(entity.Owner, 1))
                     {
-                        zPhysics.Supported = false;
+                        SetGroundState(
+                            (entity.Owner, zPhysics),
+                            ZLevelGroundState.Airborne,
+                            ZLevelReconciliationState.AuthoritativeMapTransition);
                         crossings++;
                     }
                     else
@@ -568,8 +609,12 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
 
         if (zPhysics.VelocityGravity)
         {
-            var distanceToGround = presentation.LocalHeight - zPhysics.CachedGroundHeight;
-            var targetStatus = distanceToGround > _airborneHeight ? BodyStatus.InAir : BodyStatus.OnGround;
+            var distanceToGround = zPhysics.SupportSurface == ZLevelSupportSurface.None
+                ? float.PositiveInfinity
+                : presentation.LocalHeight - GetLocalSupportHeight((entity.Owner, zPhysics));
+            var targetStatus = zPhysics.GroundState == ZLevelGroundState.Airborne && distanceToGround > _airborneHeight
+                ? BodyStatus.InAir
+                : BodyStatus.OnGround;
             if (entity.Comp2.BodyStatus != targetStatus)
             {
                 _physics.SetBodyStatus(entity.Owner, entity.Comp2, targetStatus);
@@ -626,19 +671,23 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
         if (direction < 0)
         {
             if (component.Fallable &&
-                component.CachedGroundHeight >= -PositionEpsilon &&
-                component.CachedGroundHeight <= position + PositionEpsilon)
+                component.SupportSurface != ZLevelSupportSurface.None)
             {
+                var localSupportHeight = GetLocalSupportHeight((uid, component));
+                if (localSupportHeight < -PositionEpsilon || localSupportHeight > position + PositionEpsilon)
+                    goto CheckDownBoundary;
+
                 var time = SolveTimeToPosition(
                     position,
-                    component.CachedGroundHeight,
+                    localSupportHeight,
                     component.Velocity,
                     segment.Acceleration,
                     segment.Duration);
                 if (time != null)
-                    return new MotionEvent(ZLevelStepEvent.Floor, time.Value, component.CachedGroundHeight);
+                    return new MotionEvent(ZLevelStepEvent.Floor, time.Value, localSupportHeight);
             }
 
+            CheckDownBoundary:
             var boundaryTime = SolveTimeToPosition(
                 position,
                 0f,
@@ -660,7 +709,7 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
             return MotionEvent.None;
 
         return new MotionEvent(
-            HasTileAbove(uid) ? ZLevelStepEvent.Ceiling : ZLevelStepEvent.MapBoundaryUp,
+            HasTransitionObstruction(uid, 1) ? ZLevelStepEvent.Ceiling : ZLevelStepEvent.MapBoundaryUp,
             upperTime.Value,
             1f);
     }
@@ -742,8 +791,11 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
 
         if (surface == ZLevelImpactSurface.Floor)
         {
-            component.Supported = true;
-            SetLocalHeight((uid, presentation), component.CachedGroundHeight);
+            SetGroundState(
+                (uid, component),
+                ZLevelGroundState.Grounded,
+                ZLevelReconciliationState.AuthoritativeLanding);
+            SetLocalHeight((uid, presentation), GetLocalSupportHeight((uid, component)));
         }
     }
 
@@ -760,7 +812,17 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
 
         if (direction < 0)
         {
-            component.CachedGroundHeight = 0f;
+            var xform = Transform(uid);
+            if (xform.MapUid is { } map && _zLevels.TryGetMapDepth(map, out var depth))
+            {
+                SetSupportState(
+                    (uid, component),
+                    map,
+                    ZLevelSupportSurface.NetworkBoundary,
+                    default,
+                    depth.Value,
+                    _transform.GetWorldPosition(xform));
+            }
             ResolveImpact(uid, component, presentation, ZLevelImpactSurface.Floor);
         }
         else
@@ -776,7 +838,9 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
         ZLevelPresentationComponent presentation,
         float frameTime)
     {
-        var distance = presentation.LocalHeight - entity.Comp.CachedGroundHeight;
+        var distance = entity.Comp.SupportSurface == ZLevelSupportSurface.None
+            ? float.PositiveInfinity
+            : presentation.LocalHeight - GetLocalSupportHeight(entity);
         var almostStopped = MathF.Abs(entity.Comp.Velocity) < MathF.Max(0f, entity.Comp.SleepThreshold) &&
                             MathF.Abs(distance) <= 0.01f;
 
@@ -813,7 +877,7 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
                 continue;
             }
 
-            RefreshGround(entity, true);
+            RefreshSupport(entity);
             RefreshBody(entity);
 
             if (_activeBodySet.Contains(entity.Owner))
@@ -838,7 +902,7 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
                 continue;
 
             // High ground can vary continuously inside one tile, so every actual XY move must refresh the profile.
-            RefreshGround((uid, component), true);
+            RefreshSupport((uid, component));
             RefreshBody((uid, component));
         }
 
@@ -851,121 +915,14 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
     [Pure]
     public float DistanceToGround(Entity<ZLevelPhysicsComponent> entity)
     {
+        if (entity.Comp.SupportSurface == ZLevelSupportSurface.None)
+            return float.PositiveInfinity;
+
         return _zPresentationQuery.TryComp(entity.Owner, out var presentation)
-            ? presentation.LocalHeight - entity.Comp.CachedGroundHeight
-            : -entity.Comp.CachedGroundHeight;
+            ? presentation.LocalHeight - GetLocalSupportHeight(entity)
+            : -GetLocalSupportHeight(entity);
     }
 
-    /// <summary>
-    /// Recomputes support under a body and wakes it when the result changes.
-    /// </summary>
-    public void RefreshGround(Entity<ZLevelPhysicsComponent> entity, bool force = false, bool wake = true)
-    {
-        if (!CanSimulateBody(entity))
-        {
-            SleepBody(entity);
-            return;
-        }
-
-        var tile = _transform.GetGridOrMapTilePosition(entity.Owner);
-        if (!force && tile == entity.Comp.CachedTile)
-            return;
-
-        var oldHeight = entity.Comp.CachedGroundHeight;
-        var oldSticky = entity.Comp.CachedStickyGround;
-        entity.Comp.CachedTile = tile;
-        entity.Comp.CachedGroundHeight = ComputeGroundHeight(entity, out var sticky);
-        entity.Comp.CachedStickyGround = sticky;
-
-        if (oldHeight != entity.Comp.CachedGroundHeight || oldSticky != sticky)
-        {
-            entity.Comp.Supported = false;
-            if (wake)
-                WakeBody(entity);
-        }
-    }
-
-    /// <summary>
-    /// Computes the support height relative to the body's current map plane.
-    /// </summary>
-    [Pure]
-    public float ComputeGroundHeight(Entity<ZLevelPhysicsComponent> entity, out bool stickyGround, int maxFloors = 1)
-    {
-        stickyGround = false;
-
-        if (!entity.Comp.Fallable && !entity.Comp.AutoStep)
-            return 0f;
-
-        if (Transform(entity).MapUid is not { } currentMap ||
-            !_zMapQuery.HasComp(currentMap))
-        {
-            return 0f;
-        }
-
-        maxFloors = Math.Max(0, maxFloors);
-        var worldPosition = _transform.GetWorldPosition(entity.Owner);
-
-        for (var floor = 0; floor <= maxFloors; floor++)
-        {
-            var checkingMap = (EntityUid?) currentMap;
-            if (floor != 0 && !_zLevels.TryGetMapOffset(currentMap, -floor, out checkingMap))
-                continue;
-
-            if (checkingMap is not { } checkingMapUid ||
-                !_map.TryFindGridAt(checkingMapUid, worldPosition, out var gridUid, out var grid))
-                continue;
-
-            var gridTile = _map.WorldToTile(gridUid, grid, worldPosition);
-            var anchored = _map.GetAnchoredEntities(gridUid, grid, gridTile);
-            while (anchored.MoveNext(out var anchoredUid))
-            {
-                if (anchoredUid.Value == entity.Owner ||
-                    !_highGroundQuery.TryComp(anchoredUid, out var highGround) ||
-                    highGround.HeightCurve.Count == 0)
-                {
-                    continue;
-                }
-
-                var direction = Transform(anchoredUid.Value).LocalRotation.GetCardinalDir();
-                var gridLocal = _map.WorldToLocal(gridUid, grid, worldPosition) / grid.TileSize;
-                var local = new Vector2(PositiveModulo(gridLocal.X, 1f), PositiveModulo(gridLocal.Y, 1f));
-                var t = direction switch
-                {
-                    Direction.East => highGround.Corner ? (local.X + 1f - local.Y) / 2f : local.X,
-                    Direction.West => highGround.Corner ? (1f - local.X + local.Y) / 2f : 1f - local.X,
-                    Direction.North => highGround.Corner ? (local.X + local.Y) / 2f : local.Y,
-                    Direction.South => highGround.Corner ? (1f - local.X + 1f - local.Y) / 2f : 1f - local.Y,
-                    _ => 0.5f,
-                };
-
-                var height = InterpolateHeight(highGround.HeightCurve, Math.Clamp(t, 0f, 1f));
-                if (entity.Comp.Velocity is < 0f and > StickyVelocityLimit && highGround.Stick)
-                    stickyGround = true;
-
-                return -floor + height;
-            }
-
-            if (_map.TryGetTileRef(gridUid, grid, gridTile, out var tile) && !tile.Tile.IsEmpty)
-                return -floor;
-        }
-
-        return -maxFloors;
-    }
-
-    private static float PositiveModulo(float value, float modulus)
-    {
-        return (value % modulus + modulus) % modulus;
-    }
-
-    private static float InterpolateHeight(IReadOnlyList<float> curve, float t)
-    {
-        if (curve.Count == 1)
-            return curve[0];
-
-        var scaled = t * (curve.Count - 1);
-        var index = Math.Min((int) scaled, curve.Count - 2);
-        return MathHelper.Lerp(curve[index], curve[index + 1], scaled - index);
-    }
 
     /// <summary>
     /// Replaces an anchored high-ground height profile and refreshes nearby bodies.
@@ -979,23 +936,6 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
     }
 
     /// <summary>
-    /// Checks whether a non-empty tile blocks upward movement on the adjacent map.
-    /// </summary>
-    [Pure]
-    public bool HasTileAbove(EntityUid uid)
-    {
-        var xform = Transform(uid);
-        if (xform.MapUid is not { } currentMap || !_zLevels.TryGetMapAbove(currentMap, out var mapAbove))
-            return false;
-
-        var worldPosition = _transform.GetWorldPosition(xform);
-        return mapAbove is { } mapAboveUid &&
-               _map.TryFindGridAt(mapAboveUid, worldPosition, out var gridUid, out var grid) &&
-               _map.TryGetTileRef(gridUid, grid, worldPosition, out var tile) &&
-               !tile.Tile.IsEmpty;
-    }
-
-    /// <summary>
     /// Sets a body's local vertical position and wakes it.
     /// </summary>
     [PublicAPI]
@@ -1005,7 +945,7 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
             return;
 
         var presentation = EnsureComp<ZLevelPresentationComponent>(entity.Owner);
-        entity.Comp.Supported = false;
+        SetGroundState(entity, ZLevelGroundState.Airborne, ZLevelReconciliationState.AuthoritativeSupportChange);
         SetLocalHeight((entity.Owner, presentation), position);
         WakeBody(entity);
     }
@@ -1021,7 +961,7 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
 
         entity.Comp.Velocity = velocity;
         if (velocity > VelocityEpsilon)
-            entity.Comp.Supported = false;
+            SetGroundState(entity, ZLevelGroundState.Airborne, ZLevelReconciliationState.AuthoritativeSupportChange);
         DirtyField(entity.Owner, entity.Comp, nameof(ZLevelPhysicsComponent.Velocity));
         WakeBody(entity);
     }
@@ -1045,8 +985,13 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
 
         entity.Comp.Fallable = fallable;
         entity.Comp.AutoStep = autoStep;
-        DirtyField(entity.Owner, entity.Comp, nameof(ZLevelPhysicsComponent.Fallable));
-        RefreshGround(entity, true);
+        DirtyFields(
+            entity.Owner,
+            entity.Comp,
+            null,
+            nameof(ZLevelPhysicsComponent.Fallable),
+            nameof(ZLevelPhysicsComponent.AutoStep));
+        RefreshSupport(entity);
         RefreshBody(entity);
     }
 
@@ -1067,12 +1012,13 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
     /// </summary>
     public bool TryMove(EntityUid uid, int offset)
     {
-        if (!_zLevels.TryMoveEntityToMapOffset(uid, offset, out var targetMap) ||
+        if (HasTransitionObstruction(uid, offset) ||
+            !_zLevels.TryMoveEntityToMapOffset(uid, offset, out var targetMap) ||
             targetMap is not { } targetMapUid)
             return false;
 
-        if (_zPhysicsQuery.TryComp(uid, out var zPhysics))
-            RefreshGround((uid, zPhysics), true);
+        if (_zPhysicsQuery.TryComp(uid, out var zPhysics) && !_supportMapTransitions.Contains(uid))
+            RefreshSupport((uid, zPhysics));
 
         var moved = new ZLevelMapMoveEvent(offset, targetMapUid);
         RaiseLocalEvent(uid, ref moved);
@@ -1147,23 +1093,27 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
             return;
         }
 
-        RefreshGround(entity, true, wake: false);
+        RefreshSupport(entity, wake: false);
         if (!_zPresentationQuery.TryComp(entity.Owner, out var presentation))
         {
             presentation = EnsureComp<ZLevelPresentationComponent>(entity.Owner);
         }
 
-        if ((entity.Comp.AutoStep || entity.Comp.CachedStickyGround) &&
-            presentation.LocalHeight < entity.Comp.CachedGroundHeight)
+        var localSupportHeight = GetLocalSupportHeight(entity);
+        if (entity.Comp.SupportSurface != ZLevelSupportSurface.None &&
+            entity.Comp.AutoStep &&
+            presentation.LocalHeight < localSupportHeight &&
+            localSupportHeight - presentation.LocalHeight <= _maxStepUp + PositionEpsilon)
         {
-            SetLocalHeight((entity.Owner, presentation), entity.Comp.CachedGroundHeight);
+            SetLocalHeight((entity.Owner, presentation), localSupportHeight);
         }
 
-        var onSupport = MathF.Abs(presentation.LocalHeight - entity.Comp.CachedGroundHeight) <= PositionEpsilon;
+        var onSupport = entity.Comp.SupportSurface != ZLevelSupportSurface.None &&
+                        MathF.Abs(presentation.LocalHeight - localSupportHeight) <= PositionEpsilon;
         if (onSupport && entity.Comp.Velocity <= VelocityEpsilon)
         {
             entity.Comp.Velocity = 0f;
-            entity.Comp.Supported = true;
+            SetGroundState(entity, ZLevelGroundState.Grounded, ZLevelReconciliationState.Confirmed);
             if (_physicsQuery.TryComp(entity.Owner, out var physics) &&
                 entity.Comp.VelocityGravity &&
                 physics.BodyStatus != BodyStatus.OnGround)
@@ -1175,7 +1125,7 @@ public sealed partial class ZLevelPhysicsSystem : SharedZLevelPresentationSystem
             return;
         }
 
-        entity.Comp.Supported = false;
+        SetGroundState(entity, ZLevelGroundState.Airborne, ZLevelReconciliationState.Confirmed);
         WakeBody(entity);
     }
 

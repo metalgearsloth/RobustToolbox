@@ -27,6 +27,9 @@ public sealed partial class ZLevelSystem : EntitySystem
     [Dependency] private readonly ITileDefinitionManager _tileDefinitions = default!;
 
     [Dependency] private EntityQuery<MapComponent> _mapQuery = default!;
+    [Dependency] private EntityQuery<MapGridComponent> _gridQuery = default!;
+    [Dependency] private EntityQuery<TransformComponent> _xformQuery = default!;
+    [Dependency] private EntityQuery<ZLevelGridComponent> _zGridQuery = default!;
     [Dependency] private EntityQuery<ZLevelMapComponent> _zMapQuery = default!;
     [Dependency] private EntityQuery<ZLevelMapNetworkComponent> _networkQuery = default!;
 
@@ -36,6 +39,7 @@ public sealed partial class ZLevelSystem : EntitySystem
     {
         base.Initialize();
         SubscribeLocalEvent<ZLevelMapComponent, ComponentShutdown>(OnZMapShutdown);
+        SubscribeLocalEvent<ZLevelGridComponent, ComponentShutdown>(OnZGridShutdown);
         SubscribeLocalEvent<ZLevelMapNetworkComponent, ComponentStartup>(OnNetworkStartup);
         SubscribeLocalEvent<ZLevelMapNetworkComponent, ComponentShutdown>(OnNetworkShutdown);
         SubscribeLocalEvent<BeforeSerializationEvent>(OnBeforeSerialization);
@@ -222,6 +226,91 @@ public sealed partial class ZLevelSystem : EntitySystem
         return true;
     }
 
+    /// <summary>
+    /// Converts a position displayed in one z-map pass back into the canonical XY coordinates of the layer that
+    /// supplied the visible point.
+    /// </summary>
+    /// <remarks>
+    /// Pointer input is reported in the viewed map's render space. When the pointer is over an entity drawn from a
+    /// lower layer, gameplay must undo that layer projection before using the position for movement or interaction.
+    /// </remarks>
+    [Pure]
+    public bool TryUnprojectMapLayerPosition(
+        EntityUid viewedMap,
+        EntityUid sourceLayerMap,
+        Vector2 displayedPosition,
+        out Vector2 canonicalPosition)
+    {
+        canonicalPosition = displayedPosition;
+        if (viewedMap == sourceLayerMap)
+            return _zMapQuery.HasComp(viewedMap);
+
+        if (!TryGetMapData(viewedMap, out var viewed, out var network) ||
+            !TryGetMapData(sourceLayerMap, out var source, out _) ||
+            viewed.Network != source.Network)
+        {
+            return false;
+        }
+
+        canonicalPosition = ZLevelProjection.Reproject(
+            displayedPosition,
+            viewed.Depth,
+            source.Depth,
+            network.ProjectionOffset);
+        return true;
+    }
+
+    /// <summary>
+    /// Projects an arbitrary canonical point at an absolute z height into a viewed map's presentation plane.
+    /// Physics coordinates are not changed.
+    /// </summary>
+    [Pure]
+    public bool TryProjectAbsolutePosition(
+        EntityUid viewedMap,
+        Vector2 canonicalPosition,
+        float absoluteZ,
+        out Vector2 projectedPosition)
+    {
+        projectedPosition = canonicalPosition;
+        if (!float.IsFinite(absoluteZ) ||
+            !TryGetMapData(viewedMap, out var viewed, out var network))
+        {
+            return false;
+        }
+
+        projectedPosition = ZLevelProjection.ProjectSupportPoint(
+            canonicalPosition,
+            absoluteZ,
+            viewed.Depth,
+            network.ProjectionOffset);
+        return true;
+    }
+
+    /// <summary>
+    /// Unprojects a displayed point on a known absolute-z surface into canonical physics coordinates.
+    /// </summary>
+    [Pure]
+    public bool TryUnprojectAbsolutePosition(
+        EntityUid viewedMap,
+        Vector2 projectedPosition,
+        float absoluteZ,
+        out Vector2 canonicalPosition)
+    {
+        canonicalPosition = projectedPosition;
+        if (!float.IsFinite(absoluteZ) ||
+            !TryGetMapData(viewedMap, out var viewed, out var network))
+        {
+            return false;
+        }
+
+        canonicalPosition = ZLevelProjection.UnprojectSupportPoint(
+            projectedPosition,
+            absoluteZ,
+            viewed.Depth,
+            network.ProjectionOffset);
+        return true;
+    }
+
     public void CollectMapNetworks(List<Entity<ZLevelMapNetworkComponent>> networks)
     {
         networks.Clear();
@@ -288,7 +377,8 @@ public sealed partial class ZLevelSystem : EntitySystem
         => TryGetMapOffset(map, -1, out below);
 
     /// <summary>
-    /// Moves an entity to another map while preserving canonical world XY and rotation.
+    /// Moves an entity to another map while preserving canonical world XY and rotation. If its current grid has an
+    /// explicit corresponding grid at the destination depth, that grid becomes the new parent.
     /// </summary>
     public bool TryMoveEntityToMapOffset(EntityUid entity, int offset, [NotNullWhen(true)] out EntityUid? targetMap)
     {
@@ -305,7 +395,23 @@ public sealed partial class ZLevelSystem : EntitySystem
         }
 
         var (position, rotation) = _transform.GetWorldPositionRotation(xform);
-        _transform.SetMapCoordinates((entity, xform), new MapCoordinates(position, targetMapComp.MapId), rotation);
+        if (TryResolveLinkedDestinationGrid(xform.GridUid, target, offset, out var targetGrid))
+        {
+            var targetCoordinates = _transform.ToCoordinates(
+                targetGrid.Value,
+                new MapCoordinates(position, targetMapComp.MapId));
+            _transform.SetCoordinates(entity, xform, targetCoordinates, rotation - _transform.GetWorldRotation(targetGrid.Value));
+        }
+        else
+        {
+            // A body leaving an unlinked grid must not silently attach to whichever unrelated grid happens to overlap
+            // on the target map. Map-parented bodies retain the ordinary spatial grid lookup behaviour.
+            if (xform.GridUid != null)
+                _transform.SetCoordinates(entity, xform, new EntityCoordinates(target, position), rotation);
+            else
+                _transform.SetMapCoordinates((entity, xform), new MapCoordinates(position, targetMapComp.MapId), rotation);
+        }
+
         return true;
     }
 
@@ -443,6 +549,36 @@ public sealed partial class ZLevelSystem : EntitySystem
         return false;
     }
 
+    /// <summary>
+    /// Returns whether a point on this map has an opening through which the next lower z level can be reached or
+    /// interacted with. All overlapping grids are considered deterministically.
+    /// </summary>
+    [Pure]
+    public bool IsOpenToLowerLevel(EntityUid map, Vector2 worldPosition)
+    {
+        if (!_mapQuery.TryComp(map, out var mapComp))
+            return false;
+
+        _renderOccluderGrids.Clear();
+        _mapSystem.FindGridsIntersecting(
+            mapComp.MapId,
+            Box2.CenteredAround(worldPosition, new Vector2(0.02f, 0.02f)),
+            ref _renderOccluderGrids,
+            approx: true);
+        _renderOccluderGrids.Sort(static (a, b) => a.Owner.CompareTo(b.Owner));
+
+        foreach (var grid in _renderOccluderGrids)
+        {
+            if (!_mapSystem.TryGetTileRef(grid.Owner, grid.Comp, worldPosition, out var tile) || tile.Tile.IsEmpty)
+                continue;
+
+            if (!_tileDefinitions.TryGetDefinition(tile.Tile.TypeId, out var definition) || !definition.ZLevelTransparent)
+                return false;
+        }
+
+        return true;
+    }
+
     [Pure]
     public bool HasLinearDepths(Entity<ZLevelMapNetworkComponent> network)
     {
@@ -465,6 +601,7 @@ public sealed partial class ZLevelSystem : EntitySystem
         if (!levels.Remove(map))
             return false;
 
+        UnlinkGridsOnMap(map);
         RemCompDeferred<ZLevelMapComponent>(map);
         if (levels.Count == 0)
             PredictedQueueDel(entity.Owner);
@@ -476,6 +613,7 @@ public sealed partial class ZLevelSystem : EntitySystem
 
     private void OnZMapShutdown(Entity<ZLevelMapComponent> entity, ref ComponentShutdown args)
     {
+        UnlinkGridsOnMap(entity.Owner);
         if (!_networkQuery.TryComp(entity.Comp.Network, out var networkComp))
             return;
 
@@ -510,11 +648,25 @@ public sealed partial class ZLevelSystem : EntitySystem
         }
 
         SetNetworkLevels(entity, entity.Comp.Maps);
+        if (!CanRestoreGridLinks(entity))
+        {
+            Log.Error($"Unable to restore z-level grid links for {ToPrettyString(entity)}: the saved links are invalid.");
+            return;
+        }
+
+        foreach (var link in entity.Comp.GridLinks)
+        {
+            InitializeGridMap(link.Lower);
+            InitializeGridMap(link.Upper);
+            if (!TryLinkGrids(link.Lower, link.Upper, align: false))
+                Log.Error($"Unable to restore z-level grid link {ToPrettyString(link.Lower)} -> {ToPrettyString(link.Upper)}.");
+        }
     }
 
     private void OnNetworkShutdown(Entity<ZLevelMapNetworkComponent> entity, ref ComponentShutdown args)
     {
         _pvsOverride.RemoveGlobalOverride(entity);
+        UnlinkNetworkGrids(entity.Owner);
         foreach (var map in entity.Comp.SortedZLevels)
         {
             if (_zMapQuery.TryComp(map, out var zMap) && zMap.Network == entity.Owner)
@@ -532,11 +684,15 @@ public sealed partial class ZLevelSystem : EntitySystem
         {
             network.Maps.Clear();
             network.Maps.AddRange(network.SortedZLevels);
+            network.GridLinks.Clear();
         }
+
+        CaptureGridLinks();
     }
 
     private void SetNetworkLevels(Entity<ZLevelMapNetworkComponent> network, IReadOnlyList<EntityUid> maps)
     {
+        PruneInvalidGridLinks(network.Owner, maps);
         network.Comp.SortedZLevelsInternal.Clear();
         for (var depth = 0; depth < maps.Count; depth++)
         {
