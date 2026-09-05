@@ -15,6 +15,7 @@ using Robust.Shared.IoC;
 using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
+using Robust.Shared.Physics.Components;
 using Robust.Shared.Timing;
 
 namespace Robust.UnitTesting.Client.GameObjects;
