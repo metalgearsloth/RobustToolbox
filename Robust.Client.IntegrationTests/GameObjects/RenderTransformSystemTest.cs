@@ -50,6 +50,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         _transforms.ResetRenderPoses();
         _timing.TickRemainder = TimeSpan.Zero;
         _timing.TickTimingAdjustment = 0f;
+        ((GameTiming) _timing).LatchTickTimingAdjustment();
         _timing.CurTick = new GameTick(_timing.CurTick.Value + 1);
         _timing.LastRealTick = _timing.CurTick;
     }
@@ -334,6 +335,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         {
             _timing.SetTickRateAt(5, _timing.CurTick);
             _timing.TickTimingAdjustment = tickTimingAdjustment;
+            ((GameTiming) _timing).LatchTickTimingAdjustment();
             var adjustedPeriod = (float) _timing.CalcAdjustedTickPeriod().TotalSeconds;
             const float frameTime = 1f / 119f;
             var (_, mapId) = CreateMap();
@@ -387,6 +389,48 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         {
             _timing.SetTickRateAt(oldTickRate, _timing.CurTick);
             _timing.TickTimingAdjustment = oldTimingAdjustment;
+            ((GameTiming) _timing).LatchTickTimingAdjustment();
+            _timing.TickRemainder = TimeSpan.Zero;
+        }
+    }
+
+    [Test]
+    public void TimingAdjustmentChangeMidTickDoesNotMoveRenderPoseWithoutElapsedTime()
+    {
+        var oldTickRate = _timing.TickRate;
+        var oldTimingAdjustment = _timing.TickTimingAdjustment;
+
+        try
+        {
+            _timing.SetTickRateAt(30, _timing.CurTick);
+            _timing.TickTimingAdjustment = 0f;
+            ((GameTiming) _timing).LatchTickTimingAdjustment();
+            var (_, mapId) = CreateMap();
+            var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
+            var xform = _entities.GetComponent<TransformComponent>(uid);
+            MakeRemote(xform);
+
+            ApplyRemote(() => _transforms.SetLocalPosition(uid, Vector2.UnitX, xform));
+            SetHalfTick();
+            _transforms.FrameUpdate(0f);
+
+            var before = _transforms.GetRenderWorldPosition(uid);
+            var phaseBefore = _timing.TickPhase;
+
+            _timing.TickTimingAdjustment = 0.1f;
+            _transforms.FrameUpdate(0f);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(_timing.TickPhase, Is.EqualTo(phaseBefore).Within(0.00001f));
+                AssertVector(_transforms.GetRenderWorldPosition(uid), before);
+            });
+        }
+        finally
+        {
+            _timing.SetTickRateAt(oldTickRate, _timing.CurTick);
+            _timing.TickTimingAdjustment = oldTimingAdjustment;
+            ((GameTiming) _timing).LatchTickTimingAdjustment();
             _timing.TickRemainder = TimeSpan.Zero;
         }
     }

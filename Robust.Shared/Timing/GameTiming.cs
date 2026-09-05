@@ -128,6 +128,12 @@ namespace Robust.Shared.Timing
         private ushort _tickRate;
         private TimeSpan _tickRemainder;
 
+        // The buffer controller writes requests during a frame.
+        // The active tick uses the value latched at its start.
+        private float _requestedTickTimingAdjustment;
+        private float _latchedTickTimingAdjustment;
+        private bool _tickTimingAdjustmentLatched;
+
         /// <summary>
         ///     The target ticks/second of the simulation.
         /// </summary>
@@ -180,9 +186,29 @@ namespace Robust.Shared.Timing
         {
             get
             {
-                var ratio = MathHelper.Clamp(TickTimingAdjustment, -0.99f, 0.99f);
-                return 1 - ratio;
+                EnsureTickTimingAdjustmentLatched();
+                return CalculateTickTimingScale(_latchedTickTimingAdjustment);
             }
+        }
+
+        private static float CalculateTickTimingScale(float adjustment)
+        {
+            var ratio = MathHelper.Clamp(adjustment, -0.99f, 0.99f);
+            return 1 - ratio;
+        }
+
+        private void EnsureTickTimingAdjustmentLatched()
+        {
+            if (_tickTimingAdjustmentLatched)
+                return;
+
+            LatchTickTimingAdjustment();
+        }
+
+        internal void LatchTickTimingAdjustment()
+        {
+            _latchedTickTimingAdjustment = _requestedTickTimingAdjustment;
+            _tickTimingAdjustmentLatched = true;
         }
 
         public TimeSpan CalcAdjustedTickPeriod()
@@ -197,7 +223,11 @@ namespace Robust.Shared.Timing
         public uint CurFrame { get; set; } = 1;
 
         /// <inheritdoc />
-        public float TickTimingAdjustment { get; set; } = 0;
+        public float TickTimingAdjustment
+        {
+            get => _requestedTickTimingAdjustment;
+            set => _requestedTickTimingAdjustment = value;
+        }
 
         /// <summary>
         ///     Ends the 'lap' of the timer, updating frame time info.
@@ -252,6 +282,7 @@ namespace Robust.Shared.Timing
             TimeBase = timeBase;
             CurTick = GameTick.First;
             TickRemainder = TimeSpan.Zero;
+            LatchTickTimingAdjustment();
             Paused = true;
         }
 

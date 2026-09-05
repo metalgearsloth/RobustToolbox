@@ -214,6 +214,7 @@ namespace Robust.Shared.Timing
                     {
                         accumulator -= tickPeriod;
                         _timing.LastTick += tickPeriod;
+                        (_timing as GameTiming)?.LatchTickTimingAdjustment();
 
                         // only run the simulation if unpaused, but still use up the accumulated time
                         if (_timing.Paused)
