@@ -117,6 +117,30 @@ namespace Robust.Shared.Tests.Timing
             Assert.That(result, Is.EqualTo(expected));
         }
 
+        [TestCase(-0.1f)]
+        [TestCase(0.1f)]
+        public void OutSimCurTimeUsesAdjustedTickPhase(float tickTimingAdjustment)
+        {
+            var newStopwatch = new Mock<IStopwatch>();
+            var gameTiming = GameTimingFactory(newStopwatch.Object);
+            gameTiming.InSimulation = false;
+            gameTiming.TickRate = 5;
+            gameTiming.CurTick = new GameTick(2);
+            gameTiming.TickTimingAdjustment = tickTimingAdjustment;
+
+            var adjustedHalfTick = gameTiming.CalcAdjustedTickPeriod() / 2;
+            gameTiming.TickRemainder = adjustedHalfTick / gameTiming.TimeScale;
+
+            var result = gameTiming.CurTime;
+            var phase = gameTiming.TickFraction / (float) ushort.MaxValue;
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result, Is.EqualTo(TimeSpan.FromSeconds(0.3)).Within(TimeSpan.FromTicks(1)));
+                Assert.That(phase, Is.EqualTo(0.5f).Within(0.001f));
+            });
+        }
+
         /// <summary>
         ///     Checks that IGameTiming.FrameTime returns the simulated delta time between the two most recent calls to IGameTiming.StartFrame().
         /// </summary>

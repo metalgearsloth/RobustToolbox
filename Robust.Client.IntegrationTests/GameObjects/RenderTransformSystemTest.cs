@@ -49,6 +49,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
     {
         _transforms.ResetRenderPoses();
         _timing.TickRemainder = TimeSpan.Zero;
+        _timing.TickTimingAdjustment = 0f;
         _timing.CurTick = new GameTick(_timing.CurTick.Value + 1);
         _timing.LastRealTick = _timing.CurTick;
     }
@@ -320,6 +321,74 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
             Assert.That(renderCoordinates.MapId, Is.EqualTo(mapId));
             AssertVector(renderCoordinates.Position, new Vector2(0.5f, 0f));
         });
+    }
+
+    [TestCase(-0.1f)]
+    [TestCase(0.1f)]
+    public void MovementAt5TpsUsesAdjustedTickPhase(float tickTimingAdjustment)
+    {
+        var oldTickRate = _timing.TickRate;
+        var oldTimingAdjustment = _timing.TickTimingAdjustment;
+
+        try
+        {
+            _timing.SetTickRateAt(5, _timing.CurTick);
+            _timing.TickTimingAdjustment = tickTimingAdjustment;
+            var adjustedPeriod = (float) _timing.CalcAdjustedTickPeriod().TotalSeconds;
+            const float frameTime = 1f / 119f;
+            var (_, mapId) = CreateMap();
+            var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
+            var xform = _entities.GetComponent<TransformComponent>(uid);
+            MakeRemote(xform);
+
+            var accumulator = 0f;
+            var tick = 0;
+            float? previousPosition = null;
+            var velocities = new List<float>();
+
+            ApplyRemote(() => _transforms.SetLocalPosition(uid, Vector2.UnitX, xform));
+
+            for (var frame = 0; tick < 10; frame++)
+            {
+                accumulator += frameTime;
+                while (accumulator >= adjustedPeriod)
+                {
+                    accumulator -= adjustedPeriod;
+                    tick++;
+                    if (tick >= 10)
+                        break;
+
+                    _timing.LastRealTick = new GameTick(_timing.LastRealTick.Value + 1);
+                    _timing.CurTick = _timing.LastRealTick;
+                    ApplyRemote(() => _transforms.SetLocalPosition(uid, new Vector2(tick + 1, 0f), xform));
+                }
+
+                if (tick >= 10)
+                    break;
+
+                _timing.TickRemainder = TimeSpan.FromSeconds(accumulator);
+                _transforms.FrameUpdate(frameTime);
+
+                var position = _transforms.GetRenderWorldPosition(uid).X;
+                if (previousPosition is { } previous)
+                    velocities.Add((position - previous) / frameTime);
+
+                previousPosition = position;
+            }
+
+            var expectedVelocity = 1f / adjustedPeriod;
+            Assert.Multiple(() =>
+            {
+                Assert.That(velocities.Min(), Is.EqualTo(expectedVelocity).Within(0.08f));
+                Assert.That(velocities.Max(), Is.EqualTo(expectedVelocity).Within(0.08f));
+            });
+        }
+        finally
+        {
+            _timing.SetTickRateAt(oldTickRate, _timing.CurTick);
+            _timing.TickTimingAdjustment = oldTimingAdjustment;
+            _timing.TickRemainder = TimeSpan.Zero;
+        }
     }
 
     [Test]

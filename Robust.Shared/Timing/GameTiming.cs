@@ -72,8 +72,8 @@ namespace Robust.Shared.Timing
 
                 if (!InSimulation) // rendering can draw frames between ticks
                 {
-                    DebugTools.Assert(0 <= (time + TickRemainder).TotalSeconds);
-                    return time + TickRemainder;
+                    DebugTools.Assert(0 <= (time + AdjustedTickRemainder).TotalSeconds);
+                    return time + AdjustedTickRemainder;
                 }
 
                 DebugTools.Assert(0 <= time.TotalSeconds);
@@ -160,14 +160,33 @@ namespace Robust.Shared.Timing
 
         public TimeSpan TickRemainderRealtime => TickRemainder * TimeScale;
 
-        public TimeSpan CalcAdjustedTickPeriod()
+        public float TickPhase
         {
-            // ranges from -1 to 1, with 0 being 'default'
-            var ratio = MathHelper.Clamp(TickTimingAdjustment, -0.99f, 0.99f);
+            get
+            {
+                if (InSimulation)
+                    return 1f;
 
-            // Final period ranges from near 0 (runs very fast to catch up) or 2 * tick period (runs at half speed).
-            return TickPeriod * (1-ratio) * TimeScale;
+                if (TickPeriod <= TimeSpan.Zero)
+                    return 1f;
+
+                return Math.Clamp((float) (AdjustedTickRemainder.TotalSeconds / TickPeriod.TotalSeconds), 0f, 1f);
+            }
         }
+
+        private TimeSpan AdjustedTickRemainder => TickRemainder / TickTimingScale;
+
+        private float TickTimingScale
+        {
+            get
+            {
+                var ratio = MathHelper.Clamp(TickTimingAdjustment, -0.99f, 0.99f);
+                return 1 - ratio;
+            }
+        }
+
+        public TimeSpan CalcAdjustedTickPeriod()
+            => TickPeriod * TickTimingScale * TimeScale;
 
         /// <summary>
         ///     Current graphics frame since init OpenGL which is taken as frame 1, from swapbuffer to swapbuffer. Useful to set a

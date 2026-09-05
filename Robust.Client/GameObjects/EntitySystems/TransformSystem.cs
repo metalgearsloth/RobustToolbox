@@ -543,10 +543,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
             return 1f;
 
         // Prediction runs ahead of ChangeTick; clamp old segments when the phase wraps.
-        var phase = Math.Clamp(
-            (float)(_timing.TickRemainder.TotalSeconds / _timing.TickPeriod.TotalSeconds),
-            0f,
-            1f);
+        var phase = _timing.TickPhase;
 
         if (state.LastFramePhase >= 0f && phase < state.LastFramePhase)
             return 1f;
