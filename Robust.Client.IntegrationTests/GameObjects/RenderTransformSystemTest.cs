@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using NUnit.Framework;
 using Robust.Client.GameObjects;
@@ -536,6 +538,163 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
             Assert.That(viewportAabb.Contains(simulation), Is.False);
             Assert.That(queryBounds.Contains(simulation), Is.True);
         });
+    }
+
+
+    [TestCase(30, 144f)]
+    [TestCase(60, 144f)]
+    public void PredictionReplayDoesNotDisturbConstantRenderVelocity(int tickRate, float renderFps)
+    {
+        var oldTickRate = _timing.TickRate;
+        try
+        {
+            _timing.SetTickRateAt((ushort) tickRate, _timing.CurTick);
+            var tickPeriod = (float) _timing.TickPeriod.TotalSeconds;
+            var frameTime = 1f / renderFps;
+            const float speed = 4.5f;
+            var tickDistance = speed / tickRate;
+            var (_, mapId) = CreateMap();
+            var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
+            var xform = _entities.GetComponent<TransformComponent>(uid);
+            var accumulator = 0f;
+            var simulationTick = 0;
+            float? previousRender = null;
+            var velocities = new List<float>();
+            var simulationDisplacements = new List<float>();
+
+            _timing.CurTick = _timing.LastRealTick + 1;
+            _transforms.SetLocalPosition(uid, new Vector2(tickDistance, 0f), xform);
+            var previousSimulationEndpoint = _transforms.GetWorldPosition(uid).X;
+
+            for (var frame = 0; simulationTick < 24; frame++)
+            {
+                accumulator += frameTime;
+
+                while (accumulator >= tickPeriod)
+                {
+                    accumulator -= tickPeriod;
+                    simulationTick++;
+                    ReplayPredictionTick(simulationTick);
+                    var simulationEndpoint = _transforms.GetWorldPosition(uid).X;
+                    simulationDisplacements.Add(simulationEndpoint - previousSimulationEndpoint);
+                    previousSimulationEndpoint = simulationEndpoint;
+                }
+
+                _timing.TickRemainder = TimeSpan.FromSeconds(accumulator);
+                _transforms.FrameUpdate(frameTime);
+
+                var render = _transforms.GetRenderWorldPosition(uid).X;
+                if (previousRender is { } previous && simulationTick >= 2)
+                    velocities.Add((render - previous) / frameTime);
+
+                previousRender = render;
+            }
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(simulationDisplacements.Min(), Is.EqualTo(tickDistance).Within(0.0001f));
+                Assert.That(simulationDisplacements.Max(), Is.EqualTo(tickDistance).Within(0.0001f));
+                Assert.That(velocities.Min(), Is.EqualTo(speed).Within(0.25f));
+                Assert.That(velocities.Max(), Is.EqualTo(speed).Within(0.25f));
+            });
+
+            void ReplayPredictionTick(int realTickIndex)
+            {
+                var previousRealTick = _timing.LastRealTick;
+                var nextRealTick = previousRealTick + 1;
+
+                using (_timing.StartStateApplicationArea())
+                    _transforms.SetLocalPosition(uid, new Vector2((realTickIndex - 1) * tickDistance, 0f), xform);
+
+                xform.LastModifiedTick = previousRealTick;
+
+                _timing.CurTick = _timing.LastRealTick = nextRealTick;
+                using (_timing.StartStateApplicationArea())
+                    _transforms.SetLocalPosition(uid, new Vector2(realTickIndex * tickDistance, 0f), xform);
+
+                _timing.CurTick = nextRealTick + 1;
+                using (_timing.StartPastPredictionArea())
+                    _transforms.SetLocalPosition(uid, new Vector2((realTickIndex + 1) * tickDistance, 0f), xform);
+            }
+        }
+        finally
+        {
+            _timing.SetTickRateAt(oldTickRate, _timing.CurTick);
+            _timing.TickRemainder = TimeSpan.Zero;
+        }
+    }
+
+    [Test]
+    public void SnappedLocalMispredictionUsesPredictionCorrection()
+    {
+        var (_, mapId) = CreateMap();
+        var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
+        var xform = _entities.GetComponent<TransformComponent>(uid);
+
+        _timing.CurTick = new GameTick(_timing.LastRealTick.Value + 2);
+        _transforms.SetLocalPosition(uid, Vector2.UnitX, xform);
+        _transforms.SnapRenderPose(uid, true);
+
+        AssertVector(_transforms.GetWorldPosition(uid), Vector2.UnitX);
+        AssertVector(_transforms.GetRenderWorldPosition(uid), Vector2.UnitX);
+
+        using (_timing.StartStateApplicationArea())
+            _transforms.SetLocalPosition(uid, Vector2.Zero, xform);
+
+        Assert.Multiple(() =>
+        {
+            AssertVector(_transforms.GetWorldPosition(uid), Vector2.Zero);
+            AssertVector(_transforms.GetRenderWorldPosition(uid), Vector2.UnitX);
+            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var data), Is.True);
+            Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.PredictionCorrection));
+        });
+
+        _transforms.FrameUpdate(CorrectionHalfLifeForTest);
+        AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(0.5f, 0f));
+    }
+
+    [Test]
+    public void PredictionReplayPreservesProgressAndUpdatesDestinationContinuously()
+    {
+        var (_, mapId) = CreateMap();
+        var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
+        var xform = _entities.GetComponent<TransformComponent>(uid);
+
+        _timing.CurTick = new GameTick(_timing.LastRealTick.Value + 1);
+        _transforms.SetLocalPosition(uid, Vector2.UnitX, xform);
+        SetTickAlpha(0.25f);
+        _transforms.FrameUpdate(0f);
+        AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(0.25f, 0f));
+
+        using (_timing.StartStateApplicationArea())
+            _transforms.SetLocalPosition(uid, Vector2.Zero, xform);
+        using (_timing.StartPastPredictionArea())
+            _transforms.SetLocalPosition(uid, Vector2.UnitX, xform);
+
+        AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(0.25f, 0f));
+
+        SetTickAlpha(0.5f);
+        _transforms.FrameUpdate(0f);
+        AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(0.5f, 0f));
+
+        using (_timing.StartStateApplicationArea())
+            _transforms.SetLocalPosition(uid, Vector2.Zero, xform);
+        using (_timing.StartPastPredictionArea())
+            _transforms.SetLocalPosition(uid, new Vector2(2f, 0f), xform);
+
+        Assert.Multiple(() =>
+        {
+            AssertVector(xform.LocalPosition, new Vector2(2f, 0f));
+            AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(0.5f, 0f));
+        });
+
+        SetTickAlpha(0.75f);
+        _transforms.FrameUpdate(0f);
+        AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(1.25f, 0f));
+
+        SetTickAlpha(1f);
+        _transforms.FrameUpdate(0f);
+        AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(2f, 0f));
     }
 
     private (EntityUid Uid, MapId Id) CreateMap()

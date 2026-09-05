@@ -152,9 +152,11 @@ public sealed partial class TransformSystem : SharedTransformSystem
             rendered = existing.LastRendered;
             var parentOrRenderSpaceChanged = oldEndpoint.Parent != target.Parent
                                              || oldEndpoint.RenderSpace != target.RenderSpace;
+            var sameTickPredictionReplay = existing.Type == RenderInterpolationType.PredictionInterpolation
+                                           && existing.ChangeTick == _timing.CurTick
+                                           && (existing.PendingPredictionReplay || _timing.ApplyingState);
             var predictionRollbackOrCorrection = existing.Type == RenderInterpolationType.PredictionCorrection
-                                                 || existing.PendingPredictionReplay
-                                                 || (_timing.ApplyingState && existing.Type == RenderInterpolationType.PredictionInterpolation);
+                                                 || sameTickPredictionReplay;
 
             // Multiple changes in one simulation tick retain the original source: A -> B -> C is A -> C.
             if (existing.Type != RenderInterpolationType.PredictionCorrection
@@ -320,6 +322,18 @@ public sealed partial class TransformSystem : SharedTransformSystem
         in RenderPose rendered,
         EntityUid coordinateSpace)
     {
+        var newPredictionTick = _timing.InPrediction && _timing.CurTick > state.ChangeTick;
+
+        if (newPredictionTick)
+        {
+            state.CorrectionAnchor = rendered;
+            state.InterpolationStartAlpha = 0f;
+            state.Alpha = 0f;
+            state.LastFramePhase = -1f;
+            state.ChangeTick = _timing.CurTick;
+            state.PendingPredictionReplay = true;
+        }
+
         if (!state.PendingPredictionReplay)
         {
             state.CorrectionAnchor = rendered;
