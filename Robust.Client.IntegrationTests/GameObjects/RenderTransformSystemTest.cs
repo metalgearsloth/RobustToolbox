@@ -822,7 +822,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
     [TestCase(0f)]
     [TestCase(0.7f)]
-    public void PostStackEntityAttachmentCombinesOnlyVisibleRendererSamples(float verticalOffset)
+    public void HiddenZLayerRenormalizesEntityAndPostStackAttachmentSamples(float verticalOffset)
     {
         var (maps, _, network) = CreateZNetwork(3, new Vector2(0f, verticalOffset));
         var canonical = new Vector2(2f, 3f);
@@ -838,9 +838,16 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         var allVisible = new HashSet<EntityUid> { maps[1], maps[2] };
         var upperOnly = new HashSet<EntityUid> { maps[2] };
         var unrelated = new HashSet<EntityUid> { maps[0] };
+        var samples = new RenderLayerSample[2];
+        var sampleCount = _transforms.GetRenderLayerSamples(uid, samples, xform, upperOnly);
 
         Assert.Multiple(() =>
         {
+            Assert.That(sampleCount, Is.EqualTo(1));
+            Assert.That(samples[0].Map, Is.EqualTo(maps[2]));
+            Assert.That(samples[0].Opacity, Is.EqualTo(1f).Within(0.001f),
+                "a hidden adjacent map must not make the visible entity sample fade out");
+
             Assert.That(_transforms.TryGetPresentedViewSample(uid, maps[2], allVisible, out var combined), Is.True);
             AssertVector(combined.Position, canonical - network.Comp.ProjectionOffset * 0.5f);
             Assert.That(combined.Opacity, Is.EqualTo(1f).Within(0.001f));
@@ -848,7 +855,8 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
             Assert.That(_transforms.TryGetPresentedViewSample(uid, maps[2], upperOnly, out var clipped), Is.True);
             AssertVector(clipped.Position, combined.Position);
-            Assert.That(clipped.Opacity, Is.EqualTo(0.5f).Within(0.001f));
+            Assert.That(clipped.Opacity, Is.EqualTo(1f).Within(0.001f),
+                "a post-stack attachment must use the same normalized visible sample");
 
             Assert.That(_transforms.TryGetPresentedViewSample(uid, maps[2], unrelated, out _), Is.False);
         });

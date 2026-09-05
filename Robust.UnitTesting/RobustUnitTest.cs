@@ -59,6 +59,8 @@ namespace Robust.UnitTesting
                 typeof(ZLevelMapNetworkComponent),
                 typeof(ZLevelGridComponent),
                 typeof(ZLevelPresentationComponent),
+                typeof(ZLevelPhysicsComponent),
+                typeof(ZLevelHighGroundComponent),
                 typeof(JointRelayTargetComponent),
                 typeof(OccluderComponent),
                 typeof(OccluderTreeComponent),
