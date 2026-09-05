@@ -102,6 +102,30 @@ internal sealed class ZLevelSupportTest
     }
 
     [Test]
+    public void SupportQueryEvaluatesRampHeightCurveAtSamplePoint()
+    {
+        var world = CreateWorld(1);
+        var ramp = SpawnPlatform(world, 0, new Vector2(0.5f), 0f, new Vector2(0.5f), solidVolume: false);
+        var highGround = world.Entities.GetComponent<ZLevelHighGroundComponent>(ramp);
+        SetField(highGround, nameof(ZLevelHighGroundComponent.HeightCurve), new List<float> { 0.1f, 1.05f });
+        var body = SpawnMob(world, 0, new Vector2(0.5f, 0.75f), 1.05f);
+
+        Assert.That(world.Support.TryQuerySupport(
+            (body.Uid, body.Physics),
+            world.Transform.GetWorldPosition(body.Uid),
+            GetAbsoluteZ(world, body),
+            world.ZPhysics.MaxStepUp,
+            out var result), Is.True);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Provider, Is.EqualTo(ramp));
+            Assert.That(result.Surface, Is.EqualTo(ZLevelSupportSurface.HighGround));
+            Assert.That(result.AbsoluteHeight, Is.EqualTo(0.3375f).Within(0.001f));
+        });
+    }
+
+    [Test]
     public void ActualMovementWalksOnFlatFloor()
     {
         var world = CreateWorld(1, floorLevels: [0], floorLength: 6);
