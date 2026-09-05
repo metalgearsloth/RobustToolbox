@@ -360,6 +360,18 @@ namespace Robust.Shared
             CVarDef.Create("net.pvs_exit_budget", 75, CVar.ARCHIVE | CVar.CLIENTONLY);
 
         /// <summary>
+        /// Number of z-level maps below each viewer to include in that client's PVS.
+        /// </summary>
+        public static readonly CVarDef<int> NetPvsZLevelsBelow =
+            CVarDef.Create("net.pvs_zlevels_below", 3, CVar.ARCHIVE | CVar.SERVERONLY);
+
+        /// <summary>
+        /// Number of z-level maps above each viewer to include in that client's PVS.
+        /// </summary>
+        public static readonly CVarDef<int> NetPvsZLevelsAbove =
+            CVarDef.Create("net.pvs_zlevels_above", 1, CVar.ARCHIVE | CVar.SERVERONLY);
+
+        /// <summary>
         /// ZSTD compression level to use when compressing game states. Used by both networking and replays.
         /// </summary>
         public static readonly CVarDef<int> NetPvsCompressLevel =

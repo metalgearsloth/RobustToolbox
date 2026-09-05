@@ -10,6 +10,7 @@ public sealed partial class EyeSystem : SharedEyeSystem
 {
     [Dependency] private IEyeManager _eyeManager = default!;
     [Dependency] private TransformSystem _renderTransforms = default!;
+    [Dependency] private ZLevelSystem _zLevels = default!;
 
     public override void Initialize()
     {
@@ -65,7 +66,11 @@ public sealed partial class EyeSystem : SharedEyeSystem
                 target = uid;
             }
 
+            var pose = _renderTransforms.GetRenderWorldPose(target, xform);
             eyeComponent.Eye.Position = _renderTransforms.GetRenderMapCoordinates(target, xform);
+            eyeComponent.Eye.PresentedAbsoluteZ = _zLevels.TryGetMapDepth(pose.CoordinateSpace, out _)
+                ? pose.AbsoluteZ
+                : null;
         }
     }
 }

@@ -55,6 +55,9 @@ namespace Robust.UnitTesting
                 typeof(FixturesComponent),
                 typeof(JointComponent),
                 typeof(GridTreeComponent),
+                typeof(ZLevelMapComponent),
+                typeof(ZLevelMapNetworkComponent),
+                typeof(ZLevelPresentationComponent),
                 typeof(JointRelayTargetComponent),
                 typeof(OccluderComponent),
                 typeof(OccluderTreeComponent),
@@ -119,6 +122,7 @@ namespace Robust.UnitTesting
             // and it was like this when I found it.
 
             systems.LoadExtraSystemType<SharedGridTraversalSystem>();
+            systems.LoadExtraSystemType<ZLevelSystem>();
             systems.LoadExtraSystemType<FixtureSystem>();
             systems.LoadExtraSystemType<CollisionWakeSystem>();
             systems.LoadExtraSystemType<RecursiveMoveSystem>();
@@ -140,9 +144,12 @@ namespace Robust.UnitTesting
                 systems.LoadExtraSystemType<Robust.Client.GameObjects.PointLightSystem>();
                 systems.LoadExtraSystemType<LightTreeSystem>();
                 systems.LoadExtraSystemType<SpriteSystem>();
+                systems.LoadExtraSystemType<ClientZLevelSystem>();
+                systems.LoadExtraSystemType<Robust.Client.GameObjects.ZLevelPresentationSystem>();
                 systems.LoadExtraSystemType<SpriteTreeSystem>();
                 systems.LoadExtraSystemType<AppearanceSystem>();
                 systems.LoadExtraSystemType<GridChunkBoundsDebugSystem>();
+                systems.LoadExtraSystemType<Robust.Client.GameStates.PvsOverrideSystem>();
             }
             else
             {
@@ -159,6 +166,7 @@ namespace Robust.UnitTesting
                 systems.LoadExtraSystemType<InputSystem>();
                 systems.LoadExtraSystemType<PvsOverrideSystem>();
                 systems.LoadExtraSystemType<MapSystem>();
+                systems.LoadExtraSystemType<Robust.Server.GameObjects.ZLevelPresentationSystem>();
                 systems.LoadExtraSystemType<Robust.Server.ComponentTrees.LightTreeSystem>();
                 systems.LoadExtraSystemType<Robust.Server.GameObjects.PointLightSystem>();
             }
@@ -191,6 +199,8 @@ namespace Robust.UnitTesting
                 compFactory.RegisterClass<Robust.Server.GameObjects.PointLightComponent>();
             }
 
+            LoadGeneratedComponentNetworkSystems(systems, compFactory, assemblies);
+
             deps.Resolve<IParallelManagerInternal>().Initialize();
 
             // So by default EntityManager does its own EntitySystemManager initialize during Startup.
@@ -214,6 +224,28 @@ namespace Robust.UnitTesting
         public void BaseTearDown()
         {
             IoCManager.Clear();
+        }
+
+        private static void LoadGeneratedComponentNetworkSystems(
+            IEntitySystemManager systems,
+            IComponentFactory compFactory,
+            IEnumerable<Assembly> assemblies)
+        {
+            foreach (var assembly in assemblies)
+            {
+                foreach (var type in assembly.GetTypes())
+                {
+                    if (!typeof(IEntitySystem).IsAssignableFrom(type) ||
+                        !type.Name.EndsWith("_AutoNetworkSystem", StringComparison.Ordinal) ||
+                        type.DeclaringType is not { } componentType ||
+                        !compFactory.TryGetRegistration(componentType, out _))
+                    {
+                        continue;
+                    }
+
+                    systems.LoadExtraSystemType(type);
+                }
+            }
         }
 
         /// <summary>

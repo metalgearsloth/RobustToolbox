@@ -672,6 +672,9 @@ namespace Robust.Client.Placement
 
         private void Render(in OverlayDrawArgs args)
         {
+            if (args.ZLevelOffset != 0)
+                return;
+
             if (CurrentMode == null || !IsActive)
             {
                 if (EraserRect.HasValue)
@@ -689,9 +692,13 @@ namespace Robust.Client.Placement
                 PlayerManager.LocalEntity is not {Valid: true} controlled)
                 return;
 
-            var worldPos = XformSystem.GetWorldPosition(controlled);
+            if (!args.TryGetEntityRenderLayer(controlled, out var renderLayer))
+                return;
 
-            args.WorldHandle.DrawCircle(worldPos, CurrentPermission.Range, new Color(1, 1, 1, 0.25f));
+            args.WorldHandle.DrawCircle(
+                renderLayer.Position,
+                CurrentPermission.Range,
+                new Color(1, 1, 1, 0.25f * renderLayer.Opacity));
         }
 
         private void HandleStartPlacement(MsgPlacement msg)

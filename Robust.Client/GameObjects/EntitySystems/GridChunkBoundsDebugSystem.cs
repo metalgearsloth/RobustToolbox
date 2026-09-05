@@ -53,14 +53,14 @@ namespace Robust.Client.GameObjects
     internal sealed class GridChunkBoundsOverlay : Overlay
     {
         private readonly IEntityManager _entityManager;
-        private readonly SharedTransformSystem _transformSystem;
+        private readonly TransformSystem _transformSystem;
         private readonly SharedMapSystem _mapSystem;
 
         public override OverlaySpace Space => OverlaySpace.WorldSpace;
 
         private List<Entity<MapGridComponent>> _grids = new();
 
-        public GridChunkBoundsOverlay(IEntityManager entManager, SharedTransformSystem transformSystem, SharedMapSystem mapSystem)
+        public GridChunkBoundsOverlay(IEntityManager entManager, TransformSystem transformSystem, SharedMapSystem mapSystem)
         {
             _entityManager = entManager;
             _transformSystem = transformSystem;
@@ -78,7 +78,9 @@ namespace Robust.Client.GameObjects
             _mapSystem.FindGridsIntersecting(currentMap, viewport, ref _grids);
             foreach (var grid in _grids)
             {
-                var worldMatrix = _transformSystem.GetWorldMatrix(grid);
+                if (!args.TryGetEntityRenderMatrix(grid.Owner, out var worldMatrix, out var opacity))
+                    continue;
+
                 worldHandle.SetTransform(worldMatrix);
                 var transform = new Transform(Vector2.Zero, Angle.Zero);
                 var fixtures = fixturesQuery.Comp(grid.Owner);
@@ -90,7 +92,7 @@ namespace Robust.Client.GameObjects
                     foreach (var id in chunk.Fixtures)
                     {
                         var fixture = fixtures.Fixtures[id];
-                        var poly = (PolygonShape) fixture.Shape;
+                        var poly = (PolygonShape)fixture.Shape;
 
                         var verts = new Vector2[poly.VertexCount];
 
@@ -99,13 +101,16 @@ namespace Robust.Client.GameObjects
                             verts[i] = Transform.Mul(transform, poly.Vertices[i]);
                         }
 
-                        worldHandle.DrawPrimitives(DrawPrimitiveTopology.TriangleFan, verts, Color.Green.WithAlpha(0.2f));
+                        worldHandle.DrawPrimitives(
+                            DrawPrimitiveTopology.TriangleFan,
+                            verts,
+                            Color.Green.WithAlpha(0.2f * opacity));
 
                         for (var i = 0; i < fixture.Shape.ChildCount; i++)
                         {
                             var aabb = fixture.Shape.ComputeAABB(transform, i);
 
-                            args.WorldHandle.DrawRect(aabb, Color.Red.WithAlpha(0.5f), false);
+                            args.WorldHandle.DrawRect(aabb, Color.Red.WithAlpha(0.5f * opacity), false);
                         }
                     }
                 }

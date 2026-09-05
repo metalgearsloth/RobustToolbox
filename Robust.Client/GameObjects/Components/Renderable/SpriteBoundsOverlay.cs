@@ -71,17 +71,23 @@ namespace Robust.Client.GameObjects
 
             foreach (var entry in _renderTree.QueryAabb(currentMap, viewport))
             {
-                var (sprite, xform) = entry;
-                var (worldPos, worldRot) = _xformSystem.GetRenderWorldPositionRotation(entry.Uid, xform);
-                var bounds = _spriteSystem.CalculateBounds((entry.Uid, sprite), worldPos, worldRot, args.Viewport.Eye?.Rotation ?? default);
+                var (sprite, _) = entry;
+                if (!args.TryGetEntityRenderLayer(entry.Uid, out var sample))
+                    continue;
+
+                var bounds = _spriteSystem.CalculateBounds(
+                    (entry.Uid, sprite),
+                    sample.Position,
+                    sample.Rotation,
+                    args.LayerEye?.Rotation ?? default);
 
                 // Get scaled down bounds used to indicate the "south" of a sprite.
                 var localBound = bounds.Box;
                 var smallLocal = localBound.Scale(0.2f).Translated(-new Vector2(0f, localBound.Extents.Y));
                 var southIndicator = new Box2Rotated(smallLocal, bounds.Rotation, bounds.Origin);
 
-                handle.DrawRect(bounds, Color.Red.WithAlpha(0.2f));
-                handle.DrawRect(southIndicator, Color.Blue.WithAlpha(0.5f));
+                handle.DrawRect(bounds, Color.Red.WithAlpha(0.2f * sample.Opacity));
+                handle.DrawRect(southIndicator, Color.Blue.WithAlpha(0.5f * sample.Opacity));
             }
         }
     }

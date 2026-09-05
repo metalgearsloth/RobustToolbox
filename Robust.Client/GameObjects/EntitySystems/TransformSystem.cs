@@ -30,8 +30,11 @@ public sealed partial class TransformSystem : SharedTransformSystem
 
     [Dependency] private IConfigurationManager _configuration = default!;
     [Dependency] private IClientGameTiming _timing = default!;
+    [Dependency] private MapSystem _mapSystem = default!;
+    [Dependency] private ZLevelSystem _zLevels = default!;
 
     [Dependency] private EntityQuery<MapGridComponent> _renderGridQuery;
+    [Dependency] private EntityQuery<ZLevelPresentationComponent> _zPresentationQuery;
 
     [ViewVariables]
     private readonly Dictionary<EntityUid, RenderPoseState> _renderPoses = new();
@@ -58,6 +61,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
     {
         base.Initialize();
         OnGlobalMoveEvent += OnTransformMoved;
+        SubscribeLocalEvent<ZLevelPresentationComponent, ZLevelPresentationChangedEvent>(OnPresentationChanged);
 
         _configuration.OnValueChanged(CVars.NetInterpMaxDistance, SetMaxInterpolationDistance, true);
         _configuration.OnValueChanged(CVars.NetInterpMinDistance, SetMinInterpolationDistance, true);
@@ -128,20 +132,47 @@ public sealed partial class TransformSystem : SharedTransformSystem
         var uid = args.Sender;
         var xform = args.Component;
 
-        if (xform.Deleted || !TryCreateEndpoint(args.NewPosition, args.NewRotation, out var target))
+        if (xform.Deleted || !TryCreateEndpoint(uid, args.NewPosition, args.NewRotation, out var target))
         {
             _renderPoses.Remove(uid);
             return;
         }
 
+        if (!TryCreateEndpoint(uid, args.OldPosition, args.OldRotation, out var oldEndpoint))
+        {
+            _renderPoses.Remove(uid);
+            return;
+        }
+
+        HandlePoseChange(uid, xform, oldEndpoint, target);
+    }
+
+    private void OnPresentationChanged(
+        Entity<ZLevelPresentationComponent> entity,
+        ref ZLevelPresentationChangedEvent args)
+    {
+        if (!XformQuery.TryGetComponent(entity.Owner, out var xform) || xform.Deleted)
+            return;
+
+        var coordinates = new EntityCoordinates(xform.ParentUid, xform.LocalPosition);
+        if (!TryCreateEndpoint(entity.Owner, coordinates, xform.LocalRotation, out var source, args.OldHeight) ||
+            !TryCreateEndpoint(entity.Owner, coordinates, xform.LocalRotation, out var target, args.NewHeight))
+        {
+            _renderPoses.Remove(entity.Owner);
+            return;
+        }
+
+        HandlePoseChange(entity.Owner, xform, source, target);
+    }
+
+    private void HandlePoseChange(
+        EntityUid uid,
+        TransformComponent xform,
+        in RenderPoseEndpoint oldEndpoint,
+        in RenderPoseEndpoint target)
+    {
         ref var existing = ref CollectionsMarshal.GetValueRefOrNullRef(_renderPoses, uid);
         var hasExisting = !Unsafe.IsNullRef(ref existing);
-
-        if (!TryCreateEndpoint(args.OldPosition, args.OldRotation, out var oldEndpoint))
-        {
-            _renderPoses.Remove(uid);
-            return;
-        }
 
         var source = oldEndpoint;
         RenderPose rendered;
@@ -166,10 +197,15 @@ public sealed partial class TransformSystem : SharedTransformSystem
             {
                 source = existing.Source;
             }
-            else if ((parentOrRenderSpaceChanged || predictionRollbackOrCorrection)
-                     && !TryBindRenderPoseToParent(rendered, args.OldPosition.EntityId, out source))
+            else if (parentOrRenderSpaceChanged || predictionRollbackOrCorrection)
             {
-                source = oldEndpoint;
+                // Rebase from the pose that was displayed, without binding it to the old parent.
+                source = new RenderPoseEndpoint(
+                    EntityUid.Invalid,
+                    rendered.CanonicalPosition,
+                    rendered.Rotation,
+                    rendered.CoordinateSpace,
+                    rendered.AbsoluteZ);
             }
         }
         else
@@ -228,7 +264,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
                 return;
             }
 
-            // Replay without render state must not interpolate from a temporary rollback position.
+            // Replay without render state must not interpolate from a rollback position.
             _renderPoses.Remove(uid);
             return;
         }
@@ -289,6 +325,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
         networkState.PendingPredictionReplay = false;
         networkState.CorrectionTranslation = Vector2.Zero;
         networkState.CorrectionRotation = Angle.Zero;
+        networkState.CorrectionZ = 0f;
         networkState.CorrectionRemaining = 0f;
     }
 
@@ -312,6 +349,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
         state.PendingPredictionReplay = false;
         state.CorrectionTranslation = Vector2.Zero;
         state.CorrectionRotation = Angle.Zero;
+        state.CorrectionZ = 0f;
         state.CorrectionRemaining = 0f;
     }
 
@@ -358,16 +396,18 @@ public sealed partial class TransformSystem : SharedTransformSystem
             return false;
 
         return distance > _minInterpolationDistanceSquared
-               || !sourcePose.Rotation.EqualsApprox(targetPose.Rotation);
+               || !sourcePose.Rotation.EqualsApprox(targetPose.Rotation)
+               || !MathHelper.CloseTo(sourcePose.AbsoluteZ, targetPose.AbsoluteZ);
     }
 
     private void RebaseCorrection(ref RenderPoseState state, in RenderPoseEndpoint target)
     {
         var targetPose = ResolveEndpoint(target, 0);
-        state.CorrectionTranslation = state.CorrectionAnchor.Position - targetPose.Position;
+        state.CorrectionTranslation = state.CorrectionAnchor.CanonicalPosition - targetPose.CanonicalPosition;
         state.CorrectionRotation = state.SnapRotation
             ? Angle.Zero
             : Angle.ShortestDistance(targetPose.Rotation, state.CorrectionAnchor.Rotation);
+        state.CorrectionZ = state.CorrectionAnchor.AbsoluteZ - targetPose.AbsoluteZ;
         state.LastRendered = state.CorrectionAnchor;
         state.Alpha = 0f;
     }
@@ -411,6 +451,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
                         : MathF.Pow(0.5f, frameTime / _correctionHalfLife);
                     state.CorrectionTranslation *= decay;
                     state.CorrectionRotation *= decay;
+                    state.CorrectionZ *= decay;
                     state.CorrectionRemaining *= decay;
                 }
 
@@ -445,7 +486,8 @@ public sealed partial class TransformSystem : SharedTransformSystem
 
             if (state.Type == RenderInterpolationType.PredictionCorrection
                 && state.CorrectionTranslation.LengthSquared() < _minCorrectionTranslationSquared
-                && Math.Abs(state.CorrectionRotation.Theta) < _minCorrectionRotation)
+                && Math.Abs(state.CorrectionRotation.Theta) < _minCorrectionRotation
+                && Math.Abs(state.CorrectionZ) < ZLevelProjection.BoundaryEpsilon)
             {
                 _remove.Add(uid);
             }
@@ -490,6 +532,33 @@ public sealed partial class TransformSystem : SharedTransformSystem
                 GetPointTransformErrorSquared(grid.LocalAABB.TopLeft, simulationMatrix, renderMatrix));
             errorSquared = Math.Max(errorSquared,
                 GetPointTransformErrorSquared(grid.LocalAABB.TopRight, simulationMatrix, renderMatrix));
+        }
+
+        // A crossing entity is queried from its simulation tree but can be drawn in either adjacent map pass.
+        // Include every renderer sample, not just the stable coordinate-space pose, in the conservative margin.
+        Span<RenderLayerSample> layerSamples = stackalloc RenderLayerSample[2];
+        var sampleCount = GetRenderLayerSamples(uid, layerSamples, xform);
+        for (var i = 0; i < sampleCount; i++)
+        {
+            var sample = layerSamples[i];
+            var sampleErrorSquared = Vector2.DistanceSquared(simulation.WorldPosition, sample.Position);
+            if (isGrid && grid != null)
+            {
+                var simulationMatrix = Matrix3Helpers.CreateTransform(simulation.WorldPosition, simulation.WorldRotation);
+                var sampleMatrix = Matrix3Helpers.CreateTransform(sample.Position, sample.Rotation);
+                sampleErrorSquared = Math.Max(sampleErrorSquared,
+                    GetPointTransformErrorSquared(grid.LocalAABB.BottomLeft, simulationMatrix, sampleMatrix));
+                sampleErrorSquared = Math.Max(sampleErrorSquared,
+                    GetPointTransformErrorSquared(grid.LocalAABB.BottomRight, simulationMatrix, sampleMatrix));
+                sampleErrorSquared = Math.Max(sampleErrorSquared,
+                    GetPointTransformErrorSquared(grid.LocalAABB.TopLeft, simulationMatrix, sampleMatrix));
+                sampleErrorSquared = Math.Max(sampleErrorSquared,
+                    GetPointTransformErrorSquared(grid.LocalAABB.TopRight, simulationMatrix, sampleMatrix));
+            }
+
+            var sampleError = MathF.Sqrt(sampleErrorSquared);
+            errorSquared = Math.Max(errorSquared, sampleErrorSquared);
+            UpdateCullingMargin(sample.Map, sampleError);
         }
 
         var error = MathF.Sqrt(errorSquared);
@@ -625,6 +694,259 @@ public sealed partial class TransformSystem : SharedTransformSystem
             : MapCoordinates.Nullspace;
     }
 
+    /// <summary>
+    /// Produces the layer samples actually consumed by the renderer. Between integer absolute-z boundaries this
+    /// returns two samples at the same continuous projected position with complementary opacity.
+    /// </summary>
+    public int GetRenderLayerSamples(
+        EntityUid uid,
+        Span<RenderLayerSample> samples,
+        TransformComponent? xform = null)
+    {
+        if (samples.Length == 0 || !XformQuery.Resolve(uid, ref xform, false))
+            return 0;
+
+        var pose = GetRenderWorldPose(uid, xform);
+        if (!_zLevels.TryGetMapData(pose.CoordinateSpace, out var coordinateMap, out var network))
+        {
+            samples[0] = new RenderLayerSample(pose.CoordinateSpace, pose.Position, pose.Rotation, 1f, 0);
+            return 1;
+        }
+
+        var weights = ZLevelProjection.GetLayerWeights(pose.AbsoluteZ);
+        var count = 0;
+        if (weights.LowerWeight > 0f &&
+            weights.LowerDepth >= 0 &&
+            weights.LowerDepth < network.SortedZLevels.Count)
+        {
+            var map = network.SortedZLevels[weights.LowerDepth];
+            var position = ZLevelProjection.Reproject(
+                pose.Position,
+                coordinateMap.Depth,
+                weights.LowerDepth,
+                network.ProjectionOffset);
+            samples[count++] = new RenderLayerSample(
+                map,
+                position,
+                pose.Rotation,
+                weights.LowerWeight,
+                weights.LowerDepth);
+        }
+
+        if (weights.UpperWeight > 0f &&
+            samples.Length > count &&
+            weights.UpperDepth >= 0 &&
+            weights.UpperDepth < network.SortedZLevels.Count)
+        {
+            var map = network.SortedZLevels[weights.UpperDepth];
+            var position = ZLevelProjection.Reproject(
+                pose.Position,
+                coordinateMap.Depth,
+                weights.UpperDepth,
+                network.ProjectionOffset);
+            samples[count++] = new RenderLayerSample(
+                map,
+                position,
+                pose.Rotation,
+                weights.UpperWeight,
+                weights.UpperDepth);
+        }
+
+        if (count == 1 && samples[0].Opacity < 1f)
+            samples[0] = samples[0] with { Opacity = 1f };
+
+        return count;
+    }
+
+    /// <summary>
+    /// Gets this frame's sample for a particular map render pass.
+    /// </summary>
+    public bool TryGetRenderLayerSample(
+        EntityUid uid,
+        EntityUid layerMap,
+        out RenderLayerSample sample,
+        TransformComponent? xform = null)
+    {
+        Span<RenderLayerSample> samples = stackalloc RenderLayerSample[2];
+        var count = GetRenderLayerSamples(uid, samples, xform);
+        for (var i = 0; i < count; i++)
+        {
+            if (samples[i].Map == layerMap)
+            {
+                sample = samples[i];
+                return true;
+            }
+        }
+
+        sample = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Produces the single presented sample used by an attachment drawn after the z-level stack has been
+    /// composited. Only renderer layers that are visible in the viewport contribute to its opacity.
+    /// </summary>
+    /// <remarks>
+    /// World-space attachments should use <see cref="TryGetRenderLayerSample"/> in each layer pass instead.
+    /// This helper is intended for screen-space labels and similar visuals that are drawn once after the stack.
+    /// </remarks>
+    public bool TryGetPresentedViewSample(
+        EntityUid uid,
+        EntityUid viewedMap,
+        IReadOnlySet<EntityUid> visibleMaps,
+        out PresentedViewSample sample,
+        TransformComponent? xform = null)
+    {
+        sample = default;
+        if (viewedMap == EntityUid.Invalid ||
+            visibleMaps.Count == 0 ||
+            !XformQuery.Resolve(uid, ref xform, false))
+        {
+            return false;
+        }
+
+        Span<RenderLayerSample> layerSamples = stackalloc RenderLayerSample[2];
+        var count = GetRenderLayerSamples(uid, layerSamples, xform);
+        var opacity = 0f;
+        for (var i = 0; i < count; i++)
+        {
+            if (visibleMaps.Contains(layerSamples[i].Map))
+                opacity += layerSamples[i].Opacity;
+        }
+
+        if (opacity <= ZLevelProjection.BoundaryEpsilon)
+            return false;
+
+        var pose = GetRenderWorldPoseForLayer(uid, viewedMap, xform);
+        if (!AreRenderSpacesCompatible(pose.CoordinateSpace, viewedMap))
+            return false;
+
+        sample = new PresentedViewSample(
+            pose.Position,
+            pose.Rotation,
+            Math.Clamp(opacity, 0f, 1f),
+            pose.AbsoluteZ);
+        return true;
+    }
+
+    /// <summary>
+    /// Projects a point on one map's surface into another map render pass.
+    /// </summary>
+    /// <remarks>
+    /// This is intended for map-owned visuals such as overlays and placement previews. Physics and gameplay
+    /// code should continue to use the unprojected <see cref="MapCoordinates.Position"/>.
+    /// </remarks>
+    public bool TryProjectMapCoordinatesForLayer(
+        MapCoordinates coordinates,
+        EntityUid layerMap,
+        out Vector2 position)
+    {
+        position = coordinates.Position;
+        var sourceMap = _mapSystem.GetMapOrInvalid(coordinates.MapId);
+        if (sourceMap == EntityUid.Invalid || layerMap == EntityUid.Invalid)
+            return false;
+
+        if (sourceMap == layerMap)
+            return true;
+
+        if (!_zLevels.TryGetMapData(sourceMap, out var source, out var network) ||
+            !_zLevels.TryGetMapData(layerMap, out var target, out var targetNetwork) ||
+            source.Network != target.Network)
+        {
+            return false;
+        }
+
+        position = ZLevelProjection.Reproject(
+            coordinates.Position,
+            source.Depth,
+            target.Depth,
+            network.ProjectionOffset);
+        return true;
+    }
+
+    /// <summary>
+    /// Re-expresses a render layer's visible bounds in a compatible source map.
+    /// </summary>
+    /// <remarks>
+    /// Broadphase and component-tree data use unprojected map coordinates. Overlay renderers that gather map-owned
+    /// geometry from visible z maps should use this before querying a source map.
+    /// </remarks>
+    public bool TryGetMapRenderBoundsForLayer(
+        EntityUid sourceMap,
+        EntityUid layerMap,
+        in Box2Rotated layerBounds,
+        out MapId sourceMapId,
+        out Box2Rotated sourceBounds)
+    {
+        sourceMapId = MapId.Nullspace;
+        sourceBounds = layerBounds;
+        if (!TryComp(sourceMap, out MapComponent? map) ||
+            !TryProjectMapCoordinatesForLayer(
+                new MapCoordinates(Vector2.Zero, map.MapId),
+                layerMap,
+                out var projectedOrigin))
+        {
+            return false;
+        }
+
+        sourceMapId = map.MapId;
+        sourceBounds.Box = sourceBounds.Box.Translated(-projectedOrigin);
+        sourceBounds.Origin -= projectedOrigin;
+        return true;
+    }
+
+    /// <summary>
+    /// Gets the z projection and renderer layer selection for diagnostics.
+    /// </summary>
+    public bool TryGetZLevelRenderDebugData(EntityUid uid, out ZLevelRenderDebugData data)
+    {
+        if (!XformQuery.TryGetComponent(uid, out var xform))
+        {
+            data = default;
+            return false;
+        }
+
+        var pose = GetRenderWorldPose(uid, xform);
+        var simulationMap = xform.MapUid ?? EntityUid.Invalid;
+        var mapDepth = _zLevels.TryGetMapDepth(simulationMap, out var depth) ? depth.Value : 0;
+        var authoredLocalHeight = _zPresentationQuery.TryComp(uid, out var presentation)
+            ? presentation.LocalHeight
+            : pose.AbsoluteZ - mapDepth;
+        Span<RenderLayerSample> samples = stackalloc RenderLayerSample[2];
+        var count = GetRenderLayerSamples(uid, samples, xform);
+        data = new ZLevelRenderDebugData(
+            mapDepth,
+            authoredLocalHeight,
+            pose.AbsoluteZ - pose.ReferenceDepth,
+            pose.AbsoluteZ,
+            pose.Position,
+            pose.CanonicalPosition,
+            count,
+            count > 0 ? samples[0] : default,
+            count > 1 ? samples[1] : default);
+        return true;
+    }
+
+    /// <summary>
+    /// Re-expresses a presented pose in another map pass of the same network.
+    /// </summary>
+    public RenderPose GetRenderWorldPoseForLayer(EntityUid uid, EntityUid layerMap, TransformComponent? xform = null)
+    {
+        var pose = GetRenderWorldPose(uid, xform);
+        if (!_zLevels.TryGetMapData(pose.CoordinateSpace, out var from, out var network) ||
+            !_zLevels.TryGetMapData(layerMap, out var to, out var targetNetwork) ||
+            from.Network != to.Network)
+        {
+            return pose;
+        }
+
+        return pose with
+        {
+            Position = ZLevelProjection.Reproject(pose.Position, from.Depth, to.Depth, network.ProjectionOffset),
+            ReferenceDepth = to.Depth,
+        };
+    }
+
     private RenderPose GetRenderPoseInternal(EntityUid uid, int depth, TransformComponent? xform = null)
     {
         if (depth >= MaxTransformDepth || !XformQuery.Resolve(uid, ref xform, false))
@@ -636,58 +958,77 @@ public sealed partial class TransformSystem : SharedTransformSystem
             if (state.Type == RenderInterpolationType.PredictionCorrection)
             {
                 var correctionTarget = ResolveEndpoint(state.Target, depth + 1);
-                return new RenderPose(
-                    correctionTarget.Position + state.CorrectionTranslation,
+                return CreateRenderPose(
+                    correctionTarget.CanonicalPosition + state.CorrectionTranslation,
                     snapRotation
                         ? correctionTarget.Rotation
                         : correctionTarget.Rotation + state.CorrectionRotation,
                     state.CoordinateSpace,
                     state.Source.RenderSpace,
                     state.Target.RenderSpace,
-                    state.Alpha);
+                    state.Alpha,
+                    correctionTarget.AbsoluteZ + state.CorrectionZ);
             }
 
             var source = ResolveEndpoint(state.Source, depth + 1);
             var target = ResolveEndpoint(state.Target, depth + 1);
             var alpha = GetSegmentAlpha(state);
-            return new RenderPose(
-                Vector2.Lerp(source.Position, target.Position, alpha),
+            return CreateRenderPose(
+                Vector2.Lerp(source.CanonicalPosition, target.CanonicalPosition, alpha),
                 snapRotation
                     ? target.Rotation
                     : Angle.Lerp(source.Rotation, target.Rotation, alpha),
                 state.CoordinateSpace,
                 state.Source.RenderSpace,
                 state.Target.RenderSpace,
-                alpha);
+                alpha,
+                MathHelper.Lerp(source.AbsoluteZ, target.AbsoluteZ, alpha));
         }
 
         var renderSpace = xform.MapUid ?? EntityUid.Invalid;
         if (!xform.ParentUid.IsValid())
-            return new RenderPose(xform.LocalPosition, xform.LocalRotation, renderSpace);
+        {
+            var absoluteZ = GetOwnAbsoluteZ(uid, renderSpace) ?? GetMapDepth(renderSpace);
+            return CreateRenderPose(xform.LocalPosition, xform.LocalRotation, renderSpace, renderSpace, renderSpace, 1f, absoluteZ);
+        }
 
         var parent = GetRenderPoseInternal(xform.ParentUid, depth + 1);
-        return new RenderPose(
-            parent.Position + parent.Rotation.RotateVec(xform.LocalPosition),
+        var canonicalPosition = parent.CanonicalPosition + parent.Rotation.RotateVec(xform.LocalPosition);
+        var childAbsoluteZ = GetOwnAbsoluteZ(uid, renderSpace) ?? parent.AbsoluteZ;
+        return CreateRenderPose(
+            canonicalPosition,
             parent.Rotation + xform.LocalRotation,
             parent.CoordinateSpace,
             parent.SourceRenderSpace,
             parent.TargetRenderSpace,
-            parent.RenderSpaceAlpha);
+            parent.RenderSpaceAlpha,
+            childAbsoluteZ);
     }
 
     private RenderPose ResolveEndpoint(in RenderPoseEndpoint endpoint, int depth)
     {
         if (!endpoint.Parent.IsValid() || depth >= MaxTransformDepth)
-            return new RenderPose(endpoint.LocalPosition, endpoint.LocalRotation, endpoint.RenderSpace);
+        {
+            var absoluteZ = endpoint.AbsoluteZ ?? GetMapDepth(endpoint.RenderSpace);
+            return CreateRenderPose(
+                endpoint.LocalPosition,
+                endpoint.LocalRotation,
+                endpoint.RenderSpace,
+                endpoint.RenderSpace,
+                endpoint.RenderSpace,
+                1f,
+                absoluteZ);
+        }
 
         var parent = GetRenderPoseInternal(endpoint.Parent, depth + 1);
-        return new RenderPose(
-            parent.Position + parent.Rotation.RotateVec(endpoint.LocalPosition),
+        return CreateRenderPose(
+            parent.CanonicalPosition + parent.Rotation.RotateVec(endpoint.LocalPosition),
             parent.Rotation + endpoint.LocalRotation,
             parent.CoordinateSpace,
             endpoint.RenderSpace,
             endpoint.RenderSpace,
-            1f);
+            1f,
+            endpoint.AbsoluteZ ?? parent.AbsoluteZ);
     }
 
     private static float GetSegmentAlpha(RenderPoseState state)
@@ -702,16 +1043,27 @@ public sealed partial class TransformSystem : SharedTransformSystem
     private RenderPose ResolveLastRenderedEndpoint(in RenderPoseEndpoint endpoint, int depth)
     {
         if (!endpoint.Parent.IsValid() || depth >= MaxTransformDepth)
-            return new RenderPose(endpoint.LocalPosition, endpoint.LocalRotation, endpoint.RenderSpace);
+        {
+            var absoluteZ = endpoint.AbsoluteZ ?? GetMapDepth(endpoint.RenderSpace);
+            return CreateRenderPose(
+                endpoint.LocalPosition,
+                endpoint.LocalRotation,
+                endpoint.RenderSpace,
+                endpoint.RenderSpace,
+                endpoint.RenderSpace,
+                1f,
+                absoluteZ);
+        }
 
         var parent = GetLastRenderedPoseInternal(endpoint.Parent, depth + 1);
-        return new RenderPose(
-            parent.Position + parent.Rotation.RotateVec(endpoint.LocalPosition),
+        return CreateRenderPose(
+            parent.CanonicalPosition + parent.Rotation.RotateVec(endpoint.LocalPosition),
             parent.Rotation + endpoint.LocalRotation,
             parent.CoordinateSpace,
             endpoint.RenderSpace,
             endpoint.RenderSpace,
-            1f);
+            1f,
+            endpoint.AbsoluteZ ?? parent.AbsoluteZ);
     }
 
     private RenderPose GetLastRenderedPoseInternal(EntityUid uid, int depth, TransformComponent? xform = null)
@@ -724,16 +1076,28 @@ public sealed partial class TransformSystem : SharedTransformSystem
 
         var renderSpace = xform.MapUid ?? EntityUid.Invalid;
         if (!xform.ParentUid.IsValid())
-            return new RenderPose(xform.LocalPosition, xform.LocalRotation, renderSpace);
+        {
+            var absoluteZ = GetOwnAbsoluteZ(uid, renderSpace) ?? GetMapDepth(renderSpace);
+            return CreateRenderPose(xform.LocalPosition, xform.LocalRotation, renderSpace, renderSpace, renderSpace, 1f, absoluteZ);
+        }
 
         var parent = GetLastRenderedPoseInternal(xform.ParentUid, depth + 1);
-        return parent with { Position = parent.Position + parent.Rotation.RotateVec(xform.LocalPosition), Rotation = parent.Rotation + xform.LocalRotation };
+        return CreateRenderPose(
+            parent.CanonicalPosition + parent.Rotation.RotateVec(xform.LocalPosition),
+            parent.Rotation + xform.LocalRotation,
+            parent.CoordinateSpace,
+            parent.SourceRenderSpace,
+            parent.TargetRenderSpace,
+            parent.RenderSpaceAlpha,
+            GetOwnAbsoluteZ(uid, renderSpace) ?? parent.AbsoluteZ);
     }
 
     private bool TryCreateEndpoint(
+        EntityUid uid,
         in EntityCoordinates coordinates,
         Angle rotation,
-        out RenderPoseEndpoint endpoint)
+        out RenderPoseEndpoint endpoint,
+        float? localHeightOverride = null)
     {
         if (!coordinates.EntityId.IsValid()
             || !XformQuery.TryGetComponent(coordinates.EntityId, out var parent)
@@ -743,25 +1107,65 @@ public sealed partial class TransformSystem : SharedTransformSystem
             return false;
         }
 
-        endpoint = new RenderPoseEndpoint(coordinates.EntityId, coordinates.Position, rotation, renderSpace);
+        float? absoluteZ = null;
+        if (_zLevels.TryGetMapDepth(renderSpace, out var depth))
+        {
+            var localHeight = localHeightOverride;
+            if (localHeight == null && _zPresentationQuery.TryComp(uid, out var presentation))
+                localHeight = presentation.LocalHeight;
+
+            if (localHeight is { } height)
+                absoluteZ = ZLevelProjection.GetAbsoluteZ(depth.Value, height);
+        }
+
+        endpoint = new RenderPoseEndpoint(coordinates.EntityId, coordinates.Position, rotation, renderSpace, absoluteZ);
         return true;
     }
 
-    private bool TryBindRenderPoseToParent(in RenderPose pose, EntityUid parentUid, out RenderPoseEndpoint endpoint)
+    private float? GetOwnAbsoluteZ(EntityUid uid, EntityUid renderSpace)
     {
-        if (!parentUid.IsValid()
-            || !XformQuery.TryGetComponent(parentUid, out var parentXform)
-            || parentXform.MapUid is not { } renderSpace)
+        if (!_zPresentationQuery.TryComp(uid, out var presentation) ||
+            !_zLevels.TryGetMapDepth(renderSpace, out var depth))
         {
-            endpoint = default;
-            return false;
+            return null;
         }
 
-        var parent = GetLastRenderedPoseInternal(parentUid, 0, parentXform);
-        var localPosition = (-parent.Rotation).RotateVec(pose.Position - parent.Position);
-        var localRotation = pose.Rotation - parent.Rotation;
-        endpoint = new RenderPoseEndpoint(parentUid, localPosition, localRotation, renderSpace);
-        return true;
+        return ZLevelProjection.GetAbsoluteZ(depth.Value, presentation.LocalHeight);
+    }
+
+    private float GetMapDepth(EntityUid renderSpace)
+        => _zLevels.TryGetMapDepth(renderSpace, out var depth) ? depth.Value : 0f;
+
+    private RenderPose CreateRenderPose(
+        Vector2 canonicalPosition,
+        Angle rotation,
+        EntityUid coordinateSpace,
+        EntityUid sourceRenderSpace,
+        EntityUid targetRenderSpace,
+        float renderSpaceAlpha,
+        float absoluteZ)
+    {
+        var position = canonicalPosition;
+        var referenceDepth = 0;
+        var projectionOffset = Vector2.Zero;
+        if (_zLevels.TryGetMapData(coordinateSpace, out var zMap, out var network))
+        {
+            referenceDepth = zMap.Depth;
+            projectionOffset = network.ProjectionOffset;
+            position = ZLevelProjection.Project(canonicalPosition, absoluteZ, referenceDepth, projectionOffset);
+        }
+
+        return new RenderPose(
+            position,
+            canonicalPosition,
+            rotation,
+            coordinateSpace,
+            sourceRenderSpace,
+            targetRenderSpace,
+            renderSpaceAlpha,
+            absoluteZ,
+            referenceDepth,
+            projectionOffset);
     }
 
     /// <summary>
@@ -868,7 +1272,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
     /// <summary>
     /// Enumerates active render interpolation state for debugging.
     /// </summary>
-    internal IEnumerable<RenderPoseDebugData> GetRenderPoseDebugData()
+    public IEnumerable<RenderPoseDebugData> GetRenderPoseDebugData()
     {
         foreach (var uid in _renderPoses.Keys)
         {
@@ -880,7 +1284,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
     /// <summary>
     /// Gets active render interpolation state for an entity.
     /// </summary>
-    internal bool TryGetRenderPoseDebugData(EntityUid uid, out RenderPoseDebugData data)
+    public bool TryGetRenderPoseDebugData(EntityUid uid, out RenderPoseDebugData data)
     {
         if (!_renderPoses.TryGetValue(uid, out var state)
             || !XformQuery.TryGetComponent(uid, out var xform))
@@ -893,9 +1297,19 @@ public sealed partial class TransformSystem : SharedTransformSystem
         var source = ResolveEndpoint(state.Source, 0);
         var target = ResolveEndpoint(state.Target, 0);
         var rendered = GetRenderPoseInternal(uid, 0, xform);
+        var renderSpace = xform.MapUid ?? EntityUid.Invalid;
+        var simulationZ = GetOwnAbsoluteZ(uid, renderSpace) ?? GetMapDepth(renderSpace);
         data = new RenderPoseDebugData(
             uid,
-            new RenderPose(simulation.WorldPosition, simulation.WorldRotation, xform.MapUid ?? EntityUid.Invalid),
+            state.Source.Parent,
+            CreateRenderPose(
+                simulation.WorldPosition,
+                simulation.WorldRotation,
+                renderSpace,
+                renderSpace,
+                renderSpace,
+                1f,
+                simulationZ),
             rendered,
             source,
             target,
@@ -906,7 +1320,8 @@ public sealed partial class TransformSystem : SharedTransformSystem
             state.Type,
             state.Alpha,
             state.CorrectionTranslation,
-            state.CorrectionRotation);
+            state.CorrectionRotation,
+            state.CorrectionZ);
         return true;
     }
 
@@ -924,6 +1339,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
         public float LastFramePhase;
         public Vector2 CorrectionTranslation;
         public Angle CorrectionRotation;
+        public float CorrectionZ;
         public float CorrectionRemaining;
         public bool PendingPredictionReplay;
         public bool SnapRotation;
@@ -935,14 +1351,18 @@ public sealed partial class TransformSystem : SharedTransformSystem
 /// </summary>
 public readonly record struct RenderPose(
     Vector2 Position,
+    Vector2 CanonicalPosition,
     Angle Rotation,
     EntityUid CoordinateSpace,
     EntityUid SourceRenderSpace,
     EntityUid TargetRenderSpace,
-    float RenderSpaceAlpha)
+    float RenderSpaceAlpha,
+    float AbsoluteZ,
+    int ReferenceDepth,
+    Vector2 ProjectionOffset)
 {
     public RenderPose(Vector2 position, Angle rotation, EntityUid renderSpace)
-        : this(position, rotation, renderSpace, renderSpace, renderSpace, 1f)
+        : this(position, position, rotation, renderSpace, renderSpace, renderSpace, 1f, 0f, 0, Vector2.Zero)
     {
     }
 }
@@ -951,12 +1371,47 @@ internal readonly record struct RenderPoseEndpoint(
     EntityUid Parent,
     Vector2 LocalPosition,
     Angle LocalRotation,
-    EntityUid RenderSpace);
+    EntityUid RenderSpace,
+    float? AbsoluteZ);
+
+/// <summary>
+/// One renderer-facing sample of an entity on an integer z layer.
+/// </summary>
+public readonly record struct RenderLayerSample(
+    EntityUid Map,
+    Vector2 Position,
+    Angle Rotation,
+    float Opacity,
+    int Depth);
+
+/// <summary>
+/// A presented entity pose expressed in the controlling eye's map after combining the renderer layers visible
+/// in that viewport.
+/// </summary>
+public readonly record struct PresentedViewSample(
+    Vector2 Position,
+    Angle Rotation,
+    float Opacity,
+    float AbsoluteZ);
+
+/// <summary>
+/// Renderer-selected z presentation values for debug overlays and commands.
+/// </summary>
+public readonly record struct ZLevelRenderDebugData(
+    int MapDepth,
+    float AuthoredLocalHeight,
+    float PresentedLocalHeight,
+    float AbsoluteZ,
+    Vector2 ProjectedPosition,
+    Vector2 CanonicalPosition,
+    int LayerCount,
+    RenderLayerSample FirstLayer,
+    RenderLayerSample SecondLayer);
 
 /// <summary>
 /// The source of an active render interpolation.
 /// </summary>
-internal enum RenderInterpolationType : byte
+public enum RenderInterpolationType : byte
 {
     NetworkInterpolation,
     PredictionInterpolation,
@@ -994,8 +1449,9 @@ public struct RenderSpaceCompatibilityEvent
 /// <summary>
 /// Diagnostic data for an active render interpolation.
 /// </summary>
-internal readonly record struct RenderPoseDebugData(
+public readonly record struct RenderPoseDebugData(
     EntityUid Entity,
+    EntityUid SourceParent,
     RenderPose Simulation,
     RenderPose Rendered,
     RenderPose Source,
@@ -1007,4 +1463,5 @@ internal readonly record struct RenderPoseDebugData(
     RenderInterpolationType Type,
     float Alpha,
     Vector2 CorrectionTranslation,
-    Angle CorrectionRotation);
+    Angle CorrectionRotation,
+    float CorrectionZ);

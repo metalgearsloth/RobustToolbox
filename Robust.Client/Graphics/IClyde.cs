@@ -6,6 +6,7 @@ using System.Numerics;
 using System.Threading.Tasks;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Graphics;
+using Robust.Shared.Map;
 using Robust.Shared.Maths;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -91,7 +92,7 @@ namespace Robust.Client.Graphics
         /// Gets the clear color for the specified map viewport.
         /// </summary>
         [Pure]
-        Color GetClearColor(EntityUid mapUid);
+        Color GetClearColor(EntityUid mapUid, MapId mapId = default, int zLevelOffset = 0);
 
         /// <summary>
         /// Applies a blur to the specified render target. Requires a separate buffer with similar properties to draw intermediate steps into.

@@ -29,7 +29,7 @@ public abstract partial class TileDebugOverlay : Overlay, IPostInjectInit
     [Dependency] protected IUserInterfaceManager Ui = default!;
     [Dependency] protected IResourceCache Cache = default!;
 
-    protected SharedTransformSystem Transform = default!;
+    protected TransformSystem Transform = default!;
     protected MapSystem Map = default!;
     protected EntityLookupSystem Lookup = default!;
 
@@ -40,7 +40,7 @@ public abstract partial class TileDebugOverlay : Overlay, IPostInjectInit
 
     void IPostInjectInit.PostInject()
     {
-        Transform = Entity.System<SharedTransformSystem>();
+        Transform = Entity.System<TransformSystem>();
         Map = Entity.System<MapSystem>();
         Lookup = Entity.System<EntityLookupSystem>();
         var font = Cache.GetResource<FontResource>("/Fonts/NotoSans/NotoSans-Regular.ttf");
@@ -55,7 +55,8 @@ public abstract partial class TileDebugOverlay : Overlay, IPostInjectInit
     protected internal override void Draw(in OverlayDrawArgs args)
     {
         Grids.Clear();
-        if (args.Viewport.Eye?.Position.MapId is not {} map || map == MapId.Nullspace)
+        var map = args.MapId;
+        if (map == MapId.Nullspace)
             return;
 
         Map.FindGridsIntersecting(map, args.WorldBounds, ref Grids);
@@ -79,7 +80,11 @@ public abstract partial class TileDebugOverlay : Overlay, IPostInjectInit
     protected virtual void DrawScreen(in OverlayDrawArgs args, Entity<MapGridComponent> grid)
     {
         var handle = args.ScreenHandle;
-        var (_, _, matrix, invMatrix) = Transform.GetWorldPositionRotationMatrixWithInv(grid.Owner);
+        if (!args.TryGetEntityRenderMatrix(grid.Owner, out var matrix, out _) ||
+            !Matrix3x2.Invert(matrix, out var invMatrix))
+        {
+            return;
+        }
         var gridBounds = invMatrix.TransformBox(args.WorldBounds).Enlarged(grid.Comp.TileSize * 2);
         foreach (var tile in Map.GetLocalTilesIntersecting(grid, grid, gridBounds))
         {
@@ -110,8 +115,8 @@ public abstract partial class TileDebugOverlay : Overlay, IPostInjectInit
             return;
 
         var local = Map.WorldToLocal(grid, comp, coords.Position);
-        var x = (int) Math.Floor(local.X / comp.TileSize);
-        var y = (int) Math.Floor(local.Y / comp.TileSize);
+        var x = (int)Math.Floor(local.X / comp.TileSize);
+        var y = (int)Math.Floor(local.Y / comp.TileSize);
         var indices = new Vector2i(x, y);
 
         DrawTooltip(handle, mousePos.Position, local, indices, (grid, comp));
@@ -136,15 +141,22 @@ public abstract partial class TileDebugOverlay : Overlay, IPostInjectInit
 
     protected virtual void DrawTileText(DrawingHandleScreen handle, Vector2 tileCentre, Vector2i indices, Entity<MapGridComponent> grid)
     {
-        if (GetText(indices, grid) is {} text)
+        if (GetText(indices, grid) is { } text)
             handle.DrawString(Font, tileCentre, text);
     }
 
     protected virtual void DrawWorld(in OverlayDrawArgs args, Entity<MapGridComponent> grid)
     {
         var handle = args.WorldHandle;
-        var (_, _, matrix, invMatrix) = Transform.GetWorldPositionRotationMatrixWithInv(grid.Owner);
+        if (!args.TryGetEntityRenderMatrix(grid.Owner, out var matrix, out var opacity) ||
+            !Matrix3x2.Invert(matrix, out var invMatrix))
+        {
+            return;
+        }
+
         var gridBounds = invMatrix.TransformBox(args.WorldBounds).Enlarged(grid.Comp.TileSize * 2);
+        var oldModulate = handle.Modulate;
+        handle.Modulate = oldModulate * Color.White.WithAlpha(opacity);
         foreach (var tile in Map.GetLocalTilesIntersecting(grid, grid, gridBounds))
         {
             handle.SetTransform(matrix);
@@ -152,6 +164,8 @@ public abstract partial class TileDebugOverlay : Overlay, IPostInjectInit
             if (gridBounds.Intersects(tileBounds))
                 DrawTile(handle, tileBounds, tile.GridIndices, grid);
         }
+
+        handle.Modulate = oldModulate;
     }
 
     protected virtual void DrawTile(DrawingHandleWorld handle, Box2 tile, Vector2i indices, Entity<MapGridComponent> grid)

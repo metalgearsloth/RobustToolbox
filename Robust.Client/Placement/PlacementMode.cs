@@ -116,16 +116,19 @@ namespace Robust.Client.Placement
 
             var dirAng = pManager.Direction.ToAngle();
             var spriteSys = pManager.EntityManager.System<SpriteSystem>();
-            var transformSys = pManager.EntityManager.System<SharedTransformSystem>();
             foreach (var coordinate in locationcollection)
             {
                 if (!coordinate.IsValid(pManager.EntityManager))
                     return; // Just some paranoia just in case
-                var worldPos = transformSys.ToMapCoordinates(coordinate).Position;
-                var worldRot = transformSys.GetWorldRotation(coordinate.EntityId) + dirAng;
+                if (!args.TryGetEntityRenderLayer(coordinate.EntityId, out var parentLayer))
+                    continue;
 
-                sprite.Color = IsValidPosition(coordinate) ? ValidPlaceColor : InvalidPlaceColor;
-                var rot = args.Viewport.Eye?.Rotation ?? default;
+                var worldPos = parentLayer.Position + parentLayer.Rotation.RotateVec(coordinate.Position);
+                var worldRot = parentLayer.Rotation + dirAng;
+
+                var color = IsValidPosition(coordinate) ? ValidPlaceColor : InvalidPlaceColor;
+                sprite.Color = color.WithAlpha(color.A * parentLayer.Opacity);
+                var rot = args.LayerEye?.Rotation ?? default;
                 spriteSys.RenderSprite((uid.Value, sprite), args.WorldHandle, rot, worldRot, worldPos);
             }
         }

@@ -17,6 +17,8 @@ namespace Robust.Client.Graphics.Clyde
     {
         [ViewVariables]
         private ClydeShaderInstance _defaultShader = default!;
+        private ClydeShaderInstance _zLevelCompositeShader = default!;
+        private ClydeShaderInstance _zLevelBelowPostShader = default!;
 
         private string _shaderLibrary = default!;
 
@@ -174,6 +176,17 @@ namespace Robust.Client.Graphics.Clyde
                 .GetResource<ShaderSourceResource>("/Shaders/Internal/default-sprite.swsl");
 
             _defaultShader = (ClydeShaderInstance) InstanceShader(defaultLoadedShader);
+            _zLevelCompositeShader = (ClydeShaderInstance) InstanceShader(
+                defaultLoadedShader,
+                lighting: false,
+                mode: ShaderBlendMode.Premultiplied);
+
+            var zLevelBelowShader = _resourceCache
+                .GetResource<ShaderSourceResource>("/Shaders/Internal/zlevel-below-postshader.swsl");
+            _zLevelBelowPostShader = (ClydeShaderInstance) InstanceShader(
+                zLevelBelowShader,
+                lighting: false,
+                mode: ShaderBlendMode.Premultiplied);
 
             _queuedShaderInstance = _defaultShader;
         }

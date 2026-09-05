@@ -213,12 +213,14 @@ namespace Robust.UnitTesting.Server
             container.Register<IStatusHost, StatusHost>();
             container.Register<ITransferManager, ServerTransferManager>();
 
-            var realReflection = new ServerReflectionManager();
-            realReflection.LoadAssemblies(new List<Assembly>(2)
+            var engineAssemblies = new List<Assembly>(2)
             {
                 AppDomain.CurrentDomain.GetAssemblyByName("Robust.Shared"),
                 AppDomain.CurrentDomain.GetAssemblyByName("Robust.Server"),
-            });
+            };
+
+            var realReflection = new ServerReflectionManager();
+            realReflection.LoadAssemblies(engineAssemblies);
             realReflection.EnsureGetAllTypesCache();
 
             var reflectionManager = new Mock<IReflectionManager>();
@@ -327,6 +329,9 @@ namespace Robust.UnitTesting.Server
             compFactory.RegisterClass<JointComponent>();
             compFactory.RegisterClass<EyeComponent>();
             compFactory.RegisterClass<GridTreeComponent>();
+            compFactory.RegisterClass<ZLevelMapComponent>();
+            compFactory.RegisterClass<ZLevelMapNetworkComponent>();
+            compFactory.RegisterClass<ZLevelPresentationComponent>();
             compFactory.RegisterClass<JointRelayTargetComponent>();
             compFactory.RegisterClass<BroadphaseComponent>();
             compFactory.RegisterClass<ContainerManagerComponent>();
@@ -351,6 +356,8 @@ namespace Robust.UnitTesting.Server
 
             entitySystemMan.LoadExtraSystemType<PhysicsSystem>();
             entitySystemMan.LoadExtraSystemType<SharedGridTraversalSystem>();
+            entitySystemMan.LoadExtraSystemType<ZLevelSystem>();
+            entitySystemMan.LoadExtraSystemType<Robust.Server.GameObjects.ZLevelPresentationSystem>();
             entitySystemMan.LoadExtraSystemType<ContainerSystem>();
             entitySystemMan.LoadExtraSystemType<JointSystem>();
             entitySystemMan.LoadExtraSystemType<MapSystem>();
@@ -368,6 +375,8 @@ namespace Robust.UnitTesting.Server
             entitySystemMan.LoadExtraSystemType<InputSystem>();
             entitySystemMan.LoadExtraSystemType<PvsOverrideSystem>();
 
+            LoadGeneratedComponentNetworkSystems(entitySystemMan, compFactory, engineAssemblies);
+
             _systemDelegate?.Invoke(entitySystemMan);
 
             entityMan.Startup();
@@ -378,6 +387,14 @@ namespace Robust.UnitTesting.Server
             var protoMan = container.Resolve<IPrototypeManager>();
             protoMan.Initialize();
             protoMan.RegisterKind(typeof(EntityPrototype), typeof(EntityCategoryPrototype));
+            protoMan.LoadString("""
+                - type: entity
+                  id: ZLevelMapNetwork
+                  components:
+                  - type: Transform
+                    gridTraversal: false
+                  - type: ZLevelMapNetwork
+                """);
 
             var resourceMan = container.Resolve<IResourceManager>();
             _addRootDelegate?.Invoke(resourceMan);
@@ -391,6 +408,28 @@ namespace Robust.UnitTesting.Server
             protoMan.ResolveResults();
 
             return this;
+        }
+
+        private static void LoadGeneratedComponentNetworkSystems(
+            IEntitySystemManager entitySystemMan,
+            IComponentFactory compFactory,
+            IEnumerable<Assembly> assemblies)
+        {
+            foreach (var assembly in assemblies)
+            {
+                foreach (var type in assembly.GetTypes())
+                {
+                    if (!typeof(IEntitySystem).IsAssignableFrom(type) ||
+                        !type.Name.EndsWith("_AutoNetworkSystem", StringComparison.Ordinal) ||
+                        type.DeclaringType is not { } componentType ||
+                        !compFactory.TryGetRegistration(componentType, out _))
+                    {
+                        continue;
+                    }
+
+                    entitySystemMan.LoadExtraSystemType(type);
+                }
+            }
         }
 
         public static ISimulationFactory NewSimulation()

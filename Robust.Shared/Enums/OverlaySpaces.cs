@@ -60,5 +60,11 @@ namespace Robust.Shared.Enums
         /// Called after GLClear but before FOV applied to the lighting buffer.
         /// </summary>
         BeforeLighting = 1 << 9,
+
+        /// <summary>
+        ///     Called once after all visible z-level world layers have been composited. Eye-owned fullscreen
+        ///     effects should use this space so they consume the completed world rather than each layer separately.
+        /// </summary>
+        PostZLevel = 1 << 10,
     }
 }

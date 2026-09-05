@@ -4,6 +4,7 @@ using System.Linq;
 using System.Numerics;
 using NUnit.Framework;
 using Robust.Client.GameObjects;
+using Robust.Client.Graphics.Clyde;
 using Robust.Client.Timing;
 using Robust.Shared;
 using Robust.Shared.Configuration;
@@ -12,6 +13,7 @@ using Robust.Shared.GameObjects;
 using Robust.Shared.GameStates;
 using Robust.Shared.IoC;
 using Robust.Shared.Map;
+using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
 using Robust.Shared.Timing;
 
@@ -29,6 +31,8 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
     private TransformSystem _transforms = default!;
     private SpriteSystem _sprites = default!;
     private EyeSystem _eyes = default!;
+    private ZLevelSystem _zLevels = default!;
+    private ZLevelPresentationSystem _zPresentation = default!;
     private IClientGameTiming _timing = default!;
 
     [OneTimeSetUp]
@@ -41,6 +45,8 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         _transforms = _entities.System<TransformSystem>();
         _sprites = _entities.System<SpriteSystem>();
         _eyes = _entities.System<EyeSystem>();
+        _zLevels = _entities.System<ZLevelSystem>();
+        _zPresentation = _entities.System<ZLevelPresentationSystem>();
         _timing = IoCManager.Resolve<IClientGameTiming>();
     }
 
@@ -653,6 +659,355 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         });
     }
 
+    [TestCase(0f)]
+    [TestCase(0.7f)]
+    public void RendererLayerSamplesBlendOneContinuousProjectedPose(float verticalOffset)
+    {
+        var (maps, _, network) = CreateZNetwork(3, new Vector2(0f, verticalOffset));
+        var canonical = new Vector2(2f, 3f);
+        var uid = _entities.SpawnEntity(null, new EntityCoordinates(maps[1], canonical));
+        var xform = _entities.GetComponent<TransformComponent>(uid);
+        var sprite = _entities.AddComponent<SpriteComponent>(uid);
+        var authoredOffset = new Vector2(0.125f, -0.25f);
+        _sprites.SetOffset((uid, sprite), authoredOffset);
+        _entities.AddComponent<ZLevelPresentationComponent>(uid);
+        MakeRemote(xform);
+
+        ApplyRemote(() => _zPresentation.SetLocalHeight(uid, 1f));
+        SetHalfTick();
+        _transforms.FrameUpdate(0f);
+
+        var pose = _transforms.GetRenderWorldPose(uid, xform);
+        var samples = new RenderLayerSample[2];
+        var count = _transforms.GetRenderLayerSamples(uid, samples, xform);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(count, Is.EqualTo(2));
+            Assert.That(pose.AbsoluteZ, Is.EqualTo(1.5f).Within(0.001f));
+            AssertVector(pose.CanonicalPosition, canonical);
+            AssertVector(pose.Position, canonical + network.Comp.ProjectionOffset * 0.5f);
+            Assert.That(samples[0].Map, Is.EqualTo(maps[1]));
+            Assert.That(samples[1].Map, Is.EqualTo(maps[2]));
+            Assert.That(samples[0].Opacity, Is.EqualTo(0.5f).Within(0.001f));
+            Assert.That(samples[1].Opacity, Is.EqualTo(0.5f).Within(0.001f));
+            Assert.That(samples[0].Opacity + samples[1].Opacity, Is.EqualTo(1f).Within(0.001f));
+            Assert.That(sprite.Offset, Is.EqualTo(authoredOffset),
+                "z presentation must not rewrite the authored sprite offset");
+        });
+
+        for (var i = 0; i < count; i++)
+        {
+            var layerEyeOffset = ZLevelProjection.GetLayerEyeOffset(
+                samples[i].Depth - pose.ReferenceDepth,
+                network.Comp.ProjectionOffset);
+            AssertVector(samples[i].Position - layerEyeOffset, pose.Position,
+                "both layer draws must land at the same final projected position");
+        }
+
+        SetTickAlpha(1f);
+        _transforms.FrameUpdate(0f);
+        count = _transforms.GetRenderLayerSamples(uid, samples, xform);
+        Assert.Multiple(() =>
+        {
+            Assert.That(count, Is.EqualTo(1), "an entity outside a transition must be drawn once");
+            Assert.That(samples[0].Map, Is.EqualTo(maps[2]));
+            Assert.That(samples[0].Opacity, Is.EqualTo(1f));
+        });
+    }
+
+    [TestCase(0f)]
+    [TestCase(0.7f)]
+    public void MapOverlayCoordinatesProjectIntoTheSelectedRenderLayer(float verticalOffset)
+    {
+        var (maps, mapIds, network) = CreateZNetwork(3, new Vector2(0f, verticalOffset));
+        var lower = new MapCoordinates(new Vector2(2f, 3f), mapIds[0]);
+        var upper = new MapCoordinates(new Vector2(2f, 3f), mapIds[2]);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(_transforms.TryProjectMapCoordinatesForLayer(lower, maps[2], out var lowerOnUpper), Is.True);
+            AssertVector(lowerOnUpper, lower.Position - network.Comp.ProjectionOffset * 2f);
+
+            Assert.That(_transforms.TryProjectMapCoordinatesForLayer(upper, maps[0], out var upperOnLower), Is.True);
+            AssertVector(upperOnLower, upper.Position + network.Comp.ProjectionOffset * 2f);
+
+            Assert.That(_transforms.TryProjectMapCoordinatesForLayer(lower, maps[0], out var sameLayer), Is.True);
+            AssertVector(sameLayer, lower.Position);
+        });
+    }
+
+    [TestCase(0f)]
+    [TestCase(0.7f)]
+    public void OverlayQueryBoundsAreUnprojectedIntoVisibleMaps(float verticalOffset)
+    {
+        var (maps, mapIds, _) = CreateZNetwork(3, new Vector2(0f, verticalOffset));
+        var layerBounds = new Box2Rotated(
+            new Box2(-2f, -3f, 4f, 5f),
+            Angle.FromDegrees(20),
+            new Vector2(1f, 1f));
+
+        Assert.That(
+            _transforms.TryGetMapRenderBoundsForLayer(
+                maps[0],
+                maps[2],
+                layerBounds,
+                out var sourceMapId,
+                out var sourceBounds),
+            Is.True);
+
+        var projectedOrigin = ZLevelProjection.Reproject(
+            Vector2.Zero,
+            fromReferenceDepth: 0,
+            toReferenceDepth: 2,
+            new Vector2(0f, verticalOffset));
+        Assert.Multiple(() =>
+        {
+            Assert.That(sourceMapId, Is.EqualTo(mapIds[0]));
+            AssertVector(sourceBounds.Box.BottomLeft, layerBounds.Box.BottomLeft - projectedOrigin);
+            AssertVector(sourceBounds.Box.TopRight, layerBounds.Box.TopRight - projectedOrigin);
+            AssertVector(sourceBounds.Origin, layerBounds.Origin - projectedOrigin);
+            Assert.That(sourceBounds.Rotation, Is.EqualTo(layerBounds.Rotation));
+        });
+    }
+
+    [TestCase(0f)]
+    [TestCase(0.7f)]
+    public void PostStackEntityAttachmentCombinesOnlyVisibleRendererSamples(float verticalOffset)
+    {
+        var (maps, _, network) = CreateZNetwork(3, new Vector2(0f, verticalOffset));
+        var canonical = new Vector2(2f, 3f);
+        var uid = _entities.SpawnEntity(null, new EntityCoordinates(maps[1], canonical));
+        var xform = _entities.GetComponent<TransformComponent>(uid);
+        _entities.AddComponent<ZLevelPresentationComponent>(uid);
+        MakeRemote(xform);
+
+        ApplyRemote(() => _zPresentation.SetLocalHeight(uid, 1f));
+        SetHalfTick();
+        _transforms.FrameUpdate(0f);
+
+        var allVisible = new HashSet<EntityUid> { maps[1], maps[2] };
+        var upperOnly = new HashSet<EntityUid> { maps[2] };
+        var unrelated = new HashSet<EntityUid> { maps[0] };
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(_transforms.TryGetPresentedViewSample(uid, maps[2], allVisible, out var combined), Is.True);
+            AssertVector(combined.Position, canonical - network.Comp.ProjectionOffset * 0.5f);
+            Assert.That(combined.Opacity, Is.EqualTo(1f).Within(0.001f));
+            Assert.That(combined.AbsoluteZ, Is.EqualTo(1.5f).Within(0.001f));
+
+            Assert.That(_transforms.TryGetPresentedViewSample(uid, maps[2], upperOnly, out var clipped), Is.True);
+            AssertVector(clipped.Position, combined.Position);
+            Assert.That(clipped.Opacity, Is.EqualTo(0.5f).Within(0.001f));
+
+            Assert.That(_transforms.TryGetPresentedViewSample(uid, maps[2], unrelated, out _), Is.False);
+        });
+    }
+
+    [TestCase(0.00001f, 1, 1f)]
+    [TestCase(0.25f, 2, 0.25f)]
+    [TestCase(0.99999f, 1, 1f)]
+    [TestCase(1f, 1, 1f)]
+    [TestCase(1.00001f, 1, 1f)]
+    public void RendererLayerSelectionHandlesIntegerBoundaries(float height, int expectedCount, float upperWeight)
+    {
+        var (maps, _, _) = CreateZNetwork(3, new Vector2(0f, 0.7f));
+        var uid = _entities.SpawnEntity(null, new EntityCoordinates(maps[0], Vector2.Zero));
+        var xform = _entities.GetComponent<TransformComponent>(uid);
+        _entities.AddComponent<ZLevelPresentationComponent>(uid);
+        MakeRemote(xform);
+
+        ApplyRemote(() => _zPresentation.SetLocalHeight(uid, height));
+        SetTickAlpha(1f);
+        _transforms.FrameUpdate(0f);
+
+        var samples = new RenderLayerSample[2];
+        var count = _transforms.GetRenderLayerSamples(uid, samples, xform);
+        Assert.That(count, Is.EqualTo(expectedCount));
+        Assert.That(samples[count - 1].Opacity, Is.EqualTo(upperWeight).Within(0.0001f));
+        if (count == 2)
+            Assert.That(samples[0].Opacity + samples[1].Opacity, Is.EqualTo(1f).Within(0.0001f));
+    }
+
+    [Test]
+    public void CrossLevelGridTransitionFollowsMovingRotatingParentsAndCamera()
+    {
+        var (maps, mapIds, network) = CreateZNetwork(2, new Vector2(0f, 0.7f));
+        var lowerGridEntity = _maps.CreateGridEntity(mapIds[0]);
+        var upperGridEntity = _maps.CreateGridEntity(mapIds[1]);
+        var lowerGrid = lowerGridEntity.Owner;
+        var upperGrid = upperGridEntity.Owner;
+        _maps.SetTile(lowerGridEntity, new Vector2i(1, 0), new Tile(1));
+        _maps.SetTile(upperGridEntity, new Vector2i(1, 0), new Tile(1));
+        _transforms.SetWorldPosition(upperGrid, new Vector2(0.5f, 0f));
+        _transforms.SnapRenderPose(upperGrid);
+
+        var uid = _entities.SpawnEntity(null, new EntityCoordinates(maps[0], Vector2.UnitX));
+        var xform = _entities.GetComponent<TransformComponent>(uid);
+        xform.GridTraversal = false;
+        _transforms.SetCoordinates(uid, xform, new EntityCoordinates(lowerGrid, Vector2.UnitX), Angle.Zero, false);
+        Assert.That(xform.ParentUid, Is.EqualTo(lowerGrid));
+        _entities.AddComponent<ZLevelPresentationComponent>(uid);
+        var eye = _entities.AddComponent<EyeComponent>(uid);
+        MakeRemote(lowerGrid, upperGrid, uid);
+
+        ApplyRemote(() =>
+        {
+            _transforms.SetCoordinates(uid, xform, new EntityCoordinates(upperGrid, Vector2.UnitX), Angle.Zero, false);
+            _transforms.SetWorldPositionRotation(lowerGrid, new Vector2(0f, 1f), Angle.FromDegrees(90));
+            _transforms.SetWorldPositionRotation(upperGrid, new Vector2(0.5f, 1f), Angle.FromDegrees(-90));
+        });
+
+        SetHalfTick();
+        _transforms.FrameUpdate(0f);
+        _eyes.FrameUpdate(0f);
+
+        var halfRoot = new Vector2(MathF.Sqrt(0.5f), 0.5f + MathF.Sqrt(0.5f));
+        var halfTarget = new Vector2(0.5f + MathF.Sqrt(0.5f), 0.5f - MathF.Sqrt(0.5f));
+        var expectedCanonical = Vector2.Lerp(halfRoot, halfTarget, 0.5f);
+        var pose = _transforms.GetRenderWorldPose(uid, xform);
+        Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var debugPose), Is.True);
+        Assert.That(debugPose.SourceParent, Is.EqualTo(lowerGrid));
+        var samples = new RenderLayerSample[2];
+        var count = _transforms.GetRenderLayerSamples(uid, samples, xform);
+
+        Assert.Multiple(() =>
+        {
+            AssertVector(pose.CanonicalPosition, expectedCanonical);
+            Assert.That(pose.AbsoluteZ, Is.EqualTo(0.5f).Within(0.001f));
+            Assert.That(pose.CoordinateSpace, Is.EqualTo(maps[1]));
+            AssertVector(pose.Position, expectedCanonical - network.Comp.ProjectionOffset * 0.5f);
+            Assert.That(count, Is.EqualTo(2));
+            Assert.That(samples[0].Opacity + samples[1].Opacity, Is.EqualTo(1f).Within(0.001f));
+            AssertVector(eye.Eye.Position.Position, pose.Position,
+                "camera and controlled entity must consume the same presented pose");
+            Assert.That(eye.Eye.Position.MapId, Is.EqualTo(mapIds[1]));
+            Assert.That(eye.Eye.PresentedAbsoluteZ, Is.EqualTo(pose.AbsoluteZ).Within(0.001f));
+        });
+
+        var viewport = Box2.CenteredAround(samples[0].Position, new Vector2(0.05f));
+        var queryBounds = _transforms.GetRenderCullingBounds(mapIds[1], viewport);
+        Assert.That(queryBounds.Contains(_transforms.GetWorldPosition(uid)), Is.True,
+            "the target map tree query must retain a source-layer render sample");
+    }
+
+    [TestCase(ParentTransition.GridToMap)]
+    [TestCase(ParentTransition.MapToGrid)]
+    public void CrossLevelGridMapTransitionsUseOneTimeline(ParentTransition transition)
+    {
+        var (maps, mapIds, _) = CreateZNetwork(2, new Vector2(0f, 0.7f));
+        var lowerGrid = _maps.CreateGridEntity(mapIds[0]).Owner;
+        var upperGrid = _maps.CreateGridEntity(mapIds[1]).Owner;
+        _transforms.SetWorldPosition(upperGrid, Vector2.UnitX);
+        _transforms.SnapRenderPose(upperGrid);
+
+        var source = transition == ParentTransition.MapToGrid ? maps[0] : lowerGrid;
+        var destination = transition == ParentTransition.GridToMap ? maps[1] : upperGrid;
+        var destinationLocal = transition == ParentTransition.GridToMap ? Vector2.UnitX : Vector2.Zero;
+        var uid = _entities.SpawnEntity(null, new EntityCoordinates(maps[0], Vector2.Zero));
+        var xform = _entities.GetComponent<TransformComponent>(uid);
+        xform.GridTraversal = false;
+        _transforms.SetCoordinates(uid, xform, new EntityCoordinates(source, Vector2.Zero), Angle.Zero, false);
+        _transforms.SnapRenderPose(uid);
+        _entities.AddComponent<ZLevelPresentationComponent>(uid);
+        MakeRemote(uid);
+
+        ApplyRemote(() => _transforms.SetCoordinates(
+            uid,
+            xform,
+            new EntityCoordinates(destination, destinationLocal),
+            Angle.Zero,
+            false));
+        SetHalfTick();
+        _transforms.FrameUpdate(0f);
+
+        var pose = _transforms.GetRenderWorldPose(uid, xform);
+        var samples = new RenderLayerSample[2];
+        var count = _transforms.GetRenderLayerSamples(uid, samples, xform);
+        Assert.Multiple(() =>
+        {
+            AssertVector(pose.CanonicalPosition, new Vector2(0.5f, 0f));
+            Assert.That(pose.AbsoluteZ, Is.EqualTo(0.5f).Within(0.001f));
+            Assert.That(count, Is.EqualTo(2));
+            Assert.That(samples[0].Opacity, Is.EqualTo(0.5f).Within(0.001f));
+            Assert.That(samples[1].Opacity, Is.EqualTo(0.5f).Within(0.001f));
+        });
+    }
+
+    [Test]
+    public void RendererEffectSelectionHonorsReplicatedShaderConfiguration()
+    {
+        var (_, _, network) = CreateZNetwork(2, new Vector2(0f, 0.7f));
+
+        _zLevels.SetLowerLevelEffects(
+            network.Owner,
+            enabled: false,
+            shader: "game-z-shader",
+            blurRadius: 4f,
+            darkenStrength: 0.6f,
+            tint: new Color(0.1f, 0.2f, 0.3f, 0.4f));
+        var disabled = Clyde.ResolveZLevelLayerEffects(network.Comp, -1, gameShaderAvailable: true);
+
+        _zLevels.SetLowerLevelEffects(
+            network.Owner,
+            enabled: true,
+            shader: "game-z-shader",
+            blurRadius: 4f,
+            darkenStrength: 0.6f,
+            tint: new Color(0.1f, 0.2f, 0.3f, 0.4f));
+        var game = Clyde.ResolveZLevelLayerEffects(network.Comp, -1, gameShaderAvailable: true);
+        var fallback = Clyde.ResolveZLevelLayerEffects(network.Comp, -1, gameShaderAvailable: false);
+        var transitioning = Clyde.ResolveZLevelLayerEffects(
+            network.Comp,
+            -1,
+            gameShaderAvailable: false,
+            effectStrength: 0.5f);
+        var current = Clyde.ResolveZLevelLayerEffects(network.Comp, 0, gameShaderAvailable: true);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(disabled.Shader, Is.EqualTo(Clyde.ZLevelPostShaderSelection.None));
+            Assert.That(disabled.Tint, Is.EqualTo(new Color(0.1f, 0.2f, 0.3f, 0.4f)));
+            Assert.That(game.Shader, Is.EqualTo(Clyde.ZLevelPostShaderSelection.GameShader));
+            Assert.That(fallback.Shader, Is.EqualTo(Clyde.ZLevelPostShaderSelection.EngineDefault));
+            Assert.That(fallback.BlurRadius, Is.EqualTo(4f));
+            Assert.That(fallback.DarkenStrength, Is.EqualTo(0.6f));
+            Assert.That(transitioning.Strength, Is.EqualTo(0.5f));
+            Assert.That(transitioning.BlurRadius, Is.EqualTo(2f));
+            Assert.That(transitioning.DarkenStrength, Is.EqualTo(0.3f));
+            Assert.That(transitioning.Tint.A, Is.EqualTo(0.2f).Within(0.001f));
+            Assert.That(current.Shader, Is.EqualTo(Clyde.ZLevelPostShaderSelection.None));
+            Assert.That(current.Tint, Is.EqualTo(Color.Transparent));
+        });
+    }
+
+    [Test]
+    public void ProjectedRendererSamplesDriveYSort()
+    {
+        var (maps, _, _) = CreateZNetwork(2, new Vector2(0f, 0.7f));
+        var lower = _entities.SpawnEntity(null, new EntityCoordinates(maps[0], new Vector2(0f, 0.2f)));
+        var crossing = _entities.SpawnEntity(null, new EntityCoordinates(maps[0], Vector2.Zero));
+        _entities.AddComponent<ZLevelPresentationComponent>(crossing);
+        _zPresentation.SetLocalHeight(crossing, 0.5f);
+        SetHalfTick();
+        _transforms.FrameUpdate(0f);
+
+        Assert.That(_transforms.TryGetRenderLayerSample(lower, maps[0], out var lowerSample), Is.True);
+        Assert.That(_transforms.TryGetRenderLayerSample(crossing, maps[0], out var crossingSample), Is.True);
+
+        var localBounds = new Box2(-0.5f, -0.5f, 0.5f, 0.5f);
+        var scale = new Vector2(1f, -1f);
+        var lowerBounds = Clyde.TransformCenteredBox(localBounds, 0f, lowerSample.Position, scale);
+        var crossingBounds = Clyde.TransformCenteredBox(localBounds, 0f, crossingSample.Position, scale);
+        var lowerSort = new Clyde.SpriteSortItem(0, 0, 0, lowerBounds.Top, lower);
+        var crossingSort = new Clyde.SpriteSortItem(1, 0, 0, crossingBounds.Top, crossing);
+
+        Assert.That(Math.Sign(lowerSort.CompareTo(crossingSort)),
+            Is.EqualTo(Math.Sign(lowerBounds.Top.CompareTo(crossingBounds.Top))));
+        Assert.That(lowerBounds.Top, Is.Not.EqualTo(crossingBounds.Top),
+            "continuous z projection must participate in the renderer's y-sort key");
+    }
 
     [TestCase(30, 144f)]
     [TestCase(60, 144f)]
@@ -808,6 +1163,24 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         SetTickAlpha(1f);
         _transforms.FrameUpdate(0f);
         AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(2f, 0f));
+    }
+
+    private (EntityUid[] Maps, MapId[] MapIds, Entity<ZLevelMapNetworkComponent> Network) CreateZNetwork(
+        int count,
+        Vector2 projectionOffset)
+    {
+        var maps = new EntityUid[count];
+        var mapIds = new MapId[count];
+        for (var i = 0; i < count; i++)
+            maps[i] = _maps.CreateMap(out mapIds[i]);
+
+        var networkUid = _entities.SpawnEntity(null, MapCoordinates.Nullspace);
+        var networkComp = _entities.AddComponent<ZLevelMapNetworkComponent>(networkUid);
+        Entity<ZLevelMapNetworkComponent> network = (networkUid, networkComp);
+        var depths = maps.Select((map, depth) => (map, depth)).ToDictionary(pair => pair.map, pair => pair.depth);
+        Assert.That(_zLevels.TryAddMaps(network, depths), Is.True);
+        _zLevels.SetProjectionOffset(networkUid, projectionOffset);
+        return (maps, mapIds, network);
     }
 
     private (EntityUid Uid, MapId Id) CreateMap()

@@ -1,0 +1,23 @@
+uniform mediump float blur_radius;
+uniform mediump float darken_strength;
+uniform mediump vec3 blur_color;
+
+void fragment()
+{
+    highp vec2 texel = TEXTURE_PIXEL_SIZE * blur_radius;
+    mediump vec4 blurred_color =
+        zTexture(UV + texel * vec2(-1.0, -1.0)) +
+        zTexture(UV + texel * vec2( 0.0, -1.0)) +
+        zTexture(UV + texel * vec2( 1.0, -1.0)) +
+        zTexture(UV + texel * vec2(-1.0,  0.0)) +
+        zTexture(UV) +
+        zTexture(UV + texel * vec2( 1.0,  0.0)) +
+        zTexture(UV + texel * vec2(-1.0,  1.0)) +
+        zTexture(UV + texel * vec2( 0.0,  1.0)) +
+        zTexture(UV + texel * vec2( 1.0,  1.0));
+
+    blurred_color *= 1.0 / 9.0;
+    mediump vec3 shadow = mix(vec3(1.0), blur_color, darken_strength);
+    blurred_color.rgb *= shadow;
+    COLOR = blurred_color;
+}

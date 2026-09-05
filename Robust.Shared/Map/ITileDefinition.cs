@@ -55,6 +55,11 @@ namespace Robust.Shared.Map
         bool AllowRotationMirror => false;
 
         /// <summary>
+        /// Whether this tile allows maps below it to remain visible during z-level rendering.
+        /// </summary>
+        bool ZLevelTransparent => false;
+
+        /// <summary>
         ///     Assign a new value to <see cref="TileId"/>, used when registering the tile definition.
         /// </summary>
         /// <param name="id">The new tile ID for this tile definition.</param>

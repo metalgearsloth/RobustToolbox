@@ -335,6 +335,24 @@ cmd-querymappaused-help = Usage: querymappaused <map ID>
 cmd-savegrid-desc = Serializes a grid to disk.
 cmd-savegrid-help = Usage: {$command} <gridID> <Path>
 
+cmd-zlevels_stack-desc = Creates a z-level stack from map IDs, ordered from bottom to top.
+cmd-zlevels_stack-help = Usage: {$command} <bottomMap> <map> [topMap ...]
+cmd-zlevels_stack-hint = map IDs ordered from bottom to top
+cmd-zlevels_stack-error-map = '{$map}' is not a unique existing map ID.
+cmd-zlevels_stack-error-member = Map {$map} already belongs to a z-level stack.
+cmd-zlevels_stack-error-create = Unable to create the z-level stack.
+cmd-zlevels_stack-success = Created z-level stack {$network}: {$maps} (bottom to top).
+
+cmd-zlevels_unstack-desc = Removes a map from its z-level stack.
+cmd-zlevels_unstack-help = Usage: {$command} <map>
+cmd-zlevels_unstack-hint = map ID
+cmd-zlevels_unstack-success = Removed map {$map} from its z-level stack.
+
+cmd-zlevels_list-desc = Lists z-level stacks and their maps from bottom to top.
+cmd-zlevels_list-help = Usage: {$command}
+cmd-zlevels_list-empty = No z-level stacks.
+cmd-zlevels_list-entry = {$network}: {$maps} (bottom to top)
+
 cmd-testbed-desc = Loads a physics testbed on the specified map.
 cmd-testbed-help = Usage: {$command} <mapid> <test>
 
