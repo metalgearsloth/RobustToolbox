@@ -599,17 +599,22 @@ public sealed partial class ZLevelSupportSystem : EntitySystem
                 continue;
             }
 
-            if (!float.IsFinite(provider.Comp.Height))
-            {
-                AddDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, provider.Comp.Height, sample.Point,
-                    ZLevelSupportRejection.NonFiniteHeight, diagnostics);
-                continue;
-            }
-
             if (!TryGetSupportFixture(provider, out var fixture))
             {
                 AddDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, 0f, sample.Point,
                     ZLevelSupportRejection.NoFixture, diagnostics);
+                continue;
+            }
+
+            if (!TryGetHighGroundHeight(
+                    provider,
+                    providerXform,
+                    fixture,
+                    sample.Point,
+                    out var height))
+            {
+                AddDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, provider.Comp.Height, sample.Point,
+                    ZLevelSupportRejection.NonFiniteHeight, diagnostics);
                 continue;
             }
 
@@ -620,7 +625,7 @@ public sealed partial class ZLevelSupportSystem : EntitySystem
                 continue;
             }
 
-            var absoluteHeight = mapDepth + provider.Comp.Height;
+            var absoluteHeight = mapDepth + height;
             if (absoluteHeight > currentAbsoluteHeight + maximumRise + PositionEpsilon)
             {
                 AddDiagnostic(provider.Owner, ZLevelSupportSurface.HighGround, absoluteHeight, sample.Point,
@@ -743,6 +748,62 @@ public sealed partial class ZLevelSupportSystem : EntitySystem
         return false;
     }
 
+    private bool TryGetHighGroundHeight(
+        Entity<ZLevelHighGroundComponent> provider,
+        TransformComponent providerXform,
+        Fixture fixture,
+        Vector2 samplePoint,
+        out float height)
+    {
+        if (provider.Comp.HeightCurve.Count == 0)
+        {
+            height = provider.Comp.Height;
+            return float.IsFinite(height);
+        }
+
+        if (!TryGetFixtureLocalBounds(fixture, out var bounds))
+        {
+            height = 0f;
+            return false;
+        }
+
+        var localPoint = Vector2.Transform(samplePoint, _transform.GetInvWorldMatrix(provider.Owner));
+        var local = new Vector2(
+            Normalize(localPoint.X, bounds.Left, bounds.Right),
+            Normalize(localPoint.Y, bounds.Bottom, bounds.Top));
+
+        var direction = providerXform.LocalRotation.GetCardinalDir();
+        var t = direction switch
+        {
+            Direction.East => provider.Comp.Corner ? (local.X + 1f - local.Y) / 2f : local.X,
+            Direction.West => provider.Comp.Corner ? (1f - local.X + local.Y) / 2f : 1f - local.X,
+            Direction.North => provider.Comp.Corner ? (local.X + local.Y) / 2f : local.Y,
+            Direction.South => provider.Comp.Corner ? (1f - local.X + 1f - local.Y) / 2f : 1f - local.Y,
+            _ => 0.5f,
+        };
+
+        height = InterpolateHeight(provider.Comp.HeightCurve, Math.Clamp(t, 0f, 1f));
+        return float.IsFinite(height);
+    }
+
+    private static float Normalize(float value, float min, float max)
+    {
+        var range = max - min;
+        return MathF.Abs(range) <= PositionEpsilon
+            ? 0.5f
+            : (value - min) / range;
+    }
+
+    private static float InterpolateHeight(IReadOnlyList<float> curve, float t)
+    {
+        if (curve.Count == 1)
+            return curve[0];
+
+        var scaled = t * (curve.Count - 1);
+        var index = Math.Min((int) scaled, curve.Count - 2);
+        return MathHelper.Lerp(curve[index], curve[index + 1], scaled - index);
+    }
+
     private bool TryGetSupportFixture(Entity<ZLevelHighGroundComponent> provider, out Fixture fixture)
     {
         fixture = default!;
@@ -755,6 +816,30 @@ public sealed partial class ZLevelSupportSystem : EntitySystem
 
         fixture = found;
         return true;
+    }
+
+    private static bool TryGetFixtureLocalBounds(Fixture fixture, out Box2 bounds)
+    {
+        bounds = default;
+        var any = false;
+        for (var child = 0; child < fixture.Shape.ChildCount; child++)
+        {
+            var childBounds = fixture.Shape.ComputeAABB(PhysicsTransform.Empty, child);
+            if (fixture.Shape is PolygonShape or PhysShapeAabb)
+            {
+                var radius = fixture.Shape.Radius;
+                childBounds = new Box2(
+                    childBounds.Left + radius,
+                    childBounds.Bottom + radius,
+                    childBounds.Right - radius,
+                    childBounds.Top - radius);
+            }
+
+            bounds = any ? Union(bounds, childBounds) : childBounds;
+            any = true;
+        }
+
+        return any;
     }
 
     private static void AddDiagnostic(
