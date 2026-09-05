@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Robust.Shared;
 using Robust.Shared.GameObjects;
@@ -39,6 +39,7 @@ namespace Robust.Client.GameStates
         ///     Total number of game states currently in the state buffer.
         /// </summary>
         int StateCount { get; }
+
 
         /// <summary>
         ///     If the buffer size is this many states larger than the target buffer size,

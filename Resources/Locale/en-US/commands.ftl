@@ -536,7 +536,8 @@ cmd-net_watchent-desc = Dumps all network updates for an EntityId to the console
 cmd-net_watchent-help = Usage: {$command} <0|EntityUid>
 
 cmd-net_draw_interp-desc = Toggles the debug drawing of the network interpolation.
-cmd-net_draw_interp-help = Usage: {$command} <0|EntityUid>
+cmd-net_draw_interp-help = Usage: {$command} [0|all|self|EntityUid]
+
 
 cmd-vram-desc = Displays video memory usage statics by the game.
 cmd-vram-help = Usage: {$command}

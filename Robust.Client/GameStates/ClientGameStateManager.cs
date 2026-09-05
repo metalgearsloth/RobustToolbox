@@ -1,4 +1,4 @@
-// ReSharper disable once RedundantUsingDirective
+﻿// ReSharper disable once RedundantUsingDirective
 // Used in EXCEPTION_TOLERANCE preprocessor
 using System;
 using System.Collections.Generic;
@@ -231,6 +231,7 @@ namespace Robust.Client.GameStates
             _detachedChunkEntities.Clear();
         }
 
+
         private void OnEntitySystemLoaded(object? sender, SystemChangedArgs args)
         {
             if (args.System is not ClientChunkEntitySystem chunkEntities)
@@ -303,6 +304,7 @@ namespace Robust.Client.GameStates
 
         private void HandleStateMessage(MsgState message)
         {
+
 #if DEBUG
             if (DropStates)
                 return;
@@ -611,9 +613,6 @@ namespace Robust.Client.GameStates
         {
             using var _ = _prof.Group("ResetPredictedEntities");
             using var __ = _timing.StartStateApplicationArea();
-
-            // This is terrible, and I hate it. This also needs to run even when prediction is disabled.
-            _entitySystemManager.GetEntitySystem<TransformSystem>().Reset();
 
             if (!PredictionNeedsResetting)
                 return;

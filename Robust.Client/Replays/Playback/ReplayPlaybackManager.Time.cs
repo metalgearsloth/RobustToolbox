@@ -69,8 +69,8 @@ internal sealed partial class ReplayPlaybackManager
             _timing.LastRealTick = _timing.LastProcessedTick = _timing.CurTick = Replay.CurTick;
             _gameState.UpdateFullRep(state, cloneDelta: true);
 
-            // Clear existing lerps
-            _entMan.EntitySysManager.GetEntitySystem<TransformSystem>().Reset();
+            // Clear render smoothing across the replay discontinuity.
+            _entMan.EntitySysManager.GetEntitySystem<TransformSystem>().ResetRenderPoses();
 
             var next = Replay.NextState;
             BeforeApplyState?.Invoke((state, next));
