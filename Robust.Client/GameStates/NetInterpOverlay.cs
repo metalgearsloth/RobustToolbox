@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Numerics;
 using Robust.Client.GameObjects;
 using Robust.Client.Graphics;
@@ -9,6 +10,7 @@ using Robust.Shared.Enums;
 using Robust.Shared.GameObjects;
 using Robust.Shared.IoC;
 using Robust.Shared.Maths;
+using Robust.Shared.Random;
 
 namespace Robust.Client.GameStates;
 
@@ -62,12 +64,14 @@ internal sealed partial class NetInterpOverlay : Overlay
 
             var correction =
                 $"{data.CorrectionTranslation.X:0.000},{data.CorrectionTranslation.Y:0.000}, {data.CorrectionRotation.Degrees:0.00}deg";
+            _transforms.TryGetZLevelRenderDebugData(data.Entity, out var zData);
             var text = $"{data.Entity} {data.Type} a={data.Alpha:0.000}\n" +
                        $"sim {Format(data.Simulation)} render {Format(data.Rendered)}\n" +
                        $"source {Format(data.Source)} target {Format(data.Target)}\n" +
-                       $"parent {data.Parent} coords {data.CoordinateSpace}\n" +
+                       $"parents {data.SourceParent}->{data.Parent} coords {data.CoordinateSpace}\n" +
                        $"spaces {data.SourceRenderSpace}->{data.TargetRenderSpace} " +
-                       $"a={data.Rendered.RenderSpaceAlpha:0.000} error {correction}";
+                       $"a={data.Rendered.RenderSpaceAlpha:0.000} error {correction}\n" +
+                       FormatZ(zData);
             var dimensions = handle.GetDimensions(_font, text, 1f);
             var labelPos = rendered + new Vector2(8f, 8f);
             handle.DrawRect(UIBox2.FromDimensions(labelPos - new Vector2(2f), dimensions + new Vector2(4f)),
@@ -78,6 +82,23 @@ internal sealed partial class NetInterpOverlay : Overlay
 
     private static string Format(in RenderPose pose)
         => $"({pose.Position.X:0.00},{pose.Position.Y:0.00},{pose.Rotation.Degrees:0.0}deg)";
+
+    private static string FormatZ(in ZLevelRenderDebugData data)
+    {
+        var layers = data.LayerCount switch
+        {
+            0 => "none",
+            1 => FormatLayer(data.FirstLayer),
+            _ => $"{FormatLayer(data.FirstLayer)} + {FormatLayer(data.SecondLayer)}",
+        };
+        return $"z map={data.MapDepth} local={data.AuthoredLocalHeight:0.###} " +
+               $"presentedLocal={data.PresentedLocalHeight:0.###} absolute={data.AbsoluteZ:0.###}\n" +
+               $"canonical=({data.CanonicalPosition.X:0.###},{data.CanonicalPosition.Y:0.###}) " +
+               $"projected=({data.ProjectedPosition.X:0.###},{data.ProjectedPosition.Y:0.###}) layers {layers}";
+    }
+
+    private static string FormatLayer(in RenderLayerSample sample)
+        => $"{sample.Depth}@{sample.Map}:{sample.Opacity:0.###}";
 
     private static void DrawMarker(DrawingHandleScreen handle, Vector2 position, Color color)
     {
@@ -92,6 +113,148 @@ internal sealed partial class NetInterpOverlay : Overlay
         public override string Command => "net_draw_interp";
 
         public override void Execute(IConsoleShell shell, string argStr, string[] args)
+            => SetOverlay(shell, args, _overlay, _players, Help);
+    }
+
+    private sealed partial class RenderLerpCommand : LocalizedCommands
+    {
+        [Dependency] private IOverlayManager _overlay = default!;
+        [Dependency] private IPlayerManager _players = default!;
+
+        public override string Command => "renderlerp";
+
+        public override void Execute(IConsoleShell shell, string argStr, string[] args)
+            => SetOverlay(shell, args, _overlay, _players, Help);
+    }
+
+    private static void SetOverlay(
+        IConsoleShell shell,
+        string[] args,
+        IOverlayManager overlayManager,
+        IPlayerManager players,
+        string help)
+    {
+        if (args.Length > 1)
+        {
+            shell.WriteError(help);
+            return;
+        }
+
+        if (args.Length == 0)
+        {
+            if (overlayManager.HasOverlay<NetInterpOverlay>())
+            {
+                overlayManager.RemoveOverlay<NetInterpOverlay>();
+                shell.WriteLine("Disabled render interpolation overlay.");
+            }
+            else
+            {
+                overlayManager.AddOverlay(new NetInterpOverlay());
+                shell.WriteLine("Enabled render interpolation overlay.");
+            }
+
+            return;
+        }
+
+        if (args[0] == "0")
+        {
+            overlayManager.RemoveOverlay<NetInterpOverlay>();
+            shell.WriteLine("Disabled render interpolation overlay.");
+            return;
+        }
+
+        EntityUid? filter;
+        if (args[0].Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            filter = null;
+        }
+        else if (args[0].Equals("self", StringComparison.OrdinalIgnoreCase))
+        {
+            if (players.LocalEntity is not { } player)
+            {
+                shell.WriteError("No controlled entity.");
+                return;
+            }
+
+            filter = player;
+        }
+        else if (EntityUid.TryParse(args[0], out var uid))
+        {
+            filter = uid;
+        }
+        else
+        {
+            shell.WriteError(help);
+            return;
+        }
+
+        if (!overlayManager.TryGetOverlay<NetInterpOverlay>(out var overlay))
+        {
+            overlay = new NetInterpOverlay();
+            overlayManager.AddOverlay(overlay);
+        }
+
+        overlay._filter = filter;
+        shell.WriteLine(filter == null
+            ? "Enabled render interpolation overlay for all entities."
+            : $"Enabled render interpolation overlay for entity {filter}.");
+    }
+
+    private sealed partial class NetMispredictCommand : LocalizedCommands
+    {
+        [Dependency] private IEntityManager _entities = default!;
+        [Dependency] private IPlayerManager _players = default!;
+        [Dependency] private IRobustRandom _random = default!;
+
+        public override string Command => "net_mispredict";
+
+        public override void Execute(IConsoleShell shell, string argStr, string[] args)
+        {
+            float x;
+            float y;
+            var rotationDegrees = 0f;
+            if (args.Length == 0)
+            {
+                var offset = _random.NextVector2(0.5f, 1f);
+                x = offset.X;
+                y = offset.Y;
+            }
+            else if (args.Length is < 2 or > 3
+                     || !float.TryParse(args[0], NumberStyles.Float, CultureInfo.InvariantCulture, out x)
+                     || !float.TryParse(args[1], NumberStyles.Float, CultureInfo.InvariantCulture, out y)
+                     || args.Length == 3
+                     && !float.TryParse(args[2], NumberStyles.Float, CultureInfo.InvariantCulture, out rotationDegrees))
+            {
+                shell.WriteError(Help);
+                return;
+            }
+
+            if (_players.LocalEntity is not { } player
+                || !_entities.TryGetComponent(player, out TransformComponent? xform))
+            {
+                shell.WriteError("No controlled entity with a transform.");
+                return;
+            }
+
+            var transforms = _entities.System<TransformSystem>();
+            var (position, rotation) = transforms.GetWorldPositionRotation(xform);
+            var rotationOffset = Angle.FromDegrees(rotationDegrees);
+
+            transforms.SetWorldPositionRotation(player, position + new Vector2(x, y), rotation + rotationOffset, xform);
+            transforms.SnapRenderPose(player, true);
+            shell.WriteLine(
+                $"Moved local entity {player} by ({x:0.###}, {y:0.###}), {rotationOffset.Degrees:0.###} degrees without notifying the server.");
+        }
+    }
+
+    private sealed partial class NetRenderInfoCommand : LocalizedCommands
+    {
+        [Dependency] private IEntityManager _entities = default!;
+        [Dependency] private IPlayerManager _players = default!;
+
+        public override string Command => "net_render_info";
+
+        public override void Execute(IConsoleShell shell, string argStr, string[] args)
         {
             if (args.Length > 1)
             {
@@ -99,35 +262,8 @@ internal sealed partial class NetInterpOverlay : Overlay
                 return;
             }
 
-            if (args.Length == 0)
-            {
-                if (_overlay.HasOverlay<NetInterpOverlay>())
-                {
-                    _overlay.RemoveOverlay<NetInterpOverlay>();
-                    shell.WriteLine("Disabled render interpolation overlay.");
-                }
-                else
-                {
-                    _overlay.AddOverlay(new NetInterpOverlay());
-                    shell.WriteLine("Enabled render interpolation overlay.");
-                }
-
-                return;
-            }
-
-            if (args[0] == "0")
-            {
-                _overlay.RemoveOverlay<NetInterpOverlay>();
-                shell.WriteLine("Disabled render interpolation overlay.");
-                return;
-            }
-
-            EntityUid? filter;
-            if (args[0].Equals("all", StringComparison.OrdinalIgnoreCase))
-            {
-                filter = null;
-            }
-            else if (args[0].Equals("self", StringComparison.OrdinalIgnoreCase))
+            EntityUid uid;
+            if (args.Length == 0 || args[0].Equals("self", StringComparison.OrdinalIgnoreCase))
             {
                 if (_players.LocalEntity is not { } player)
                 {
@@ -135,29 +271,41 @@ internal sealed partial class NetInterpOverlay : Overlay
                     return;
                 }
 
-                filter = player;
+                uid = player;
             }
-            else if (EntityUid.TryParse(args[0], out var uid))
-            {
-                filter = uid;
-            }
-            else
+            else if (!EntityUid.TryParse(args[0], out uid))
             {
                 shell.WriteError(Help);
                 return;
             }
 
-            if (!_overlay.TryGetOverlay<NetInterpOverlay>(out var overlay))
+            if (!_entities.TryGetComponent(uid, out TransformComponent? xform))
             {
-                overlay = new NetInterpOverlay();
-                _overlay.AddOverlay(overlay);
+                shell.WriteError($"Entity {uid} has no transform.");
+                return;
             }
 
-            overlay._filter = filter;
-            shell.WriteLine(filter == null
-                ? "Enabled render interpolation overlay for all entities."
-                : $"Enabled render interpolation overlay for entity {filter}.");
+            var transforms = _entities.System<TransformSystem>();
+            var simulation = transforms.GetWorldPositionRotation(xform);
+            var rendered = transforms.GetRenderWorldPose(uid, xform);
+            shell.WriteLine(
+                $"{uid} sim=({simulation.WorldPosition.X:0.###},{simulation.WorldPosition.Y:0.###},{simulation.WorldRotation.Degrees:0.###}deg) " +
+                $"render={Format(rendered)} coords={rendered.CoordinateSpace} " +
+                $"spaces={rendered.SourceRenderSpace}->{rendered.TargetRenderSpace} spaceAlpha={rendered.RenderSpaceAlpha:0.###}");
+
+            if (transforms.TryGetZLevelRenderDebugData(uid, out var zData))
+                shell.WriteLine(FormatZ(zData));
+
+            if (transforms.TryGetRenderPoseDebugData(uid, out var data))
+            {
+                shell.WriteLine(
+                    $"type={data.Type} alpha={data.Alpha:0.###} source={Format(data.Source)} target={Format(data.Target)} " +
+                    $"parents={data.SourceParent}->{data.Parent} error=({data.CorrectionTranslation.X:0.###},{data.CorrectionTranslation.Y:0.###},{data.CorrectionRotation.Degrees:0.###}deg,z={data.CorrectionZ:0.###})");
+            }
+            else
+            {
+                shell.WriteLine("No active render interpolation state.");
+            }
         }
     }
-
 }

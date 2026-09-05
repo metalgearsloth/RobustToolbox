@@ -573,11 +573,11 @@ cmd-net_watchent-help = Usage: {$command} <0|EntityUid>
 cmd-net_draw_interp-desc = Toggles the debug drawing of the network interpolation.
 cmd-net_draw_interp-help = Usage: {$command} [0|all|self|EntityUid]
 
+cmd-renderlerp-desc = Toggles the debug drawing of the render interpolation.
+cmd-renderlerp-help = Usage: {$command} [0|all|self|EntityUid]
+
 cmd-net_mispredict-desc = Applies an unsent local transform offset to test prediction correction smoothing.
 cmd-net_mispredict-help = Usage: {$command} [<x> <y> [rotation degrees]]
-
-cmd-net_drop_state-desc = Drops the next received game state without acknowledging it.
-cmd-net_drop_state-help = Usage: {$command}
 
 cmd-net_render_info-desc = Prints simulation, projected z, render layers, weights, and transform interpolation state.
 cmd-net_render_info-help = Usage: {$command} [self|EntityUid]
