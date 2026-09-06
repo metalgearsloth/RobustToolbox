@@ -72,12 +72,16 @@ internal sealed partial class NetInterpOverlay : Overlay
             var correction =
                 $"{data.CorrectionTranslation.X:0.000},{data.CorrectionTranslation.Y:0.000}, {data.CorrectionRotation.Degrees:0.00}deg";
             var correctionState = data.CorrectionActive ? "correction active" : "no correction";
+            var replayState = data.HasPredictionReplayTarget
+                ? $"replay compare {data.PredictionReplayTargetTick}"
+                : "no replay compare";
             var text = $"{data.Entity} {data.Type} a={data.Alpha:0.000} {correctionState}\n" +
                        $"sim {Format(data.Simulation)} render {Format(data.Rendered)}\n" +
                        $"source {Format(data.Source)} base {Format(data.BaseRendered)} target {Format(data.Target)}\n" +
                        $"parent {data.Parent} coords {data.CoordinateSpace}\n" +
                        $"spaces {data.SourceRenderSpace}->{data.TargetRenderSpace} " +
-                       $"a={data.Rendered.RenderSpaceAlpha:0.000} error {correction}";
+                       $"a={data.Rendered.RenderSpaceAlpha:0.000} error {correction}\n" +
+                       $"{replayState} changed={data.PredictionReplayChanged}";
             var dimensions = handle.GetDimensions(_font, text, 1f);
             var labelPos = rendered + new Vector2(8f, 8f);
             handle.DrawRect(UIBox2.FromDimensions(labelPos - new Vector2(2f), dimensions + new Vector2(4f)),

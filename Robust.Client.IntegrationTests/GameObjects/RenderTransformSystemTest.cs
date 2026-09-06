@@ -709,6 +709,354 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         }
     }
 
+    [TestCase(1)]
+    [TestCase(3)]
+    [TestCase(6)]
+    public void CorrectMultiTickPredictionReplayDoesNotCreateCorrection(int predictionLead)
+    {
+        var oldTickRate = _timing.TickRate;
+        try
+        {
+            const int tickRate = 30;
+            const float renderFps = 144f;
+            const int authoritativeTicks = 24;
+            var tickPeriod = 1f / tickRate;
+            var frameTime = 1f / renderFps;
+            var tickDelta = new Vector2(1.8f, -2.4f) / tickRate;
+            var expectedSpeed = tickDelta.Length() * tickRate;
+            var direction = Vector2.Normalize(tickDelta);
+            _timing.SetTickRateAt((ushort) tickRate, _timing.CurTick);
+            var startTick = _timing.LastRealTick;
+            var (_, mapId) = CreateMap();
+            var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
+            var xform = _entities.GetComponent<TransformComponent>(uid);
+            var accumulator = 0f;
+            var authoritativeTick = 0;
+            var corrections = 0;
+            var maxCorrectionError = 0f;
+            var maxPredictionLead = 0u;
+            string? firstCorrection = null;
+            float? previousProjectedRender = null;
+            var velocities = new List<float>();
+
+            PredictFromAuthoritativeTick(0);
+
+            while (authoritativeTick < authoritativeTicks)
+            {
+                accumulator += frameTime;
+
+                while (accumulator >= tickPeriod)
+                {
+                    accumulator -= tickPeriod;
+                    authoritativeTick++;
+                    ApplyAuthoritativeStateAndReplay(authoritativeTick);
+                    RecordCorrection();
+                }
+
+                _timing.TickRemainder = TimeSpan.FromSeconds(accumulator);
+                _transforms.FrameUpdate(frameTime);
+                RecordCorrection();
+
+                var projectedRender = Vector2.Dot(_transforms.GetRenderWorldPosition(uid), direction);
+                if (previousProjectedRender is { } previous && authoritativeTick >= 3)
+                    velocities.Add((projectedRender - previous) / frameTime);
+
+                previousProjectedRender = projectedRender;
+            }
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(maxPredictionLead, Is.GreaterThanOrEqualTo((uint) predictionLead));
+                Assert.That(corrections, Is.Zero,
+                    $"ordinary rollback and replay must not create prediction corrections; first correction: {firstCorrection}");
+                Assert.That(maxCorrectionError, Is.Zero);
+                Assert.That(velocities.Min(), Is.EqualTo(expectedSpeed).Within(0.25f));
+                Assert.That(velocities.Max(), Is.EqualTo(expectedSpeed).Within(0.25f));
+            });
+
+            void ApplyAuthoritativeStateAndReplay(int realTickIndex)
+            {
+                var previousRealTick = _timing.LastRealTick;
+                var nextRealTick = startTick + (uint) realTickIndex;
+
+                _timing.CurTick = previousRealTick;
+                using (_timing.StartStateApplicationArea())
+                    _transforms.SetLocalPosition(uid, PositionAt(previousRealTick), xform);
+
+                xform.LastModifiedTick = previousRealTick;
+
+                _timing.CurTick = _timing.LastRealTick = nextRealTick;
+                using (_timing.StartStateApplicationArea())
+                    _transforms.SetLocalPosition(uid, PositionAt(nextRealTick), xform);
+
+                PredictFromAuthoritativeTick(realTickIndex);
+            }
+
+            void PredictFromAuthoritativeTick(int realTickIndex)
+            {
+                var realTick = startTick + (uint) realTickIndex;
+                var predictionTarget = realTick + (uint) predictionLead;
+
+                using (_timing.StartPastPredictionArea())
+                {
+                    for (var tick = realTick + 1; tick < predictionTarget; tick += 1)
+                    {
+                        _timing.CurTick = tick;
+                        _transforms.SetLocalPosition(uid, PositionAt(tick), xform);
+                    }
+                }
+
+                _timing.CurTick = predictionTarget;
+                _transforms.SetLocalPosition(uid, PositionAt(predictionTarget), xform);
+                maxPredictionLead = Math.Max(maxPredictionLead, predictionTarget.Value - _timing.LastRealTick.Value);
+            }
+
+            void RecordCorrection()
+            {
+                if (!_transforms.TryGetRenderPoseDebugData(uid, out var data))
+                    return;
+
+                if (data.CorrectionActive)
+                {
+                    corrections++;
+                    firstCorrection ??=
+                        $"authoritativeTick={authoritativeTick}, cur={_timing.CurTick}, lastReal={_timing.LastRealTick}, " +
+                        $"hasReplayTarget={data.HasPredictionReplayTarget}, replayTargetTick={data.PredictionReplayTargetTick}, " +
+                        $"replayChanged={data.PredictionReplayChanged}, " +
+                        $"source={data.Source.Position}, target={data.Target.Position}, " +
+                        $"base={data.BaseRendered.Position}, rendered={data.Rendered.Position}, " +
+                        $"error={data.Rendered.Position - data.BaseRendered.Position}";
+                }
+
+                maxCorrectionError = Math.Max(maxCorrectionError,
+                    Vector2.Distance(data.Rendered.Position, data.BaseRendered.Position));
+            }
+
+            Vector2 PositionAt(GameTick tick)
+                => tickDelta * (tick.Value - startTick.Value);
+        }
+        finally
+        {
+            _timing.SetTickRateAt(oldTickRate, _timing.CurTick);
+            _timing.TickRemainder = TimeSpan.Zero;
+        }
+    }
+
+    [Test]
+    public void MultiTickPredictionReplayCreatesCorrectionOnlyWhenTrajectoryChanges()
+    {
+        var oldTickRate = _timing.TickRate;
+        try
+        {
+            const int tickRate = 30;
+            const float renderFps = 144f;
+            const int authoritativeTicks = 18;
+            const int predictionLead = 6;
+            const int influenceChangeTick = 6;
+            var tickPeriod = 1f / tickRate;
+            var frameTime = 1f / renderFps;
+            var tickDelta = new Vector2(1.8f, -2.4f) / tickRate;
+            var conveyorOffset = new Vector2(0.24f, -0.06f);
+            _timing.SetTickRateAt((ushort) tickRate, _timing.CurTick);
+            var startTick = _timing.LastRealTick;
+            var (_, mapId) = CreateMap();
+            var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
+            var xform = _entities.GetComponent<TransformComponent>(uid);
+            var accumulator = 0f;
+            var authoritativeTick = 0;
+            var conveyorActive = false;
+            var sawCorrection = false;
+            var correctionStarts = 0;
+            var correctionSimulationTicks = 0;
+            var correctionFrames = 0;
+            var errorDecreased = false;
+            var maxRenderedStep = 0f;
+            var maxBaseStep = 0f;
+            var maxRenderedStepDetails = string.Empty;
+            var maxBaseStepDetails = string.Empty;
+            var finalCorrectionDetails = string.Empty;
+            float? initialError = null;
+            float? previousError = null;
+            RenderPoseDebugData? previousData = null;
+            Vector2 renderedBeforeChange = default;
+
+            PredictFromAuthoritativeTick(0);
+
+            while (authoritativeTick < authoritativeTicks)
+            {
+                accumulator += frameTime;
+
+                while (accumulator >= tickPeriod)
+                {
+                    accumulator -= tickPeriod;
+                    _timing.TickRemainder = TimeSpan.FromSeconds(accumulator);
+                    authoritativeTick++;
+
+                    if (authoritativeTick == influenceChangeTick)
+                    {
+                        renderedBeforeChange = _transforms.GetRenderWorldPosition(uid);
+                        conveyorActive = true;
+                    }
+
+                    ApplyAuthoritativeStateAndReplay(authoritativeTick);
+                    _timing.TickRemainder = TimeSpan.FromSeconds(accumulator);
+                    _transforms.FrameUpdate(0f);
+                    RecordCorrection(true);
+
+                    if (authoritativeTick == influenceChangeTick)
+                    {
+                        Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var correction), Is.True);
+                        Assert.Multiple(() =>
+                        {
+                            Assert.That(correction.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
+                            Assert.That(correction.CorrectionActive, Is.True);
+                            AssertVector(correction.Rendered.Position, renderedBeforeChange,
+                                "changed replay must stay anchored to the pose visible before rollback");
+                            Assert.That(Vector2.Distance(correction.Rendered.Position, correction.BaseRendered.Position),
+                                Is.GreaterThan(0.1f));
+                        });
+
+                        initialError = Vector2.Distance(correction.Rendered.Position, correction.BaseRendered.Position);
+                    }
+                }
+
+                _timing.TickRemainder = TimeSpan.FromSeconds(accumulator);
+                _transforms.FrameUpdate(frameTime);
+                RecordCorrection(false);
+            }
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(correctionStarts, Is.EqualTo(1),
+                    "the conveyor-style mismatch should create exactly one new correction");
+                Assert.That(correctionSimulationTicks, Is.GreaterThanOrEqualTo(3),
+                    "the correction must survive later first-time predicted movement ticks");
+                Assert.That(correctionFrames, Is.GreaterThan(8));
+                Assert.That(previousError, Is.Not.Null);
+                Assert.That(previousError!.Value, Is.LessThan(initialError!.Value * 0.6f),
+                    finalCorrectionDetails);
+                Assert.That(errorDecreased, Is.True);
+                Assert.That(maxBaseStep, Is.LessThan(0.04f),
+                    $"base predicted movement must remain interpolated under the correction; {maxBaseStepDetails}");
+                Assert.That(maxRenderedStep, Is.LessThan(0.06f),
+                    $"final rendered movement must not snap while the correction decays; {maxRenderedStepDetails}");
+            });
+
+            void ApplyAuthoritativeStateAndReplay(int realTickIndex)
+            {
+                var previousRealTick = _timing.LastRealTick;
+                var nextRealTick = startTick + (uint) realTickIndex;
+
+                _timing.CurTick = previousRealTick;
+                using (_timing.StartStateApplicationArea())
+                    _transforms.SetLocalPosition(uid, PositionAt(previousRealTick), xform);
+
+                xform.LastModifiedTick = previousRealTick;
+
+                _timing.CurTick = _timing.LastRealTick = nextRealTick;
+                using (_timing.StartStateApplicationArea())
+                    _transforms.SetLocalPosition(uid, PositionAt(nextRealTick), xform);
+
+                PredictFromAuthoritativeTick(realTickIndex);
+            }
+
+            void PredictFromAuthoritativeTick(int realTickIndex)
+            {
+                var realTick = startTick + (uint) realTickIndex;
+                var predictionTarget = realTick + predictionLead;
+
+                using (_timing.StartPastPredictionArea())
+                {
+                    for (var tick = realTick + 1; tick < predictionTarget; tick += 1)
+                    {
+                        _timing.CurTick = tick;
+                        _transforms.SetLocalPosition(uid, PositionAt(tick), xform);
+                    }
+                }
+
+                _timing.CurTick = predictionTarget;
+                _transforms.SetLocalPosition(uid, PositionAt(predictionTarget), xform);
+            }
+
+            void RecordCorrection(bool simulationTick)
+            {
+                if (!_transforms.TryGetRenderPoseDebugData(uid, out var data))
+                    return;
+
+                if (!data.CorrectionActive)
+                {
+                    if (!simulationTick)
+                        previousData = data;
+
+                    return;
+                }
+
+                if (!sawCorrection)
+                {
+                    sawCorrection = true;
+                    correctionStarts++;
+                    previousData = null;
+                    previousError = Vector2.Distance(data.Rendered.Position, data.BaseRendered.Position);
+                    correctionFrames++;
+                    return;
+                }
+
+                if (simulationTick && authoritativeTick > influenceChangeTick)
+                    correctionSimulationTicks++;
+
+                correctionFrames++;
+                var error = Vector2.Distance(data.Rendered.Position, data.BaseRendered.Position);
+                if (previousError is { } lastError && error < lastError - 0.0001f)
+                    errorDecreased = true;
+
+                previousError = error;
+                finalCorrectionDetails =
+                    $"authoritativeTick={authoritativeTick}, cur={_timing.CurTick}, lastReal={_timing.LastRealTick}, " +
+                    $"source={data.Source.Position}, target={data.Target.Position}, " +
+                    $"base={data.BaseRendered.Position}, rendered={data.Rendered.Position}, error={error}";
+
+                if (!simulationTick && previousData is { } previous)
+                {
+                    var renderedStep = Vector2.Distance(previous.Rendered.Position, data.Rendered.Position);
+                    if (renderedStep > maxRenderedStep)
+                    {
+                        maxRenderedStep = renderedStep;
+                        maxRenderedStepDetails =
+                            $"authoritativeTick={authoritativeTick}, cur={_timing.CurTick}, lastReal={_timing.LastRealTick}, " +
+                            $"previous={previous.Rendered.Position}, current={data.Rendered.Position}";
+                    }
+
+                    var baseStep = Vector2.Distance(previous.BaseRendered.Position, data.BaseRendered.Position);
+                    if (baseStep > maxBaseStep)
+                    {
+                        maxBaseStep = baseStep;
+                        maxBaseStepDetails =
+                            $"authoritativeTick={authoritativeTick}, cur={_timing.CurTick}, lastReal={_timing.LastRealTick}, " +
+                            $"previous={previous.BaseRendered.Position}, current={data.BaseRendered.Position}";
+                    }
+                }
+
+                if (!simulationTick)
+                    previousData = data;
+            }
+
+            Vector2 PositionAt(GameTick tick)
+            {
+                var tickIndex = tick.Value - startTick.Value;
+                var position = tickDelta * tickIndex;
+                if (conveyorActive && tickIndex >= influenceChangeTick)
+                    position += conveyorOffset;
+
+                return position;
+            }
+        }
+        finally
+        {
+            _timing.SetTickRateAt(oldTickRate, _timing.CurTick);
+            _timing.TickRemainder = TimeSpan.Zero;
+        }
+    }
+
     [Test]
     public void SnappedLocalMispredictionUsesPredictionCorrection()
     {
