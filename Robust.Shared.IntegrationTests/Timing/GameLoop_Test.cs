@@ -100,6 +100,8 @@ namespace Robust.UnitTesting.Shared.Timing
                 Assert.That(gameTiming.TickPhase, Is.EqualTo(0.08f / 0.09f).Within(0.0001f));
             });
         }
+
+        private static GameTiming GameTimingFactory(IStopwatch stopwatch)
         {
             var timing = new GameTiming();
 
