@@ -959,6 +959,49 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
     }
 
     [Test]
+    public void PredictionInterpolationCompletesWhenPredictionTickAdvancesWithoutMovement()
+    {
+        var oldTickRate = _timing.TickRate;
+        try
+        {
+            _timing.SetTickRateAt(30, _timing.CurTick);
+            var (_, mapId) = CreateMap();
+            var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
+            var xform = _entities.GetComponent<TransformComponent>(uid);
+
+            _timing.CurTick = new GameTick(_timing.LastRealTick.Value + 1);
+            _transforms.SetLocalPosition(uid, Vector2.UnitX, xform);
+            SetTickAlpha(0.1f);
+            _transforms.FrameUpdate(0f);
+
+            Assert.Multiple(() =>
+            {
+                AssertVector(_transforms.GetWorldPosition(uid), Vector2.UnitX);
+                AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(0.1f, 0f));
+            });
+
+            // Releasing movement produces no transform move on the next prediction tick.
+            // A later render frame can still have a larger tick phase than the last frame from the old tick.
+            _timing.CurTick += 1;
+            SetTickAlpha(0.2f);
+            _transforms.FrameUpdate(0f);
+
+            Assert.Multiple(() =>
+            {
+                AssertVector(_transforms.GetWorldPosition(uid), Vector2.UnitX);
+                AssertVector(_transforms.GetRenderWorldPosition(uid), Vector2.UnitX,
+                    "old predicted movement must not keep sliding after a later prediction tick produced no move");
+                Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out _), Is.False);
+            });
+        }
+        finally
+        {
+            _timing.SetTickRateAt(oldTickRate, _timing.CurTick);
+            _timing.TickRemainder = TimeSpan.Zero;
+        }
+    }
+
+    [Test]
     public void PredictionCorrectionRetargetsFromTheCurrentRenderedPose()
     {
         var (uid, xform) = CreateActivePredictionCorrection();

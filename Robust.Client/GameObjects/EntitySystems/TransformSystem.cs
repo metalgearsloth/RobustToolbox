@@ -568,6 +568,13 @@ public sealed partial class TransformSystem : SharedTransformSystem
         // Prediction runs ahead of ChangeTick; clamp old segments when the phase wraps.
         var phase = _timing.TickPhase;
 
+        if (state.Type == RenderInterpolationType.PredictionInterpolation
+            && _timing.CurTick > state.ChangeTick)
+        {
+            state.LastFramePhase = phase;
+            return 1f;
+        }
+
         if (state.LastFramePhase >= 0f && phase < state.LastFramePhase)
             return 1f;
 
