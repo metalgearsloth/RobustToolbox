@@ -677,7 +677,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
             void RecordPredictionCorrection()
             {
                 if (_transforms.TryGetRenderPoseDebugData(uid, out var data)
-                    && data.Type == RenderInterpolationType.PredictionCorrection)
+                    && data.CorrectionActive)
                 {
                     predictionCorrections++;
                 }
@@ -717,25 +717,29 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         var xform = _entities.GetComponent<TransformComponent>(uid);
 
         _timing.CurTick = new GameTick(_timing.LastRealTick.Value + 2);
-        _transforms.SetLocalPosition(uid, Vector2.UnitX, xform);
+        _transforms.SetLocalPositionRotation(uid, Vector2.UnitX, Angle.FromDegrees(90f), xform);
         _transforms.SnapRenderPose(uid, true);
 
         AssertVector(_transforms.GetWorldPosition(uid), Vector2.UnitX);
         AssertVector(_transforms.GetRenderWorldPosition(uid), Vector2.UnitX);
+        Assert.That(_transforms.GetRenderWorldRotation(uid).Degrees, Is.EqualTo(90f).Within(0.001f));
 
         using (_timing.StartStateApplicationArea())
-            _transforms.SetLocalPosition(uid, Vector2.Zero, xform);
+            _transforms.SetLocalPositionRotation(uid, Vector2.Zero, Angle.Zero, xform);
 
         Assert.Multiple(() =>
         {
             AssertVector(_transforms.GetWorldPosition(uid), Vector2.Zero);
             AssertVector(_transforms.GetRenderWorldPosition(uid), Vector2.UnitX);
+            Assert.That(_transforms.GetRenderWorldRotation(uid).Degrees, Is.EqualTo(90f).Within(0.001f));
             Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var data), Is.True);
-            Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.PredictionCorrection));
+            Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
+            Assert.That(data.CorrectionActive, Is.True);
         });
 
         _transforms.FrameUpdate(CorrectionHalfLifeForTest);
         AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(0.5f, 0f));
+        Assert.That(_transforms.GetRenderWorldRotation(uid).Degrees, Is.EqualTo(45f).Within(0.001f));
     }
 
     [Test]
@@ -783,7 +787,8 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
                 renderedBeforeRollback,
                 "first post-replay render must stay anchored at the visible pose");
             Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var data), Is.True);
-            Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.PredictionCorrection));
+            Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
+            Assert.That(data.CorrectionActive, Is.True);
             AssertVector(data.Target.Position, replayedEndpoint);
         });
 
@@ -803,6 +808,190 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
             Assert.That(afterFullLife.X, Is.GreaterThan(afterHalfLife.X));
             Assert.That(afterFullLife.X, Is.LessThan(replayedEndpoint.X));
             AssertVector(afterFullLife, new Vector2(1.5625f, 0f));
+        });
+    }
+
+    [Test]
+    public void PredictionCorrectionSurvivesSubsequentPredictedMovement()
+    {
+        var oldTickRate = _timing.TickRate;
+        try
+        {
+            const int tickRate = 30;
+            const float renderFps = 144f;
+            const float speed = 3f;
+            const int predictedTicks = 5;
+            _timing.SetTickRateAt((ushort) tickRate, _timing.CurTick);
+            var tickPeriod = (float) _timing.TickPeriod.TotalSeconds;
+            var frameTime = 1f / renderFps;
+            var tickDistance = speed / tickRate;
+            var (_, mapId) = CreateMap();
+            var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
+            var xform = _entities.GetComponent<TransformComponent>(uid);
+
+            _timing.CurTick = new GameTick(_timing.LastRealTick.Value + 1);
+            _transforms.SetLocalPosition(uid, new Vector2(tickDistance, 0f), xform);
+            SetTickAlpha(0.25f);
+            _transforms.FrameUpdate(0f);
+            var renderedBeforeRollback = _transforms.GetRenderWorldPosition(uid);
+
+            using (_timing.StartStateApplicationArea())
+                _transforms.SetLocalPosition(uid, Vector2.Zero, xform);
+            using (_timing.StartPastPredictionArea())
+                _transforms.SetLocalPosition(uid, new Vector2(tickDistance * 3f, 0f), xform);
+
+            _transforms.FrameUpdate(0f);
+            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var correction), Is.True);
+            Assert.Multiple(() =>
+            {
+                Assert.That(correction.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
+                Assert.That(correction.CorrectionActive, Is.True);
+                AssertVector(_transforms.GetRenderWorldPosition(uid), renderedBeforeRollback);
+            });
+
+            var initialError = Vector2.Distance(correction.Rendered.Position, correction.BaseRendered.Position);
+            var previousRendered = correction.Rendered.Position;
+            var previousBase = correction.BaseRendered.Position;
+            var maxRenderedStep = 0f;
+            var maxBaseStep = 0f;
+            var accumulator = tickPeriod * 0.25f;
+            var completedTicks = 0;
+            RenderPoseDebugData last = default;
+
+            while (completedTicks < predictedTicks)
+            {
+                accumulator += frameTime;
+
+                while (accumulator >= tickPeriod)
+                {
+                    accumulator -= tickPeriod;
+                    completedTicks++;
+                    _timing.CurTick = _timing.CurTick + 1;
+                    _transforms.SetLocalPosition(uid, new Vector2(tickDistance * (3f + completedTicks), 0f), xform);
+                }
+
+                _timing.TickRemainder = TimeSpan.FromSeconds(accumulator);
+                _transforms.FrameUpdate(frameTime);
+                Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out last), Is.True);
+                Assert.Multiple(() =>
+                {
+                    Assert.That(last.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
+                    Assert.That(last.CorrectionActive, Is.True,
+                        "normal predicted movement must not discard the active correction");
+                });
+
+                maxRenderedStep = Math.Max(maxRenderedStep, Vector2.Distance(previousRendered, last.Rendered.Position));
+                maxBaseStep = Math.Max(maxBaseStep, Vector2.Distance(previousBase, last.BaseRendered.Position));
+                previousRendered = last.Rendered.Position;
+                previousBase = last.BaseRendered.Position;
+            }
+
+            var finalError = Vector2.Distance(last.Rendered.Position, last.BaseRendered.Position);
+            Assert.Multiple(() =>
+            {
+                Assert.That(completedTicks, Is.EqualTo(predictedTicks));
+                Assert.That(last.CorrectionActive, Is.True);
+                Assert.That(finalError, Is.LessThan(initialError * 0.4f),
+                    "the correction must decay across frames rather than restart on each predicted tick");
+                Assert.That(maxBaseStep, Is.LessThan(0.03f),
+                    "the base predicted movement must remain interpolated at render frame rate");
+                Assert.That(maxRenderedStep, Is.LessThan(0.04f),
+                    "the final render pose must not snap at a predicted tick boundary");
+            });
+        }
+        finally
+        {
+            _timing.SetTickRateAt(oldTickRate, _timing.CurTick);
+            _timing.TickRemainder = TimeSpan.Zero;
+        }
+    }
+
+    [Test]
+    public void PredictionCorrectionRetargetsFromTheCurrentRenderedPose()
+    {
+        var (uid, xform) = CreateActivePredictionCorrection();
+        _transforms.FrameUpdate(CorrectionHalfLifeForTest / 4f);
+        var renderedBeforeSecondRollback = _transforms.GetRenderWorldPosition(uid);
+
+        using (_timing.StartStateApplicationArea())
+            _transforms.SetLocalPosition(uid, Vector2.Zero, xform);
+        AssertVector(_transforms.GetRenderWorldPosition(uid), renderedBeforeSecondRollback,
+            "rollback during a correction must not expose its temporary base pose");
+
+        using (_timing.StartPastPredictionArea())
+            _transforms.SetLocalPosition(uid, new Vector2(4f, 0f), xform);
+        AssertVector(_transforms.GetRenderWorldPosition(uid), renderedBeforeSecondRollback,
+            "replay during a correction must preserve the pose already on screen");
+
+        _transforms.FrameUpdate(0f);
+        Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var retargeted), Is.True);
+        Assert.Multiple(() =>
+        {
+            Assert.That(retargeted.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
+            Assert.That(retargeted.CorrectionActive, Is.True);
+            AssertVector(retargeted.Rendered.Position, renderedBeforeSecondRollback);
+            AssertVector(retargeted.BaseRendered.Position, new Vector2(4f, 0f));
+        });
+
+        var errorBeforeDecay = Vector2.Distance(retargeted.Rendered.Position, retargeted.BaseRendered.Position);
+        _transforms.FrameUpdate(CorrectionHalfLifeForTest / 4f);
+        Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var afterDecay), Is.True);
+        Assert.That(Vector2.Distance(afterDecay.Rendered.Position, afterDecay.BaseRendered.Position),
+            Is.LessThan(errorBeforeDecay));
+    }
+
+    [Test]
+    public void SuccessfulReplayPreservesAnActivePredictionCorrection()
+    {
+        var (uid, xform) = CreateActivePredictionCorrection();
+        _transforms.FrameUpdate(CorrectionHalfLifeForTest / 4f);
+        var renderedBeforeRollback = _transforms.GetRenderWorldPosition(uid);
+
+        using (_timing.StartStateApplicationArea())
+            _transforms.SetLocalPosition(uid, Vector2.Zero, xform);
+        using (_timing.StartPastPredictionArea())
+            _transforms.SetLocalPosition(uid, new Vector2(2f, 0f), xform);
+
+        _transforms.FrameUpdate(0f);
+        Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var replayed), Is.True);
+        Assert.Multiple(() =>
+        {
+            Assert.That(replayed.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
+            Assert.That(replayed.CorrectionActive, Is.True,
+                "a successful replay must retain an earlier correction");
+            AssertVector(replayed.Rendered.Position, renderedBeforeRollback);
+        });
+
+        var errorBeforeDecay = Vector2.Distance(replayed.Rendered.Position, replayed.BaseRendered.Position);
+        _transforms.FrameUpdate(CorrectionHalfLifeForTest / 4f);
+        Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var afterDecay), Is.True);
+        Assert.That(afterDecay.CorrectionActive, Is.True);
+        Assert.That(Vector2.Distance(afterDecay.Rendered.Position, afterDecay.BaseRendered.Position),
+            Is.LessThan(errorBeforeDecay));
+    }
+
+    [Test]
+    public void SnapRenderPoseClearsPredictionCorrection()
+    {
+        var (uid, _) = CreateActivePredictionCorrection();
+        _transforms.SnapRenderPose(uid);
+        Assert.Multiple(() =>
+        {
+            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out _), Is.False);
+            AssertVector(_transforms.GetRenderWorldPosition(uid), _transforms.GetWorldPosition(uid));
+        });
+    }
+
+    [Test]
+    public void PredictionCorrectionCompletesAtTheCorrectionCutoff()
+    {
+        var (uid, _) = CreateActivePredictionCorrection();
+
+        _transforms.FrameUpdate(CorrectionHalfLifeForTest * 20f);
+        Assert.Multiple(() =>
+        {
+            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out _), Is.False);
+            AssertVector(_transforms.GetRenderWorldPosition(uid), _transforms.GetWorldPosition(uid));
         });
     }
 
@@ -831,6 +1020,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         {
             Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var data), Is.True);
             Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
+            Assert.That(data.CorrectionActive, Is.False);
             AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(0.25f, 0f));
         });
 
@@ -842,6 +1032,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         {
             Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var data), Is.True);
             Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
+            Assert.That(data.CorrectionActive, Is.False);
         });
 
         SetTickAlpha(1f);
@@ -875,6 +1066,28 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
     }
 
     private float CorrectionHalfLifeForTest => _configuration.GetCVar(CVars.NetInterpCorrectionHalfLife);
+
+    private (EntityUid Uid, TransformComponent Xform) CreateActivePredictionCorrection()
+    {
+        var (_, mapId) = CreateMap();
+        var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
+        var xform = _entities.GetComponent<TransformComponent>(uid);
+
+        _timing.CurTick = new GameTick(_timing.LastRealTick.Value + 1);
+        _transforms.SetLocalPosition(uid, Vector2.UnitX, xform);
+        SetTickAlpha(0.25f);
+        _transforms.FrameUpdate(0f);
+
+        using (_timing.StartStateApplicationArea())
+            _transforms.SetLocalPosition(uid, Vector2.Zero, xform);
+        using (_timing.StartPastPredictionArea())
+            _transforms.SetLocalPosition(uid, new Vector2(2f, 0f), xform);
+
+        _transforms.FrameUpdate(0f);
+        Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var data), Is.True);
+        Assert.That(data.CorrectionActive, Is.True);
+        return (uid, xform);
+    }
 
     private void MakeRemote(params EntityUid[] entities)
     {

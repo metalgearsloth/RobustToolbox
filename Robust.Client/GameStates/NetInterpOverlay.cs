@@ -52,11 +52,18 @@ internal sealed partial class NetInterpOverlay : Overlay
 
             var simulation = args.ViewportControl.WorldToScreen(data.Simulation.Position);
             var rendered = args.ViewportControl.WorldToScreen(data.Rendered.Position);
+            var baseRendered = args.ViewportControl.WorldToScreen(data.BaseRendered.Position);
             var source = args.ViewportControl.WorldToScreen(data.Source.Position);
             var target = args.ViewportControl.WorldToScreen(data.Target.Position);
 
             handle.DrawLine(source, target, Color.Yellow);
             handle.DrawLine(simulation, rendered, Color.Cyan);
+            if (data.CorrectionActive)
+            {
+                handle.DrawLine(baseRendered, rendered, Color.Yellow);
+                DrawMarker(handle, baseRendered, Color.Orange);
+            }
+
             DrawMarker(handle, source, Color.Yellow);
             DrawMarker(handle, target, Color.Green);
             DrawMarker(handle, simulation, Color.Red);
@@ -64,9 +71,10 @@ internal sealed partial class NetInterpOverlay : Overlay
 
             var correction =
                 $"{data.CorrectionTranslation.X:0.000},{data.CorrectionTranslation.Y:0.000}, {data.CorrectionRotation.Degrees:0.00}deg";
-            var text = $"{data.Entity} {data.Type} a={data.Alpha:0.000}\n" +
+            var correctionState = data.CorrectionActive ? "correction active" : "no correction";
+            var text = $"{data.Entity} {data.Type} a={data.Alpha:0.000} {correctionState}\n" +
                        $"sim {Format(data.Simulation)} render {Format(data.Rendered)}\n" +
-                       $"source {Format(data.Source)} target {Format(data.Target)}\n" +
+                       $"source {Format(data.Source)} base {Format(data.BaseRendered)} target {Format(data.Target)}\n" +
                        $"parent {data.Parent} coords {data.CoordinateSpace}\n" +
                        $"spaces {data.SourceRenderSpace}->{data.TargetRenderSpace} " +
                        $"a={data.Rendered.RenderSpaceAlpha:0.000} error {correction}";
