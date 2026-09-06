@@ -62,7 +62,7 @@ namespace Robust.Client.GameStates
         /// </summary>
         /// <param name="curTick">Tick to get the states for.</param>
         /// <param name="curState">Current state for the given tick. This can be null.</param>
-        /// <param name="nextState">Current state for tick + 1. This can be null.</param>
+        /// <param name="nextState">Usable future state for interpolation. This can be null or more than one tick ahead.</param>
         /// <returns>Was the function able to correctly calculate the states for the given tick?</returns>
         bool TryGetServerState([NotNullWhen(true)] out GameState? curState, out GameState? nextState);
 

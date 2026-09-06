@@ -697,6 +697,36 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
     }
 
     [Test]
+    public void FutureNetworkInterpolationDoesNotReplacePredictionInterpolation()
+    {
+        var (map, mapId) = CreateMap();
+        var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
+        var xform = _entities.GetComponent<TransformComponent>(uid);
+
+        _timing.CurTick = _timing.LastRealTick + 1;
+        _transforms.SetLocalPosition(uid, Vector2.UnitX, xform);
+
+        Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var data), Is.True);
+        Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
+
+        var result = _transforms.SetupNetworkInterpolation(
+            uid,
+            new EntityCoordinates(map, Vector2.UnitX),
+            Angle.Zero,
+            _timing.LastRealTick,
+            new EntityCoordinates(map, new Vector2(2f, 0f)),
+            Angle.Zero,
+            _timing.LastRealTick + 2);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result, Is.False);
+            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out data), Is.True);
+            Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
+        });
+    }
+
+    [Test]
     public void SnappedLocalMispredictionUsesPredictionCorrection()
     {
         var (_, mapId) = CreateMap();

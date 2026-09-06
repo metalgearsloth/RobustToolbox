@@ -189,6 +189,20 @@ public sealed partial class TransformSystem : SharedTransformSystem
             return;
         }
 
+        if (_timing.ApplyingState
+            && hasExisting
+            && existing.Type == RenderInterpolationType.NetworkInterpolation
+            && !existing.NetworkTargetApplied
+            && existing.Target.Equals(target))
+        {
+            existing.NetworkTargetApplied = true;
+
+            if (existing.Alpha >= 1f)
+                _renderPoses.Remove(uid);
+
+            return;
+        }
+
         if (!_timing.ApplyingState)
         {
             if (_timing.IsFirstTimePredicted)
@@ -291,10 +305,79 @@ public sealed partial class TransformSystem : SharedTransformSystem
         networkState.Alpha = 0f;
         networkState.InterpolationStartAlpha = 0f;
         networkState.LastFramePhase = -1f;
+        networkState.SourceTick = _timing.LastRealTick == GameTick.Zero
+            ? _timing.LastRealTick
+            : _timing.LastRealTick - 1;
+        networkState.TargetTick = _timing.LastRealTick;
+        networkState.NetworkTickSpan = 1;
+        networkState.NetworkElapsedTicks = 0;
+        networkState.NetworkTargetApplied = true;
         networkState.PendingPredictionRollback = false;
         networkState.CorrectionTranslation = Vector2.Zero;
         networkState.CorrectionRotation = Angle.Zero;
         networkState.CorrectionRemaining = 0f;
+        networkState.SnapRotation = false;
+    }
+
+    internal bool SetupNetworkInterpolation(
+        EntityUid uid,
+        EntityCoordinates sourceCoordinates,
+        Angle sourceRotation,
+        GameTick sourceTick,
+        EntityCoordinates targetCoordinates,
+        Angle targetRotation,
+        GameTick targetTick)
+    {
+        var hasExisting = _renderPoses.TryGetValue(uid, out var existing);
+        if (hasExisting && existing.Type != RenderInterpolationType.NetworkInterpolation)
+            return false;
+
+        if (targetTick <= sourceTick)
+            return false;
+
+        if (!TryCreateEndpoint(sourceCoordinates, sourceRotation, out var source)
+            || !TryCreateEndpoint(targetCoordinates, targetRotation, out var target))
+            return false;
+
+        if (!TryGetCommonRenderSpace(source.RenderSpace, target.RenderSpace, out var coordinateSpace)
+            || !ShouldInterpolate(source, target))
+            return false;
+
+        if (hasExisting
+            && !existing.NetworkTargetApplied
+            && existing.SourceTick == sourceTick
+            && existing.TargetTick == targetTick
+            && existing.Source.Equals(source)
+            && existing.Target.Equals(target))
+        {
+            return true;
+        }
+
+        var rendered = hasExisting
+            ? existing.LastRendered
+            : ResolveLastRenderedEndpoint(source, 0);
+
+        ref var networkState = ref CollectionsMarshal.GetValueRefOrAddDefault(_renderPoses, uid, out _);
+        networkState.Source = source;
+        networkState.Target = target;
+        networkState.LastRendered = rendered;
+        networkState.CoordinateSpace = coordinateSpace;
+        networkState.ChangeTick = _timing.CurTick;
+        networkState.Type = RenderInterpolationType.NetworkInterpolation;
+        networkState.Alpha = 0f;
+        networkState.InterpolationStartAlpha = 0f;
+        networkState.LastFramePhase = -1f;
+        networkState.SourceTick = sourceTick;
+        networkState.TargetTick = targetTick;
+        networkState.NetworkTickSpan = targetTick.Value - sourceTick.Value;
+        networkState.NetworkElapsedTicks = 0;
+        networkState.NetworkTargetApplied = false;
+        networkState.PendingPredictionRollback = false;
+        networkState.CorrectionTranslation = Vector2.Zero;
+        networkState.CorrectionRotation = Angle.Zero;
+        networkState.CorrectionRemaining = 0f;
+        networkState.SnapRotation = false;
+        return true;
     }
 
     private void StartTickInterpolation(
@@ -314,10 +397,16 @@ public sealed partial class TransformSystem : SharedTransformSystem
         state.Alpha = 0f;
         state.InterpolationStartAlpha = 0f;
         state.LastFramePhase = -1f;
+        state.SourceTick = _timing.CurTick;
+        state.TargetTick = _timing.CurTick + 1;
+        state.NetworkTickSpan = 1;
+        state.NetworkElapsedTicks = 0;
+        state.NetworkTargetApplied = true;
         state.PendingPredictionRollback = false;
         state.CorrectionTranslation = Vector2.Zero;
         state.CorrectionRotation = Angle.Zero;
         state.CorrectionRemaining = 0f;
+        state.SnapRotation = false;
     }
 
     private void RebaseTickInterpolation(
@@ -336,6 +425,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
             state.InterpolationStartAlpha = 0f;
             state.Alpha = 0f;
             state.LastFramePhase = -1f;
+            state.NetworkElapsedTicks = 0;
             state.ChangeTick = _timing.CurTick;
             state.PendingPredictionRollback = true;
         }
@@ -446,6 +536,9 @@ public sealed partial class TransformSystem : SharedTransformSystem
 
             if (state.Type != RenderInterpolationType.PredictionCorrection && state.Alpha >= 1f)
             {
+                if (state.Type == RenderInterpolationType.NetworkInterpolation && !state.NetworkTargetApplied)
+                    continue;
+
                 _remove.Add(uid);
                 continue;
             }
@@ -469,6 +562,9 @@ public sealed partial class TransformSystem : SharedTransformSystem
         if (_timing.TickPeriod <= TimeSpan.Zero)
             return 1f;
 
+        if (state.Type == RenderInterpolationType.NetworkInterpolation)
+            return GetNetworkInterpolationAlpha(ref state);
+
         // Prediction runs ahead of ChangeTick; clamp old segments when the phase wraps.
         var phase = _timing.TickPhase;
 
@@ -477,6 +573,20 @@ public sealed partial class TransformSystem : SharedTransformSystem
 
         state.LastFramePhase = phase;
         return Math.Max(state.Alpha, phase);
+    }
+
+    private float GetNetworkInterpolationAlpha(ref RenderPoseState state)
+    {
+        var phase = _timing.TickPhase;
+
+        if (state.LastFramePhase >= 0f && phase < state.LastFramePhase)
+            state.NetworkElapsedTicks++;
+
+        state.LastFramePhase = phase;
+
+        var span = Math.Max(state.NetworkTickSpan, 1u);
+        var alpha = (state.NetworkElapsedTicks + phase) / span;
+        return Math.Max(state.Alpha, Math.Clamp(alpha, 0f, 1f));
     }
 
     /// <summary>
@@ -848,6 +958,22 @@ public sealed partial class TransformSystem : SharedTransformSystem
         return true;
     }
 
+    internal bool TryGetNetworkInterpolationDebugTicks(EntityUid uid, out GameTick sourceTick, out GameTick targetTick, out uint tickSpan)
+    {
+        if (!_renderPoses.TryGetValue(uid, out var state) || state.Type != RenderInterpolationType.NetworkInterpolation)
+        {
+            sourceTick = default;
+            targetTick = default;
+            tickSpan = 0;
+            return false;
+        }
+
+        sourceTick = state.SourceTick;
+        targetTick = state.TargetTick;
+        tickSpan = state.NetworkTickSpan;
+        return true;
+    }
+
     private struct RenderPoseState
     {
         public RenderPoseEndpoint Source;
@@ -860,6 +986,11 @@ public sealed partial class TransformSystem : SharedTransformSystem
         public float Alpha;
         public float InterpolationStartAlpha;
         public float LastFramePhase;
+        public GameTick SourceTick;
+        public GameTick TargetTick;
+        public uint NetworkTickSpan;
+        public uint NetworkElapsedTicks;
+        public bool NetworkTargetApplied;
         public Vector2 CorrectionTranslation;
         public Angle CorrectionRotation;
         public float CorrectionRemaining;

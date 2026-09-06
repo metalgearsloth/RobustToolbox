@@ -23,6 +23,7 @@ using Robust.Shared.Input;
 using Robust.Shared.IoC;
 using Robust.Shared.Localization;
 using Robust.Shared.Log;
+using Robust.Shared.Map;
 using Robust.Shared.Network;
 using Robust.Shared.Network.Messages;
 using Robust.Shared.Profiling;
@@ -412,6 +413,9 @@ namespace Robust.Client.GameStates
                 if (curState == null)
                 {
                     // Might just be missing a state, but we may be able to make use of a future state if it has a low enough from sequence.
+                    if (nextState != null)
+                        SetupFutureTransformInterpolation(nextState, _timing.LastRealTick);
+
                     _timing.LastProcessedTick += 1;
                     continue;
                 }
@@ -1599,12 +1603,23 @@ namespace Robust.Client.GameStates
                 }
             }
 
+            var hasFutureTransform = false;
+            ComponentChange futureTransform = default;
+
             if (data.NextState != null)
             {
                 foreach (var compState in data.NextState.ComponentChanges.Span)
                 {
                     if (compState.LastModifiedTick != toTick + 1)
+                    {
+                        if (compState.NetID == _xformCompNetId && compState.LastModifiedTick > toTick + 1)
+                        {
+                            hasFutureTransform = true;
+                            futureTransform = compState;
+                        }
+
                         continue;
+                    }
 
                     if (!data.Meta.NetComponents.TryGetValue(compState.NetID, out var comp))
                     {
@@ -1654,6 +1669,104 @@ namespace Robust.Client.GameStates
 
                 var handleState = new ComponentHandleState(cur, next);
                 bus.RaiseComponentEvent(data.Uid, comp, ref handleState);
+            }
+
+            if (hasFutureTransform)
+                SetupFutureTransformInterpolation(data, toTick, futureTransform);
+        }
+
+        private void SetupFutureTransformInterpolation(GameState futureState, GameTick sourceTick)
+        {
+            foreach (var entityState in futureState.EntityStates.Span)
+            {
+                if (!_entities.TryGetEntityData(entityState.NetEntity, out var uid, out var meta)
+                    || (meta.Flags & MetaDataFlags.Detached) != 0)
+                {
+                    continue;
+                }
+
+                foreach (var compState in entityState.ComponentChanges.Span)
+                {
+                    if (compState.NetID != _xformCompNetId || compState.LastModifiedTick <= sourceTick)
+                        continue;
+
+                    SetupFutureTransformInterpolation(uid.Value, entityState.NetEntity, meta, sourceTick, compState);
+                    break;
+                }
+            }
+        }
+
+        private void SetupFutureTransformInterpolation(
+            in StateData data,
+            GameTick sourceTick,
+            in ComponentChange futureTransform)
+        {
+            if (data.EnteringPvs)
+                return;
+
+            SetupFutureTransformInterpolation(data.Uid, data.NetEntity, data.Meta, sourceTick, futureTransform);
+        }
+
+        private void SetupFutureTransformInterpolation(
+            EntityUid uid,
+            NetEntity netEntity,
+            MetaDataComponent meta,
+            GameTick sourceTick,
+            in ComponentChange futureTransform)
+        {
+            if (IsPredictionEnabled && _players.LocalEntity is { } localEntity && localEntity == uid)
+                return;
+
+            if (!meta.NetComponents.TryGetValue(futureTransform.NetID, out var component)
+                || component is not TransformComponent xform)
+            {
+                return;
+            }
+
+            if (!TryResolveTransformState(netEntity, futureTransform.NetID, futureTransform.State, out var targetState))
+                return;
+
+            if (!_entities.TryGetEntity(targetState.ParentID, out var targetParent))
+                return;
+
+            var xformSys = _entitySystemManager.GetEntitySystem<TransformSystem>();
+            xformSys.SetupNetworkInterpolation(
+                uid,
+                xform.Coordinates,
+                xform.LocalRotation,
+                sourceTick,
+                new EntityCoordinates(targetParent.Value, targetState.LocalPosition),
+                targetState.Rotation,
+                futureTransform.LastModifiedTick);
+        }
+
+        private bool TryResolveTransformState(
+            NetEntity netEntity,
+            ushort transformNetId,
+            IComponentState? state,
+            [NotNullWhen(true)] out TransformComponentState? transform)
+        {
+            switch (state)
+            {
+                case TransformComponentState full:
+                    transform = full;
+                    return true;
+                case TransformComponentDeltaState delta:
+                {
+                    if (!_processor.TryGetLastServerStates(netEntity, out var lastStates)
+                        || !lastStates.TryGetValue(transformNetId, out var current)
+                        || current is not TransformComponentState currentTransform)
+                    {
+                        transform = null;
+                        return false;
+                    }
+
+                    transform = delta.CreateNewFullState(currentTransform);
+                    return true;
+                }
+                default:
+                    transform = null;
+                    return false;
             }
         }
 

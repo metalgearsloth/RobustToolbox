@@ -282,8 +282,7 @@ Had full state: {LastFullState != null}"
                 return false;
 
             // remove any old states we find to keep the buffer clean
-            // also look for the next state if we are interpolating.
-            var nextTick = LastFullState.ToSequence + 1;
+            // also look for the next usable state if we are interpolating.
             for (var i = 0; i < _stateBuffer.Count; i++)
             {
                 var state = _stateBuffer[i];
@@ -293,7 +292,10 @@ Had full state: {LastFullState != null}"
                     _stateBuffer.RemoveSwap(i);
                     i--;
                 }
-                else if (Interpolation && state.ToSequence == nextTick)
+                else if (Interpolation
+                         && state.ToSequence > LastFullState.ToSequence
+                         && state.FromSequence <= LastFullState.ToSequence
+                         && (nextState == null || state.ToSequence < nextState.ToSequence))
                 {
                     nextState = state;
                 }
@@ -424,8 +426,6 @@ Had full state: {LastFullState != null}"
             nextState = null;
 
             var targetCurTick = _timing.LastProcessedTick + 1;
-            var targetNextTick = _timing.LastProcessedTick + 2;
-
             GameTick? futureStateLowestFromSeq = null;
 
             for (var i = 0; i < _stateBuffer.Count; i++)
@@ -439,8 +439,13 @@ Had full state: {LastFullState != null}"
                     continue;
                 }
 
-                if (Interpolation && state.ToSequence == targetNextTick)
+                if (Interpolation
+                    && state.ToSequence > targetCurTick
+                    && state.FromSequence <= targetCurTick
+                    && (nextState == null || state.ToSequence < nextState.ToSequence))
+                {
                     nextState = state;
+                }
 
                 if (state.ToSequence > targetCurTick && (futureStateLowestFromSeq == null || futureStateLowestFromSeq.Value > state.FromSequence))
                 {

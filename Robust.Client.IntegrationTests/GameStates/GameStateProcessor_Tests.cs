@@ -165,6 +165,47 @@ namespace Robust.UnitTesting.Client.GameStates
         }
 
         [Test]
+        public void InterpolationUsesBufferedFutureStateWhenNextTickIsMissing()
+        {
+            var (timing, processor) = SetupEmptyProcessor();
+            processor.OnFullStateReceived();
+            processor.Interpolation = true;
+
+            timing.LastRealTick = new GameTick(3);
+            timing.LastProcessedTick = new GameTick(3);
+            processor.AddNewState(GameStateFactory(3, 4));
+            processor.AddNewState(GameStateFactory(4, 6));
+
+            var result = processor.TryGetServerState(out var curState, out var nextState);
+
+            Assert.That(result, Is.True);
+            Assert.That(curState, Is.Not.Null);
+            Assert.That(curState!.ToSequence, Is.EqualTo(new GameTick(4)));
+            Assert.That(nextState, Is.Not.Null);
+            Assert.That(nextState!.ToSequence, Is.EqualTo(new GameTick(6)));
+        }
+
+        [Test]
+        public void InterpolationIgnoresFutureStateWithUnusableDeltaBase()
+        {
+            var (timing, processor) = SetupEmptyProcessor();
+            processor.OnFullStateReceived();
+            processor.Interpolation = true;
+
+            timing.LastRealTick = new GameTick(3);
+            timing.LastProcessedTick = new GameTick(3);
+            processor.AddNewState(GameStateFactory(3, 4));
+            processor.AddNewState(GameStateFactory(5, 6));
+
+            var result = processor.TryGetServerState(out var curState, out var nextState);
+
+            Assert.That(result, Is.True);
+            Assert.That(curState, Is.Not.Null);
+            Assert.That(curState!.ToSequence, Is.EqualTo(new GameTick(4)));
+            Assert.That(nextState, Is.Null);
+        }
+
+        [Test]
         public void PvsDetachMergesMessagesWithSameTick()
         {
             var (_, processor) = SetupEmptyProcessor();
