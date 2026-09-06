@@ -482,6 +482,38 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         Assert.That(mapAId, Is.Not.EqualTo(MapId.Nullspace));
     }
 
+    [Test]
+    public void LargeMovementSnapsWithExistingRenderState()
+    {
+        var (_, mapId) = CreateMap();
+        var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
+        var xform = _entities.GetComponent<TransformComponent>(uid);
+        MakeRemote(xform);
+
+        ApplyRemote(() => _transforms.SetLocalPosition(uid, Vector2.UnitX, xform));
+        SetHalfTick();
+        _transforms.FrameUpdate(0f);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var data), Is.True);
+            Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.NetworkInterpolation));
+            AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(0.5f, 0f));
+        });
+
+        var maxDistance = _configuration.GetCVar(CVars.NetInterpMaxDistance);
+        var snapTarget = new Vector2(maxDistance + 2f, 0f);
+        ApplyRemote(() => _transforms.SetLocalPosition(uid, snapTarget, xform));
+
+        Assert.Multiple(() =>
+        {
+            AssertVector(_transforms.GetWorldPosition(uid), snapTarget);
+            AssertVector(_transforms.GetRenderWorldPosition(uid), snapTarget,
+                "large movement must not be interpolated over an active render state");
+            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out _), Is.False);
+        });
+    }
+
     [TestCase(false)]
     [TestCase(true)]
     public void ContainerInsertionRemovalSnap(bool handSlot)
@@ -635,6 +667,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
             _timing.CurTick = _timing.LastRealTick + 1;
             _transforms.SetLocalPosition(uid, new Vector2(tickDistance, 0f), xform);
+            AssertNoPredictionCorrection(uid);
             var previousSimulationEndpoint = _transforms.GetWorldPosition(uid).X;
 
             // Repeated rollback should update the destination without restarting visible motion.
@@ -647,6 +680,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
                     accumulator -= tickPeriod;
                     simulationTick++;
                     RollbackPredictionTick(simulationTick);
+                    AssertNoPredictionCorrection(uid);
                     var simulationEndpoint = _transforms.GetWorldPosition(uid).X;
                     simulationDisplacements.Add(simulationEndpoint - previousSimulationEndpoint);
                     previousSimulationEndpoint = simulationEndpoint;
@@ -654,6 +688,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
                 _timing.TickRemainder = TimeSpan.FromSeconds(accumulator);
                 _transforms.FrameUpdate(frameTime);
+                AssertNoPredictionCorrection(uid);
 
                 var render = _transforms.GetRenderWorldPosition(uid).X;
                 if (previousRender is { } previous && simulationTick >= 2)
@@ -677,16 +712,19 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
                 using (_timing.StartStateApplicationArea())
                     _transforms.SetLocalPosition(uid, new Vector2((realTickIndex - 1) * tickDistance, 0f), xform);
+                AssertNoPredictionCorrection(uid);
 
                 xform.LastModifiedTick = previousRealTick;
 
                 _timing.CurTick = _timing.LastRealTick = nextRealTick;
                 using (_timing.StartStateApplicationArea())
                     _transforms.SetLocalPosition(uid, new Vector2(realTickIndex * tickDistance, 0f), xform);
+                AssertNoPredictionCorrection(uid);
 
                 _timing.CurTick = nextRealTick + 1;
                 using (_timing.StartPastPredictionArea())
                     _transforms.SetLocalPosition(uid, new Vector2((realTickIndex + 1) * tickDistance, 0f), xform);
+                AssertNoPredictionCorrection(uid);
             }
         }
         finally
@@ -800,6 +838,14 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
     }
 
     private float CorrectionHalfLifeForTest => _configuration.GetCVar(CVars.NetInterpCorrectionHalfLife);
+
+    private void AssertNoPredictionCorrection(EntityUid uid)
+    {
+        if (!_transforms.TryGetRenderPoseDebugData(uid, out var data))
+            return;
+
+        Assert.That(data.Type, Is.Not.EqualTo(RenderInterpolationType.PredictionCorrection));
+    }
 
     private void MakeRemote(params EntityUid[] entities)
     {
