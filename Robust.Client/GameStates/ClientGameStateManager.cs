@@ -140,6 +140,8 @@ namespace Robust.Client.GameStates
         /// If true, this will cause received game states to be ignored. Used by integration tests.
         /// </summary>
         public bool DropStates;
+
+        private int _dropStateCount;
 #endif
 
         private bool _resettingPredictedEntities;
@@ -181,6 +183,9 @@ namespace Robust.Client.GameStates
             _conHost.RegisterCommand("detachent", Loc.GetString("cmd-detach-ent-desc"), Loc.GetString("cmd-detach-ent-help"), DetachEntCommand);
             _conHost.RegisterCommand("localdelete", Loc.GetString("cmd-local-delete-desc"), Loc.GetString("cmd-local-delete-help"), LocalDeleteEntCommand);
             _conHost.RegisterCommand("fullstatereset", Loc.GetString("cmd-full-state-reset-desc"), Loc.GetString("cmd-full-state-reset-help"), (_, _, _) => RequestFullState());
+#if DEBUG
+            _conHost.RegisterCommand("dropstate", "Drops the next received game state.", "dropstate [count]", DropStateCommand);
+#endif
 
             _entities.ComponentAdded += OnComponentAdded;
             _entitySystemManager.SystemLoaded += OnEntitySystemLoaded;
@@ -308,6 +313,12 @@ namespace Robust.Client.GameStates
 #if DEBUG
             if (DropStates)
                 return;
+
+            if (_dropStateCount > 0)
+            {
+                _dropStateCount--;
+                return;
+            }
 #endif
             // We ONLY ack states that are definitely going to get applied. Otherwise the sever might assume that we
             // applied a state containing entity-creation information, which it would then no longer send to us when
@@ -1814,6 +1825,27 @@ namespace Robust.Client.GameStates
                 _entities.RemoveComponent(uid, comp);
             }
         }
+
+#if DEBUG
+        private void DropStateCommand(IConsoleShell shell, string argStr, string[] args)
+        {
+            if (args.Length > 1)
+            {
+                shell.WriteError("Usage: dropstate [count]");
+                return;
+            }
+
+            var count = 1;
+            if (args.Length == 1 && (!int.TryParse(args[0], out count) || count < 1))
+            {
+                shell.WriteError("Count must be a positive integer.");
+                return;
+            }
+
+            _dropStateCount += count;
+            shell.WriteLine($"Dropping the next {_dropStateCount} game state(s).");
+        }
+#endif
         #endregion
 
         public bool IsQueuedForDetach(NetEntity entity)
