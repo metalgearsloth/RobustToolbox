@@ -191,20 +191,30 @@ internal sealed partial class NetInterpOverlay : Overlay
 
         public override void Execute(IConsoleShell shell, string argStr, string[] args)
         {
+            var snap = true;
+            var offset = 0;
+
+            if (args.Length > 0 && args[0].Equals("active", StringComparison.OrdinalIgnoreCase))
+            {
+                snap = false;
+                offset = 1;
+            }
+
             float x;
             float y;
             var rotationDegrees = 0f;
-            if (args.Length == 0)
+            var remaining = args.Length - offset;
+            if (remaining == 0)
             {
-                var offset = _random.NextVector2(0.5f, 1f);
-                x = offset.X;
-                y = offset.Y;
+                var randomOffset = _random.NextVector2(0.5f, 1f);
+                x = randomOffset.X;
+                y = randomOffset.Y;
             }
-            else if (args.Length is < 2 or > 3
-                     || !float.TryParse(args[0], NumberStyles.Float, CultureInfo.InvariantCulture, out x)
-                     || !float.TryParse(args[1], NumberStyles.Float, CultureInfo.InvariantCulture, out y)
-                     || args.Length == 3
-                     && !float.TryParse(args[2], NumberStyles.Float, CultureInfo.InvariantCulture, out rotationDegrees))
+            else if (remaining is < 2 or > 3
+                     || !float.TryParse(args[offset], NumberStyles.Float, CultureInfo.InvariantCulture, out x)
+                     || !float.TryParse(args[offset + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out y)
+                     || remaining == 3
+                     && !float.TryParse(args[offset + 2], NumberStyles.Float, CultureInfo.InvariantCulture, out rotationDegrees))
             {
                 shell.WriteError(Help);
                 return;
@@ -222,9 +232,12 @@ internal sealed partial class NetInterpOverlay : Overlay
             var rotationOffset = Angle.FromDegrees(rotationDegrees);
 
             transforms.SetWorldPositionRotation(player, position + new Vector2(x, y), rotation + rotationOffset, xform);
-            transforms.SnapRenderPose(player, true);
+            if (snap)
+                transforms.SnapRenderPose(player, true);
+
             shell.WriteLine(
-                $"Moved local entity {player} by ({x:0.###}, {y:0.###}), {rotationOffset.Degrees:0.###} degrees without notifying the server.");
+                $"Moved local entity {player} by ({x:0.###}, {y:0.###}), {rotationOffset.Degrees:0.###} degrees without notifying the server"
+                + (snap ? "." : " while preserving active render interpolation."));
         }
     }
 

@@ -542,7 +542,7 @@ cmd-renderlerp-desc = Toggles the debug drawing of the render interpolation.
 cmd-renderlerp-help = Usage: {$command} [0|all|self|EntityUid]
 
 cmd-net_mispredict-desc = Applies an unsent local transform offset to test prediction correction smoothing.
-cmd-net_mispredict-help = Usage: {$command} [<x> <y> [rotation degrees]]
+cmd-net_mispredict-help = Usage: {$command} [active] [<x> <y> [rotation degrees]]
 
 
 cmd-vram-desc = Displays video memory usage statics by the game.

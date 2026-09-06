@@ -291,6 +291,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
         networkState.Alpha = 0f;
         networkState.InterpolationStartAlpha = 0f;
         networkState.LastFramePhase = -1f;
+        ClearPredictionReplay(ref networkState);
         networkState.PendingPredictionRollback = false;
         networkState.CorrectionTranslation = Vector2.Zero;
         networkState.CorrectionRotation = Angle.Zero;
@@ -314,6 +315,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
         state.Alpha = 0f;
         state.InterpolationStartAlpha = 0f;
         state.LastFramePhase = -1f;
+        ClearPredictionReplay(ref state);
         state.PendingPredictionRollback = false;
         state.CorrectionTranslation = Vector2.Zero;
         state.CorrectionRotation = Angle.Zero;
@@ -330,6 +332,13 @@ public sealed partial class TransformSystem : SharedTransformSystem
         // Prediction rollback may revisit a previous simulation tick so keep it so the correction remains continuous.
         var newPredictionTick = _timing.InPrediction && _timing.CurTick > state.ChangeTick;
 
+        if (newPredictionTick
+            && state.HasPredictionReplayTarget
+            && _timing.CurTick > state.PredictionReplayTargetTick)
+        {
+            UpdatePredictionReplay(ref state);
+        }
+
         if (newPredictionTick)
         {
             state.CorrectionAnchor = rendered;
@@ -342,6 +351,15 @@ public sealed partial class TransformSystem : SharedTransformSystem
 
         if (!state.PendingPredictionRollback)
         {
+            if (_timing.ApplyingState && state.Type == RenderInterpolationType.PredictionInterpolation)
+            {
+                state.PredictionReplayTarget = ResolveEndpoint(state.Target, 0);
+                state.PredictionReplayTargetTick = state.ChangeTick;
+                state.HasPredictionReplayTarget = true;
+                state.PredictionReplayChanged = false;
+                state.PredictionReplayIncompatible = false;
+            }
+
             state.CorrectionAnchor = rendered;
             state.InterpolationStartAlpha = state.Alpha;
             state.PendingPredictionRollback = true;
@@ -352,6 +370,81 @@ public sealed partial class TransformSystem : SharedTransformSystem
         state.CoordinateSpace = coordinateSpace;
         state.LastRendered = state.CorrectionAnchor;
         state.Type = RenderInterpolationType.PredictionInterpolation;
+        UpdatePredictionReplay(ref state);
+    }
+
+    private bool CompletePredictionReplay(ref RenderPoseState state)
+    {
+        if (state.HasPredictionReplayTarget)
+        {
+            if (!_timing.ApplyingState && state.ChangeTick <= state.PredictionReplayTargetTick)
+                UpdatePredictionReplay(ref state);
+            else
+                ClearPredictionReplayTarget(ref state);
+        }
+
+        if (state.PredictionReplayIncompatible)
+        {
+            ClearPredictionReplay(ref state);
+            return false;
+        }
+
+        if (!state.PredictionReplayChanged)
+        {
+            ClearPredictionReplay(ref state);
+            return true;
+        }
+
+        state.Type = RenderInterpolationType.PredictionCorrection;
+        state.CorrectionRemaining = 1f;
+        RebaseCorrection(ref state, state.Target);
+        ClearPredictionReplay(ref state);
+        return true;
+    }
+
+    private void UpdatePredictionReplay(ref RenderPoseState state)
+    {
+        if (!state.HasPredictionReplayTarget
+            || _timing.CurTick < state.PredictionReplayTargetTick
+            || (_timing.ApplyingState && _timing.CurTick > _timing.LastRealTick))
+        {
+            return;
+        }
+
+        var oldTarget = state.PredictionReplayTarget;
+        var newTarget = ResolveEndpoint(state.Target, 0);
+        ClearPredictionReplayTarget(ref state);
+
+        if (!TryGetCommonRenderSpace(oldTarget.TargetRenderSpace, newTarget.TargetRenderSpace, out _))
+        {
+            state.PredictionReplayIncompatible = true;
+            return;
+        }
+
+        if (PredictionEndpointsDiffer(oldTarget, newTarget))
+            state.PredictionReplayChanged = true;
+    }
+
+    private static void ClearPredictionReplay(ref RenderPoseState state)
+    {
+        ClearPredictionReplayTarget(ref state);
+        state.PredictionReplayChanged = false;
+        state.PredictionReplayIncompatible = false;
+    }
+
+    private static void ClearPredictionReplayTarget(ref RenderPoseState state)
+    {
+        state.PredictionReplayTarget = default;
+        state.PredictionReplayTargetTick = default;
+        state.HasPredictionReplayTarget = false;
+    }
+
+    private bool PredictionEndpointsDiffer(in RenderPose oldTarget, in RenderPose newTarget)
+    {
+        var distance = Vector2.DistanceSquared(oldTarget.Position, newTarget.Position);
+
+        return distance > _minCorrectionTranslationSquared
+               || Math.Abs(Angle.ShortestDistance(oldTarget.Rotation, newTarget.Rotation).Theta) > _minCorrectionRotation;
     }
 
     private bool ShouldInterpolate(in RenderPoseEndpoint source, in RenderPoseEndpoint target)
@@ -401,6 +494,14 @@ public sealed partial class TransformSystem : SharedTransformSystem
                 continue;
 
             if (!XformQuery.TryGetComponent(uid, out var xform) || xform.Deleted)
+            {
+                _remove.Add(uid);
+                continue;
+            }
+
+            if (state.Type == RenderInterpolationType.PredictionInterpolation
+                && state.PendingPredictionRollback
+                && !CompletePredictionReplay(ref state))
             {
                 _remove.Add(uid);
                 continue;
@@ -860,10 +961,15 @@ public sealed partial class TransformSystem : SharedTransformSystem
         public float Alpha;
         public float InterpolationStartAlpha;
         public float LastFramePhase;
+        public RenderPose PredictionReplayTarget;
+        public GameTick PredictionReplayTargetTick;
         public Vector2 CorrectionTranslation;
         public Angle CorrectionRotation;
         public float CorrectionRemaining;
         public bool PendingPredictionRollback;
+        public bool HasPredictionReplayTarget;
+        public bool PredictionReplayChanged;
+        public bool PredictionReplayIncompatible;
         public bool SnapRotation;
     }
 }

@@ -632,6 +632,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
             float? previousRender = null;
             var velocities = new List<float>();
             var simulationDisplacements = new List<float>();
+            var predictionCorrections = 0;
 
             _timing.CurTick = _timing.LastRealTick + 1;
             _transforms.SetLocalPosition(uid, new Vector2(tickDistance, 0f), xform);
@@ -647,6 +648,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
                     accumulator -= tickPeriod;
                     simulationTick++;
                     RollbackPredictionTick(simulationTick);
+                    RecordPredictionCorrection();
                     var simulationEndpoint = _transforms.GetWorldPosition(uid).X;
                     simulationDisplacements.Add(simulationEndpoint - previousSimulationEndpoint);
                     previousSimulationEndpoint = simulationEndpoint;
@@ -654,6 +656,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
                 _timing.TickRemainder = TimeSpan.FromSeconds(accumulator);
                 _transforms.FrameUpdate(frameTime);
+                RecordPredictionCorrection();
 
                 var render = _transforms.GetRenderWorldPosition(uid).X;
                 if (previousRender is { } previous && simulationTick >= 2)
@@ -668,7 +671,17 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
                 Assert.That(simulationDisplacements.Max(), Is.EqualTo(tickDistance).Within(0.0001f));
                 Assert.That(velocities.Min(), Is.EqualTo(speed).Within(0.25f));
                 Assert.That(velocities.Max(), Is.EqualTo(speed).Within(0.25f));
+                Assert.That(predictionCorrections, Is.Zero);
             });
+
+            void RecordPredictionCorrection()
+            {
+                if (_transforms.TryGetRenderPoseDebugData(uid, out var data)
+                    && data.Type == RenderInterpolationType.PredictionCorrection)
+                {
+                    predictionCorrections++;
+                }
+            }
 
             void RollbackPredictionTick(int realTickIndex)
             {
@@ -726,7 +739,75 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
     }
 
     [Test]
-    public void PredictionRollbackPreservesProgressAndUpdatesDestination()
+    public void ActivePredictionInterpolationCreatesCorrectionWhenReplayChangesEndpoint()
+    {
+        var (_, mapId) = CreateMap();
+        var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
+        var xform = _entities.GetComponent<TransformComponent>(uid);
+
+        _timing.CurTick = new GameTick(_timing.LastRealTick.Value + 1);
+        _transforms.SetLocalPosition(uid, Vector2.UnitX, xform);
+        SetTickAlpha(0.25f);
+        _transforms.FrameUpdate(0f);
+
+        var renderedBeforeRollback = _transforms.GetRenderWorldPosition(uid);
+        var predictedBeforeRollback = _transforms.GetWorldPosition(uid);
+
+        Assert.Multiple(() =>
+        {
+            AssertVector(renderedBeforeRollback, new Vector2(0.25f, 0f));
+            AssertVector(predictedBeforeRollback, Vector2.UnitX);
+            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var data), Is.True);
+            Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
+        });
+
+        using (_timing.StartStateApplicationArea())
+            _transforms.SetLocalPosition(uid, Vector2.Zero, xform);
+
+        AssertVector(
+            _transforms.GetRenderWorldPosition(uid),
+            renderedBeforeRollback,
+            "rollback must not expose the authoritative reset to rendering");
+
+        var replayedEndpoint = new Vector2(2f, 0f);
+        using (_timing.StartPastPredictionArea())
+            _transforms.SetLocalPosition(uid, replayedEndpoint, xform);
+
+        _transforms.FrameUpdate(0f);
+
+        Assert.Multiple(() =>
+        {
+            AssertVector(_transforms.GetWorldPosition(uid), replayedEndpoint);
+            AssertVector(
+                _transforms.GetRenderWorldPosition(uid),
+                renderedBeforeRollback,
+                "first post-replay render must stay anchored at the visible pose");
+            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var data), Is.True);
+            Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.PredictionCorrection));
+            AssertVector(data.Target.Position, replayedEndpoint);
+        });
+
+        _transforms.FrameUpdate(CorrectionHalfLifeForTest);
+        var afterHalfLife = _transforms.GetRenderWorldPosition(uid);
+        Assert.Multiple(() =>
+        {
+            Assert.That(afterHalfLife.X, Is.GreaterThan(renderedBeforeRollback.X));
+            Assert.That(afterHalfLife.X, Is.LessThan(replayedEndpoint.X));
+            AssertVector(afterHalfLife, new Vector2(1.125f, 0f));
+        });
+
+        _transforms.FrameUpdate(CorrectionHalfLifeForTest);
+        var afterFullLife = _transforms.GetRenderWorldPosition(uid);
+        Assert.Multiple(() =>
+        {
+            Assert.That(afterFullLife.X, Is.GreaterThan(afterHalfLife.X));
+            Assert.That(afterFullLife.X, Is.LessThan(replayedEndpoint.X));
+            AssertVector(afterFullLife, new Vector2(1.5625f, 0f));
+        });
+    }
+
+    [Test]
+    public void PredictionReplayPreservesProgressWhenEndpointMatches()
     {
         var (_, mapId) = CreateMap();
         var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
@@ -745,33 +826,27 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
         AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(0.25f, 0f));
 
+        _transforms.FrameUpdate(0f);
+        Assert.Multiple(() =>
+        {
+            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var data), Is.True);
+            Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
+            AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(0.25f, 0f));
+        });
+
         SetTickAlpha(0.5f);
         _transforms.FrameUpdate(0f);
         AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(0.5f, 0f));
 
-        using (_timing.StartStateApplicationArea())
-        {
-            _transforms.SetLocalPosition(uid, Vector2.Zero, xform);
-        }
-
-        using (_timing.StartPastPredictionArea())
-        {
-            _transforms.SetLocalPosition(uid, new Vector2(2f, 0f), xform);
-        }
-
         Assert.Multiple(() =>
         {
-            AssertVector(xform.LocalPosition, new Vector2(2f, 0f));
-            AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(0.5f, 0f));
+            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var data), Is.True);
+            Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
         });
-
-        SetTickAlpha(0.75f);
-        _transforms.FrameUpdate(0f);
-        AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(1.25f, 0f));
 
         SetTickAlpha(1f);
         _transforms.FrameUpdate(0f);
-        AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(2f, 0f));
+        AssertVector(_transforms.GetRenderWorldPosition(uid), Vector2.UnitX);
     }
 
     private (EntityUid Uid, MapId Id) CreateMap()
