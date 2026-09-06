@@ -840,6 +840,9 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
             using (_timing.StartPastPredictionArea())
                 _transforms.SetLocalPosition(uid, new Vector2(tickDistance * 3f, 0f), xform);
 
+            _timing.CurTick += 1;
+            _transforms.SetLocalPosition(uid, new Vector2(tickDistance * 4f, 0f), xform);
+
             _transforms.FrameUpdate(0f);
             Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var correction), Is.True);
             Assert.Multiple(() =>
@@ -847,6 +850,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
                 Assert.That(correction.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
                 Assert.That(correction.CorrectionActive, Is.True);
                 AssertVector(_transforms.GetRenderWorldPosition(uid), renderedBeforeRollback);
+                AssertVector(correction.BaseRendered.Position, new Vector2(tickDistance * 3.25f, 0f));
             });
 
             var initialError = Vector2.Distance(correction.Rendered.Position, correction.BaseRendered.Position);
@@ -867,7 +871,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
                     accumulator -= tickPeriod;
                     completedTicks++;
                     _timing.CurTick = _timing.CurTick + 1;
-                    _transforms.SetLocalPosition(uid, new Vector2(tickDistance * (3f + completedTicks), 0f), xform);
+                    _transforms.SetLocalPosition(uid, new Vector2(tickDistance * (4f + completedTicks), 0f), xform);
                 }
 
                 _timing.TickRemainder = TimeSpan.FromSeconds(accumulator);
@@ -897,6 +901,54 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
                     "the base predicted movement must remain interpolated at render frame rate");
                 Assert.That(maxRenderedStep, Is.LessThan(0.04f),
                     "the final render pose must not snap at a predicted tick boundary");
+            });
+        }
+        finally
+        {
+            _timing.SetTickRateAt(oldTickRate, _timing.CurTick);
+            _timing.TickRemainder = TimeSpan.Zero;
+        }
+    }
+
+    [Test]
+    public void PredictionCorrectionStartsBeforeCurrentTickPredictionMovesAgain()
+    {
+        var oldTickRate = _timing.TickRate;
+        try
+        {
+            const int tickRate = 30;
+            const float speed = 3f;
+            _timing.SetTickRateAt((ushort) tickRate, _timing.CurTick);
+            var tickDistance = speed / tickRate;
+            var (_, mapId) = CreateMap();
+            var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
+            var xform = _entities.GetComponent<TransformComponent>(uid);
+
+            _timing.CurTick = new GameTick(_timing.LastRealTick.Value + 1);
+            _transforms.SetLocalPosition(uid, new Vector2(tickDistance, 0f), xform);
+            SetTickAlpha(0.25f);
+            _transforms.FrameUpdate(0f);
+            var renderedBeforeRollback = _transforms.GetRenderWorldPosition(uid);
+
+            using (_timing.StartStateApplicationArea())
+                _transforms.SetLocalPosition(uid, Vector2.Zero, xform);
+            using (_timing.StartPastPredictionArea())
+                _transforms.SetLocalPosition(uid, new Vector2(tickDistance * 3f, 0f), xform);
+
+            // The current client tick can run before the next render frame.
+            _timing.CurTick += 1;
+            _transforms.SetLocalPosition(uid, new Vector2(tickDistance * 4f, 0f), xform);
+
+            _transforms.FrameUpdate(0f);
+            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var data), Is.True);
+            Assert.Multiple(() =>
+            {
+                Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
+                Assert.That(data.CorrectionActive, Is.True,
+                    "current-tick prediction must not discard the replay mismatch before correction starts");
+                AssertVector(data.Rendered.Position, renderedBeforeRollback,
+                    "first render after replay and current-tick prediction must stay anchored at the visible pose");
+                AssertVector(data.BaseRendered.Position, new Vector2(tickDistance * 3.25f, 0f));
             });
         }
         finally

@@ -180,6 +180,22 @@ public sealed partial class TransformSystem : SharedTransformSystem
             rendered = ResolveLastRenderedEndpoint(oldEndpoint, 0);
         }
 
+        var completedPredictionReplay = false;
+        if (!_timing.ApplyingState
+            && _timing.IsFirstTimePredicted
+            && hasExisting
+            && existing.Type == RenderInterpolationType.PredictionInterpolation
+            && existing.PendingPredictionRollback)
+        {
+            if (!CompletePredictionReplay(ref existing))
+            {
+                _renderPoses.Remove(uid);
+                return;
+            }
+
+            completedPredictionReplay = true;
+        }
+
         if (!TryGetCommonRenderSpace(source.RenderSpace, target.RenderSpace, out var coordinateSpace)
             || (!ShouldInterpolate(source, target) && !(hasExisting && existing.CorrectionActive)))
         {
@@ -211,6 +227,13 @@ public sealed partial class TransformSystem : SharedTransformSystem
                     target,
                     rendered,
                     coordinateSpace);
+                if (completedPredictionReplay && tickState.CorrectionActive)
+                {
+                    tickState.Alpha = GetInterpolationAlpha(ref tickState);
+                    tickState.CorrectionAnchor = rendered;
+                    RebaseCorrection(ref tickState);
+                }
+
                 return;
             }
 
