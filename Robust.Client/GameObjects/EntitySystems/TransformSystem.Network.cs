@@ -10,6 +10,7 @@ namespace Robust.Client.GameObjects;
 
 public sealed partial class TransformSystem
 {
+    // Network interpolation presents authoritative movement for entities that are not locally predicted.
     private void HandleAppliedTransformMove(
         EntityUid uid,
         TransformComponent xform,
@@ -33,6 +34,7 @@ public sealed partial class TransformSystem
             return;
         }
 
+        // Consecutive state application uses the previous authoritative tick as its source.
         var targetTick = _timing.LastProcessedTick;
         var sourceTick = targetTick > GameTick.Zero
             ? targetTick - 1
@@ -68,6 +70,7 @@ public sealed partial class TransformSystem
         GameTick targetTick,
         bool snapRotation)
     {
+        // Source and target ticks define duration, including gaps caused by dropped states.
         state.Source = source;
         state.Target = target;
         state.LastRendered = rendered;
@@ -100,6 +103,7 @@ public sealed partial class TransformSystem
         state.LastFramePhase = phase;
         state.LastFrameProcessedTick = processedTick;
 
+        // Advance by authoritative tick span instead of compressing every segment into one tick.
         var span = state.NetworkTargetTick.Value - state.ChangeTick.Value;
         var wholeTicks = processedTick > state.ChangeTick
             ? processedTick.Value - state.ChangeTick.Value - 1
@@ -115,6 +119,7 @@ public sealed partial class TransformSystem
         GameTick sourceTick,
         GameTick targetTick)
     {
+        // The game-state layer supplies a resolved future transform when an intermediate state is missing.
         if (targetTick <= sourceTick
             || !XformQuery.TryGetComponent(uid, out var xform)
             || xform.Deleted

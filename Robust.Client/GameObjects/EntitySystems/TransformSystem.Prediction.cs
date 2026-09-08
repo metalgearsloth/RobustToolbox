@@ -11,12 +11,14 @@ public sealed partial class TransformSystem
 {
     internal void BeginPredictionRollback(EntityUid uid, GameTick predictionTick)
     {
+        // Prediction interpolation is the normal tick-to-tick render path for locally simulated movement.
         if (_predictionReconciliation.Rollback.Status != PredictionRollbackStatus.Inactive)
             return;
 
         if (!XformQuery.TryGetComponent(uid, out var xform) || xform.Deleted)
             return;
 
+        // Keep the pose that was actually displayed while prediction is reset and run again.
         _predictionReconciliation.TryBeginRollback(
             uid,
             predictionTick,
@@ -25,6 +27,7 @@ public sealed partial class TransformSystem
 
     internal void CompletePredictionRollback(GameTick predictionTick)
     {
+        // Wait until prediction reaches the exact tick represented by the saved endpoint.
         ref var rollback = ref _predictionReconciliation.Rollback;
         if (rollback.Status != PredictionRollbackStatus.Pending
             || predictionTick < rollback.Tick)
@@ -89,6 +92,7 @@ public sealed partial class TransformSystem
         if (rollback.Status != PredictionRollbackStatus.Mismatch)
             return;
 
+        // Layer the visible error over the newly predicted base pose.
         ref var state = ref CollectionsMarshal.GetValueRefOrNullRef(_renderPoses, rollback.Entity);
         RenderPose basePose;
 
@@ -160,6 +164,7 @@ public sealed partial class TransformSystem
             return;
         }
 
+        // The input sequence records which queued inputs were included in this endpoint.
         _predictionReconciliation.Record(uid, endpoint, predictionTick, inputSequence);
     }
 
@@ -181,6 +186,7 @@ public sealed partial class TransformSystem
         if (!_predictionReconciliation.TryGetLatestSample(uid, out var sample))
             return;
 
+        // Transform helpers can change the endpoint after the regular end-of-tick sample.
         RecordPredictionSample(uid, _timing.CurTick, sample.InputSequence);
     }
 
@@ -240,6 +246,7 @@ public sealed partial class TransformSystem
         bool preserveCorrection,
         bool snapRotation)
     {
+        // Correction is independent from this base interpolation and may continue across later ticks.
         state.Source = source;
         state.Target = target;
         state.LastRendered = rendered;
@@ -265,6 +272,7 @@ public sealed partial class TransformSystem
         in RenderPose rendered,
         EntityUid coordinateSpace)
     {
+        // Rollback updates the saved segment without starting a new visible interpolation.
         RebasePredictionState(ref state, source, target, rendered, coordinateSpace);
         state.Type = RenderInterpolationType.PredictionInterpolation;
     }
@@ -321,6 +329,7 @@ public sealed partial class TransformSystem
         EntityUid coordinateSpace,
         InterpolationDecision decision)
     {
+        // Authoritative updates own the segment while a predicted entity returns to server state.
         if (state.PredictionHandoff == PredictionHandoffStatus.Inactive)
             return false;
 
@@ -358,6 +367,7 @@ public sealed partial class TransformSystem
             return;
         }
 
+        // Continue from the displayed pose until an authoritative segment replaces this handoff.
         var sourceTick = _timing.LastProcessedTick;
         StartPredictionHandoff(
             ref state,
@@ -414,6 +424,7 @@ public sealed partial class TransformSystem
     private struct PredictionReconciliationTracker
     {
         public PredictionRollback Rollback;
+        // Two samples cover the current comparison tick and the immediately preceding candidate.
         private PredictionSample _latestSample;
         private PredictionSample _previousSample;
 

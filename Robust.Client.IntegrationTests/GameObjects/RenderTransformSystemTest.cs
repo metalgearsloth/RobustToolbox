@@ -709,17 +709,17 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         });
     }
 
-    [Test]
-    public void PredictionRollbackDoesNotDisturbConstantRenderVelocity()
+    [TestCase(30)]
+    [TestCase(60)]
+    public void PredictionRollbackDoesNotDisturbConstantRenderVelocity(int tickRate)
     {
         // The real sanity check of "please god just make the entity move from point A to point B cleanly".
         var oldTickRate = _timing.TickRate;
         try
         {
-            const int tickRate = 30;
             const float renderFps = 144f;
-            _timing.SetTickRateAt((ushort) tickRate, _timing.CurTick);
-            var tickPeriod = (float) _timing.TickPeriod.TotalSeconds;
+            _timing.SetTickRateAt((ushort)tickRate, _timing.CurTick);
+            var tickPeriod = (float)_timing.TickPeriod.TotalSeconds;
             var frameTime = 1f / renderFps;
             const float speed = 4.5f;
             var tickDistance = speed / tickRate;
@@ -734,7 +734,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
             _timing.CurTick = _timing.LastRealTick + 1;
             _transforms.SetLocalPosition(uid, new Vector2(tickDistance, 0f), xform);
-            AssertNoPredictionCorrection(uid);
+            AssertNoCorrection(uid);
             var previousSimulationEndpoint = _transforms.GetWorldPosition(uid).X;
 
             // Repeated rollback should update the destination without restarting visible motion.
@@ -747,7 +747,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
                     accumulator -= tickPeriod;
                     simulationTick++;
                     RollbackPredictionTick(simulationTick);
-                    AssertNoPredictionCorrection(uid);
+                    AssertNoCorrection(uid);
                     var simulationEndpoint = _transforms.GetWorldPosition(uid).X;
                     simulationDisplacements.Add(simulationEndpoint - previousSimulationEndpoint);
                     previousSimulationEndpoint = simulationEndpoint;
@@ -755,7 +755,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
                 _timing.TickRemainder = TimeSpan.FromSeconds(accumulator);
                 _transforms.FrameUpdate(frameTime);
-                AssertNoPredictionCorrection(uid);
+                AssertNoCorrection(uid);
 
                 var render = _transforms.GetRenderWorldPosition(uid).X;
                 if (previousRender is { } previous && simulationTick >= 2)
@@ -768,8 +768,8 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
             {
                 Assert.That(simulationDisplacements.Min(), Is.EqualTo(tickDistance).Within(0.0001f));
                 Assert.That(simulationDisplacements.Max(), Is.EqualTo(tickDistance).Within(0.0001f));
-                Assert.That(velocities.Min(), Is.EqualTo(speed).Within(0.25f));
-                Assert.That(velocities.Max(), Is.EqualTo(speed).Within(0.25f));
+                Assert.That(velocities.Min(), Is.EqualTo(speed).Within(0.0001f));
+                Assert.That(velocities.Max(), Is.EqualTo(speed).Within(0.0001f));
             });
 
             void RollbackPredictionTick(int realTickIndex)
@@ -779,19 +779,19 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
                 using (_timing.StartStateApplicationArea())
                     _transforms.SetLocalPosition(uid, new Vector2((realTickIndex - 1) * tickDistance, 0f), xform);
-                AssertNoPredictionCorrection(uid);
+                AssertNoCorrection(uid);
 
                 xform.LastModifiedTick = previousRealTick;
 
                 _timing.CurTick = _timing.LastRealTick = nextRealTick;
                 using (_timing.StartStateApplicationArea())
                     _transforms.SetLocalPosition(uid, new Vector2(realTickIndex * tickDistance, 0f), xform);
-                AssertNoPredictionCorrection(uid);
+                AssertNoCorrection(uid);
 
                 _timing.CurTick = nextRealTick + 1;
                 using (_timing.StartPastPredictionArea())
                     _transforms.SetLocalPosition(uid, new Vector2((realTickIndex + 1) * tickDistance, 0f), xform);
-                AssertNoPredictionCorrection(uid);
+                AssertNoCorrection(uid);
             }
         }
         finally
@@ -802,7 +802,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
     }
 
     [Test]
-    public void SnappedLocalMispredictionUsesPredictionCorrection()
+    public void SnappedLocalMispredictionUsesCorrection()
     {
         var (_, mapId) = CreateMap();
         var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
@@ -811,6 +811,9 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         _timing.CurTick = new GameTick(_timing.LastRealTick.Value + 2);
         _transforms.SetLocalPosition(uid, Vector2.UnitX, xform);
         _transforms.SnapRenderPose(uid, true);
+        var predictionTick = _timing.CurTick;
+        _transforms.RecordPredictionSample(uid, predictionTick, 0);
+        _transforms.BeginPredictionRollback(uid, predictionTick);
 
         AssertVector(_transforms.GetWorldPosition(uid), Vector2.UnitX);
         AssertVector(_transforms.GetRenderWorldPosition(uid), Vector2.UnitX);
@@ -818,12 +821,16 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         using (_timing.StartStateApplicationArea())
             _transforms.SetLocalPosition(uid, Vector2.Zero, xform);
 
+        _transforms.CompletePredictionRollback(predictionTick);
+        _transforms.FinishPredictionRollback();
+
         Assert.Multiple(() =>
         {
             AssertVector(_transforms.GetWorldPosition(uid), Vector2.Zero);
             AssertVector(_transforms.GetRenderWorldPosition(uid), Vector2.UnitX);
             Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var data), Is.True);
-            Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.PredictionCorrection));
+            Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
+            Assert.That(data.CorrectionTranslation.LengthSquared(), Is.GreaterThan(0f));
         });
 
         _transforms.FrameUpdate(CorrectionHalfLifeForTest);
@@ -906,12 +913,16 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
     private float CorrectionHalfLifeForTest => _configuration.GetCVar(CVars.NetInterpCorrectionHalfLife);
 
-    private void AssertNoPredictionCorrection(EntityUid uid)
+    private void AssertNoCorrection(EntityUid uid)
     {
         if (!_transforms.TryGetRenderPoseDebugData(uid, out var data))
             return;
 
-        Assert.That(data.Type, Is.Not.EqualTo(RenderInterpolationType.PredictionCorrection));
+        Assert.Multiple(() =>
+        {
+            Assert.That(data.CorrectionTranslation, Is.EqualTo(Vector2.Zero));
+            Assert.That(data.CorrectionRotation, Is.EqualTo(Angle.Zero));
+        });
     }
 
     private void MakeRemote(params EntityUid[] entities)

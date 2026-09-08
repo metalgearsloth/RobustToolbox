@@ -9,6 +9,7 @@ namespace Robust.Client.GameObjects;
 
 public sealed partial class TransformSystem
 {
+    // Snapped rotation can update immediately while position keeps its normal interpolation.
     private void UpdateSnappedRenderRotation(EntityUid uid, in RenderPoseEndpoint target)
     {
         if (!_snapRenderRotations.TryGetValue(uid, out var snapped)
@@ -18,6 +19,7 @@ public sealed partial class TransformSystem
             return;
         }
 
+        // Only first-time prediction may replace the displayed snapped angle.
         var targetPose = ResolveEndpoint(target, 0);
         _snapRenderRotations[uid] = snapped with { Rotation = targetPose.Rotation };
     }
@@ -38,6 +40,7 @@ public sealed partial class TransformSystem
         Angle worldRotation,
         TransformComponent? xform = null)
     {
+        // Some predicted input changes simulation rotation without changing what this frame displays.
         var hadState = _renderPoses.TryGetValue(uid, out var state);
         var hasSnapRotation = _snapRenderRotations.TryGetValue(uid, out var snapRotation);
 
@@ -55,6 +58,9 @@ public sealed partial class TransformSystem
             _snapRenderRotations.Remove(uid);
     }
 
+    /// <summary>
+    /// Snaps rendered rotation to its simulation target without interrupting position interpolation.
+    /// </summary>
     public void SnapRenderRotation(EntityUid uid)
     {
         if (_timing.ApplyingState)
@@ -72,11 +78,17 @@ public sealed partial class TransformSystem
         SnapRenderRotation(ref state);
     }
 
+    /// <summary>
+    /// Overrides an entity's rendered world rotation without changing its simulation transform.
+    /// </summary>
     public void SetRenderRotationOverride(EntityUid uid, Angle rotation)
     {
         _renderRotationOverrides[uid] = rotation;
     }
 
+    /// <summary>
+    /// Clears an entity's rendered world rotation override.
+    /// </summary>
     public void ClearRenderRotationOverride(EntityUid uid)
     {
         _renderRotationOverrides.Remove(uid);

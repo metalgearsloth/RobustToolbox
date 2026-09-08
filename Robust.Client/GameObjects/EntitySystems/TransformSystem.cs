@@ -776,15 +776,6 @@ public sealed partial class TransformSystem : SharedTransformSystem
     }
 
     /// <summary>
-    /// Snaps rendered rotation to its simulation target without interrupting position interpolation.
-    /// </summary>
-    /// <summary>
-    /// Overrides an entity's rendered world rotation without changing its simulation transform.
-    /// </summary>
-    /// <summary>
-    /// Clears an entity's rendered world rotation override.
-    /// </summary>
-    /// <summary>
     /// Enlarges a render query enough to include sparse poses whose simulation target lies outside the viewport.
     /// </summary>
     [Pure]
