@@ -50,6 +50,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
 
     private readonly Dictionary<EntityUid, SnappedRenderRotation> _snapRenderRotations = new();
     private readonly HashSet<EntityUid> _snapRenderRotationEntities = new();
+    private readonly HashSet<EntityUid> _snapRenderPoseAfterParentChange = new();
     private readonly Dictionary<EntityUid, Angle> _renderRotationOverrides = new();
     private readonly HashSet<EntityUid> _remove = new();
 
@@ -88,6 +89,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
         _renderPoses.Clear();
         _snapRenderRotations.Clear();
         _snapRenderRotationEntities.Clear();
+        _snapRenderPoseAfterParentChange.Clear();
         _renderRotationOverrides.Clear();
         _predictionReconciliation.Clear();
         base.Shutdown();
@@ -101,6 +103,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
         _renderPoses.Clear();
         _snapRenderRotations.Clear();
         _snapRenderRotationEntities.Clear();
+        _snapRenderPoseAfterParentChange.Clear();
         _renderRotationOverrides.Clear();
         _remove.Clear();
         _predictionReconciliation.Clear();
@@ -112,6 +115,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
         _renderPoses.Remove(uid);
         _snapRenderRotations.Remove(uid);
         _snapRenderRotationEntities.Remove(uid);
+        _snapRenderPoseAfterParentChange.Remove(uid);
         _renderRotationOverrides.Remove(uid);
 
         _predictionReconciliation.RemoveEntity(uid);
@@ -145,6 +149,12 @@ public sealed partial class TransformSystem : SharedTransformSystem
     {
         var uid = args.Sender;
         var xform = args.Component;
+
+        if (_snapRenderPoseAfterParentChange.Remove(uid))
+        {
+            SnapRenderPose(uid);
+            return;
+        }
 
         if (xform.Deleted || !TryCreateEndpoint(args.NewPosition, args.NewRotation, out var target))
         {
@@ -762,7 +772,9 @@ public sealed partial class TransformSystem : SharedTransformSystem
     {
         _renderPoses.Remove(uid);
         _snapRenderRotations.Remove(uid);
+        _snapRenderPoseAfterParentChange.Remove(uid);
         _renderRotationOverrides.Remove(uid);
+        _predictionReconciliation.MarkRollbackHardReset(uid);
         RefreshPredictionSample(uid);
 
         if (!recursive || !XformQuery.TryGetComponent(uid, out var xform))
@@ -773,6 +785,18 @@ public sealed partial class TransformSystem : SharedTransformSystem
         {
             SnapRenderPose(child, true);
         }
+    }
+
+    /// <summary>
+    /// Discards render interpolation and suppresses the move event that follows a parent-change event.
+    /// </summary>
+    /// <remarks>
+    /// Parent-change events are raised before the corresponding move event creates render interpolation.
+    /// </remarks>
+    public void SnapRenderPoseAfterParentChange(EntityUid uid, bool recursive = false)
+    {
+        SnapRenderPose(uid, recursive);
+        _snapRenderPoseAfterParentChange.Add(uid);
     }
 
     /// <summary>

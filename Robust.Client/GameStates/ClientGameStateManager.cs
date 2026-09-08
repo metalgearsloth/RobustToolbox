@@ -423,13 +423,13 @@ namespace Robust.Client.GameStates
                     continue;
                 }
 
-                if (PredictionNeedsResetting && _players.LocalEntity is { } localEntity)
+                if (PredictionNeedsResetting && TryGetPredictionReconciliationTarget(out var reconciliationTarget))
                 {
                     var transforms = _entitySystemManager.GetEntitySystem<TransformSystem>();
-                    if (TryGetPredictionComparisonTick(transforms, localEntity, false, out var predictionTick)
-                        || TryGetPredictionComparisonTick(transforms, localEntity, true, out predictionTick))
+                    if (TryGetPredictionComparisonTick(transforms, reconciliationTarget, false, out var predictionTick)
+                        || TryGetPredictionComparisonTick(transforms, reconciliationTarget, true, out predictionTick))
                     {
-                        transforms.BeginPredictionRollback(localEntity, predictionTick);
+                        transforms.BeginPredictionRollback(reconciliationTarget, predictionTick);
                     }
                 }
 
@@ -569,8 +569,23 @@ namespace Robust.Client.GameStates
             transformSystem.CompletePredictionRollback(_timing.CurTick);
             transformSystem.FinishPredictionRollback();
 
-            if (IsPredictionEnabled && _players.LocalEntity is { } predictedEntity)
-                transformSystem.RecordPredictionSample(predictedEntity, _timing.CurTick, predictionInputSequence);
+            if (IsPredictionEnabled && TryGetPredictionReconciliationTarget(out var sampleTarget))
+                transformSystem.RecordPredictionSample(sampleTarget, _timing.CurTick, predictionInputSequence);
+        }
+
+        private bool TryGetPredictionReconciliationTarget(out EntityUid target)
+        {
+            if (_players.LocalEntity is not { Valid: true } localEntity)
+            {
+                target = default;
+                return false;
+            }
+
+            // Movement relays can make another entity the locally controlled transform.
+            var ev = new GetPredictionReconciliationTargetEvent(localEntity);
+            _entities.EventBus.RaiseLocalEvent(localEntity, ref ev);
+            target = ev.Target;
+            return target.IsValid() && _entities.EntityExists(target);
         }
 
         private bool TryGetPredictionComparisonTick(

@@ -29,7 +29,9 @@ public sealed partial class TransformSystem
     {
         // Wait until prediction reaches the exact tick represented by the saved endpoint.
         ref var rollback = ref _predictionReconciliation.Rollback;
-        if (rollback.Status != PredictionRollbackStatus.Pending
+.
+        var explicitSnap = rollback.Status == PredictionRollbackStatus.HardReset;
+        if (rollback.Status is not (PredictionRollbackStatus.Pending or PredictionRollbackStatus.HardReset)
             || predictionTick < rollback.Tick)
         {
             return;
@@ -64,7 +66,9 @@ public sealed partial class TransformSystem
                 rollback.Status = PredictionRollbackStatus.Match;
                 break;
             case InterpolationDecision.Interpolate:
-                rollback.Status = PredictionRollbackStatus.Mismatch;
+                rollback.Status = explicitSnap
+                    ? PredictionRollbackStatus.HardReset
+                    : PredictionRollbackStatus.Mismatch;
                 break;
             default:
                 throw new ArgumentOutOfRangeException();
@@ -467,6 +471,13 @@ public sealed partial class TransformSystem
             _previousSample = default;
         }
 
+        public void MarkRollbackHardReset(EntityUid uid)
+        {
+            // Keep a real mismatch snapped when rollback finishes.
+            if (Rollback.Entity == uid)
+                Rollback.Status = PredictionRollbackStatus.HardReset;
+        }
+
         public void Record(
             EntityUid uid,
             in RenderPoseEndpoint endpoint,
@@ -546,5 +557,26 @@ public sealed partial class TransformSystem
         Inactive,
         WaitingForAuthoritativeState,
         RebasePending,
+    }
+}
+
+/// <summary>
+/// Allows client features to redirect transform reconciliation to the entity currently controlled by the local player.
+/// </summary>
+[ByRefEvent]
+public record struct GetPredictionReconciliationTargetEvent
+{
+    /// <summary>
+    /// Entity whose predicted transform should be sampled and reconciled.
+    /// </summary>
+    public EntityUid Target;
+
+    /// <summary>
+    /// Initializes the query with the attached local entity as the default target.
+    /// </summary>
+    /// <param name="target">The default reconciliation target.</param>
+    public GetPredictionReconciliationTargetEvent(EntityUid target)
+    {
+        Target = target;
     }
 }
