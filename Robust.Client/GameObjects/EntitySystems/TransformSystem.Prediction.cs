@@ -29,7 +29,7 @@ public sealed partial class TransformSystem
     {
         // Wait until prediction reaches the exact tick represented by the saved endpoint.
         ref var rollback = ref _predictionReconciliation.Rollback;
-.
+
         var explicitSnap = rollback.Status == PredictionRollbackStatus.HardReset;
         if (rollback.Status is not (PredictionRollbackStatus.Pending or PredictionRollbackStatus.HardReset)
             || predictionTick < rollback.Tick)
