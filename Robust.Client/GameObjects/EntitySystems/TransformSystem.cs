@@ -11,7 +11,6 @@ using Robust.Shared.IoC;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
 using Robust.Shared.Timing;
-using Robust.Shared.Utility;
 using Robust.Shared.ViewVariables;
 using Unsafe = System.Runtime.CompilerServices.Unsafe;
 
@@ -25,13 +24,17 @@ public sealed partial class TransformSystem : SharedTransformSystem
 {
     /*
      * Okay so because our game runs at TPS, we need to be able to smoothly render entities A -> B
-     * We also need to handle mispredicts.
+     * We also need to handle mispredicts (correction for translation OR rotation)
      *
      * RenderPoseState handles what the render position of a particular entity was so we can avoid mutating transformcomponent
      * itself and can just let it run in the simulation just fine.
      *
      * We also use it to store any corrections required so they can be adjusted over _correctionHalfLife time
      * (it's multiplicative so... half every time).
+     *
+     * Most of the complexity comes from handling:
+     * - Dropped state buffer so we lerp from A -> C
+     * - Handling mispredicted states with correction.
      */
 
     // Oh yeah the only reason the unsafe ref checks are everywhere is so we can access the direct dictionary value
@@ -45,7 +48,9 @@ public sealed partial class TransformSystem : SharedTransformSystem
     [ViewVariables]
     private readonly Dictionary<EntityUid, RenderPoseState> _renderPoses = new();
 
-    private readonly HashSet<EntityUid> _snapRenderRotations = new();
+    private readonly Dictionary<EntityUid, SnappedRenderRotation> _snapRenderRotations = new();
+    private readonly HashSet<EntityUid> _snapRenderRotationEntities = new();
+    private readonly Dictionary<EntityUid, Angle> _renderRotationOverrides = new();
     private readonly HashSet<EntityUid> _remove = new();
 
     private float _maxInterpolationDistance;
@@ -54,6 +59,8 @@ public sealed partial class TransformSystem : SharedTransformSystem
     private float _correctionHalfLife;
     private float _minCorrectionTranslationSquared;
     private float _minCorrectionRotation;
+
+    private PredictionReconciliationTracker _predictionReconciliation;
 
     /// <summary>
     /// Invoked when interpolation crosses render spaces. The default policy only permits the same map.
@@ -80,6 +87,9 @@ public sealed partial class TransformSystem : SharedTransformSystem
         OnGlobalMoveEvent -= OnTransformMoved;
         _renderPoses.Clear();
         _snapRenderRotations.Clear();
+        _snapRenderRotationEntities.Clear();
+        _renderRotationOverrides.Clear();
+        _predictionReconciliation.Clear();
         base.Shutdown();
     }
 
@@ -90,7 +100,10 @@ public sealed partial class TransformSystem : SharedTransformSystem
     {
         _renderPoses.Clear();
         _snapRenderRotations.Clear();
+        _snapRenderRotationEntities.Clear();
+        _renderRotationOverrides.Clear();
         _remove.Clear();
+        _predictionReconciliation.Clear();
     }
 
     [SubscribeLocalEvent]
@@ -98,6 +111,10 @@ public sealed partial class TransformSystem : SharedTransformSystem
     {
         _renderPoses.Remove(uid);
         _snapRenderRotations.Remove(uid);
+        _snapRenderRotationEntities.Remove(uid);
+        _renderRotationOverrides.Remove(uid);
+
+        _predictionReconciliation.RemoveEntity(uid);
     }
 
     private void SetMaxInterpolationDistance(float value)
@@ -135,6 +152,8 @@ public sealed partial class TransformSystem : SharedTransformSystem
             return;
         }
 
+        UpdateSnappedRenderRotation(uid, target);
+
         if (!TryCreateEndpoint(args.OldPosition, args.OldRotation, out var oldEndpoint))
         {
             _renderPoses.Remove(uid);
@@ -143,6 +162,10 @@ public sealed partial class TransformSystem : SharedTransformSystem
 
         ref var existing = ref CollectionsMarshal.GetValueRefOrNullRef(_renderPoses, uid);
         var hasExisting = !Unsafe.IsNullRef(ref existing);
+        var snapRotation = _snapRenderRotationEntities.Contains(uid);
+
+        if (hasExisting)
+            existing.SnapRotation = snapRotation;
 
         var source = oldEndpoint;
         RenderPose rendered;
@@ -157,21 +180,17 @@ public sealed partial class TransformSystem : SharedTransformSystem
             var parentOrRenderSpaceChanged = oldEndpoint.Parent != target.Parent
                                              || oldEndpoint.RenderSpace != target.RenderSpace;
             var sameTickPredictionRollback = existing.Type == RenderInterpolationType.PredictionInterpolation
-                                           && existing.ChangeTick == _timing.CurTick
-                                           && (existing.PendingPredictionRollback || _timing.ApplyingState);
-            var predictionRollbackOrCorrection = existing.Type == RenderInterpolationType.PredictionCorrection
-                                                 || sameTickPredictionRollback;
-
+                                             && existing.ChangeTick == _timing.CurTick
+                                             && (existing.PendingPredictionRollback || _timing.ApplyingState);
             // Multiple changes in one simulation tick retain the original source: A -> B -> C is A -> C.
             // Most notable with substepping or content systems touching it.
-            if (existing.Type != RenderInterpolationType.PredictionCorrection
-                && existing.ChangeTick == _timing.CurTick
+            if (existing.ChangeTick == _timing.CurTick
                 && existing.Alpha <= existing.InterpolationStartAlpha
                 && !existing.PendingPredictionRollback)
             {
                 source = existing.Source;
             }
-            else if ((parentOrRenderSpaceChanged || predictionRollbackOrCorrection)
+            else if ((parentOrRenderSpaceChanged || sameTickPredictionRollback)
                      && !TryBindRenderPoseToParent(rendered, args.OldPosition.EntityId, out source))
             {
                 source = oldEndpoint;
@@ -182,217 +201,149 @@ public sealed partial class TransformSystem : SharedTransformSystem
             rendered = ResolveLastRenderedEndpoint(oldEndpoint, 0);
         }
 
-        if (!TryGetCommonRenderSpace(source.RenderSpace, target.RenderSpace, out var coordinateSpace)
-            || !ShouldInterpolate(source, target))
+        if (!TryGetCommonRenderSpace(source.RenderSpace, target.RenderSpace, out var coordinateSpace))
         {
             _renderPoses.Remove(uid);
+            return;
+        }
+
+        // Corrections never make a rejected transform segment... interpolatable, interpolable?
+        var decision = ClassifyInterpolation(source, target);
+        if (decision == InterpolationDecision.Snap)
+        {
+            _renderPoses.Remove(uid);
+            return;
+        }
+
+        if (hasExisting && TryHandlePredictionHandoff(
+                ref existing,
+                source,
+                target,
+                rendered,
+                coordinateSpace,
+                decision))
+        {
+            return;
+        }
+
+        if (decision == InterpolationDecision.Ignore)
+        {
+            HandleIgnoredTransformMove(uid, target, rendered, coordinateSpace, hasExisting, ref existing, snapRotation);
             return;
         }
 
         if (!_timing.ApplyingState)
         {
-            if (_timing.IsFirstTimePredicted)
-            {
-                // First-time prediction renders over the current tick. Rollback keeps the last rendered pose below.
-                if (hasExisting
-                    && existing.Type == RenderInterpolationType.PredictionInterpolation
-                    && existing.ChangeTick == _timing.CurTick
-                    && existing.Alpha <= existing.InterpolationStartAlpha
-                    && !existing.PendingPredictionRollback)
-                {
-                    existing.Target = target;
-                    existing.CoordinateSpace = coordinateSpace;
-                    return;
-                }
-
-                ref var tickState = ref CollectionsMarshal.GetValueRefOrAddDefault(_renderPoses, uid, out _);
-                StartTickInterpolation(
-                    ref tickState,
-                    source,
-                    target,
-                    rendered,
-                    coordinateSpace,
-                    RenderInterpolationType.PredictionInterpolation);
-                return;
-            }
-
-            if (hasExisting && existing.Type == RenderInterpolationType.PredictionCorrection)
-            {
-                existing.Target = target;
-                existing.CoordinateSpace = coordinateSpace;
-
-                if (existing.PendingPredictionRollback && _timing.InPrediction)
-                    RebaseCorrection(ref existing, target);
-
-                return;
-            }
-
-            if (hasExisting)
-            {
-                RebaseTickInterpolation(ref existing, source, target, rendered, coordinateSpace);
-                return;
-            }
-
-            // Rollback without render state must not interpolate from a temporary rollback position.
-            _renderPoses.Remove(uid);
+            HandlePredictedTransformMove(
+                uid,
+                source,
+                target,
+                rendered,
+                coordinateSpace,
+                hasExisting,
+                ref existing,
+                snapRotation);
             return;
         }
 
-        if (hasExisting && existing.Type == RenderInterpolationType.PredictionInterpolation)
-        {
-            RebaseTickInterpolation(ref existing, source, target, rendered, coordinateSpace);
-            return;
-        }
-
-        // ResetPredictedEntities restores the cached server state before ApplyGameState applies the newly
-        // arrived state. The reset creates the correction below while LastModifiedTick is still in the future,
-        // but ResetPredictedEntities normalises that tick before the new state is applied. Preserve the correction
-        // across both so prediction rollback can rebase it against the final predicted pose.
-        if (hasExisting && existing.Type == RenderInterpolationType.PredictionCorrection)
-        {
-            if (!existing.PendingPredictionRollback)
-                existing.CorrectionAnchor = rendered;
-
-            existing.Source = source;
-            existing.Target = target;
-            existing.LastRendered = rendered;
-            existing.CoordinateSpace = coordinateSpace;
-            existing.ChangeTick = _timing.CurTick;
-            existing.PendingPredictionRollback = true;
-            RebaseCorrection(ref existing, target);
-            return;
-        }
-
-        // A transform that was dirty in a future prediction tick is being reset.
-        // Keep the last render pose on screen and decay.
-        if (xform.LastModifiedTick > _timing.LastRealTick)
-        {
-            ref var correction = ref CollectionsMarshal.GetValueRefOrAddDefault(_renderPoses, uid, out _);
-            correction.Source = source;
-            correction.Target = target;
-            correction.LastRendered = rendered;
-            correction.CorrectionAnchor = rendered;
-            correction.CoordinateSpace = coordinateSpace;
-            correction.ChangeTick = _timing.CurTick;
-            correction.Type = RenderInterpolationType.PredictionCorrection;
-            correction.PendingPredictionRollback = true;
-            correction.CorrectionRemaining = 1f;
-            RebaseCorrection(ref correction, target);
-            return;
-        }
-
-        ref var networkState = ref CollectionsMarshal.GetValueRefOrAddDefault(_renderPoses, uid, out _);
-        networkState.Source = source;
-        networkState.Target = target;
-        networkState.LastRendered = rendered;
-        networkState.CoordinateSpace = coordinateSpace;
-        networkState.ChangeTick = _timing.CurTick;
-        networkState.Type = RenderInterpolationType.NetworkInterpolation;
-        networkState.Alpha = 0f;
-        networkState.InterpolationStartAlpha = 0f;
-        networkState.LastFramePhase = -1f;
-        networkState.PendingPredictionRollback = false;
-        networkState.CorrectionTranslation = Vector2.Zero;
-        networkState.CorrectionRotation = Angle.Zero;
-        networkState.CorrectionRemaining = 0f;
+        HandleAppliedTransformMove(
+            uid,
+            xform,
+            source,
+            target,
+            rendered,
+            coordinateSpace,
+            hasExisting,
+            ref existing,
+            snapRotation);
     }
 
-    private void StartTickInterpolation(
-        ref RenderPoseState state,
-        in RenderPoseEndpoint source,
+    private void HandleIgnoredTransformMove(
+        EntityUid uid,
         in RenderPoseEndpoint target,
         in RenderPose rendered,
         EntityUid coordinateSpace,
-        RenderInterpolationType type)
+        bool hasExisting,
+        ref RenderPoseState existing,
+        bool snapRotation)
     {
-        state.Source = source;
-        state.Target = target;
-        state.LastRendered = rendered;
-        state.CoordinateSpace = coordinateSpace;
-        state.ChangeTick = _timing.CurTick;
-        state.Type = type;
-        state.Alpha = 0f;
-        state.InterpolationStartAlpha = 0f;
-        state.LastFramePhase = -1f;
-        state.PendingPredictionRollback = false;
-        state.CorrectionTranslation = Vector2.Zero;
-        state.CorrectionRotation = Angle.Zero;
-        state.CorrectionRemaining = 0f;
+        if (hasExisting && HasCorrection(in existing))
+        {
+            StartPredictionInterpolation(
+                ref existing,
+                target,
+                target,
+                rendered,
+                coordinateSpace,
+                true,
+                snapRotation);
+            existing.Alpha = 1f;
+            existing.InterpolationStartAlpha = 1f;
+            return;
+        }
+
+        _renderPoses.Remove(uid);
     }
 
-    private void RebaseTickInterpolation(
-        ref RenderPoseState state,
+    private InterpolationDecision ClassifyInterpolation(
         in RenderPoseEndpoint source,
-        in RenderPoseEndpoint target,
-        in RenderPose rendered,
-        EntityUid coordinateSpace)
-    {
-        // Prediction rollback may revisit a previous simulation tick so keep it so the correction remains continuous.
-        var newPredictionTick = _timing.InPrediction && _timing.CurTick > state.ChangeTick;
-
-        if (newPredictionTick)
-        {
-            state.CorrectionAnchor = rendered;
-            state.InterpolationStartAlpha = 0f;
-            state.Alpha = 0f;
-            state.LastFramePhase = -1f;
-            state.ChangeTick = _timing.CurTick;
-            state.PendingPredictionRollback = true;
-        }
-
-        if (!state.PendingPredictionRollback)
-        {
-            state.CorrectionAnchor = rendered;
-            state.InterpolationStartAlpha = state.Alpha;
-            state.PendingPredictionRollback = true;
-        }
-
-        state.Source = source;
-        state.Target = target;
-        state.CoordinateSpace = coordinateSpace;
-        state.LastRendered = state.CorrectionAnchor;
-        state.Type = RenderInterpolationType.PredictionInterpolation;
-    }
-
-    private bool ShouldInterpolate(in RenderPoseEndpoint source, in RenderPoseEndpoint target)
+        in RenderPoseEndpoint target)
     {
         var sourcePose = ResolveEndpoint(source, 0);
         var targetPose = ResolveEndpoint(target, 0);
         var distance = Vector2.DistanceSquared(sourcePose.Position, targetPose.Position);
 
         if (distance >= _maxInterpolationDistanceSquared)
-            return false;
+            return InterpolationDecision.Snap;
 
-        return distance > _minInterpolationDistanceSquared
-               || !sourcePose.Rotation.EqualsApprox(targetPose.Rotation);
+        if (distance <= _minInterpolationDistanceSquared
+            && sourcePose.Rotation.EqualsApprox(targetPose.Rotation))
+        {
+            return InterpolationDecision.Ignore;
+        }
+
+        return InterpolationDecision.Interpolate;
     }
 
-    private void RebaseCorrection(ref RenderPoseState state, in RenderPoseEndpoint target)
+    private bool ExceedsMaxInterpolationDistance(in RenderPose source, in RenderPose target)
+        => Vector2.DistanceSquared(source.Position, target.Position) >= _maxInterpolationDistanceSquared;
+
+    private static bool EndpointsEqualApprox(in RenderPoseEndpoint a, in RenderPoseEndpoint b)
     {
-        // Store correction as an offset from the current target. Future target changes can then rebase
-        // the same visible pose without restarting from rollback-local coordinates.
-        var targetPose = ResolveEndpoint(target, 0);
-        state.CorrectionTranslation = state.CorrectionAnchor.Position - targetPose.Position;
+        return a.Parent == b.Parent
+               && a.RenderSpace == b.RenderSpace
+               && a.LocalPosition.EqualsApprox(b.LocalPosition)
+               && a.LocalRotation.EqualsApprox(b.LocalRotation);
+    }
+
+    private void StartCorrection(ref RenderPoseState state, in RenderPose anchor, in RenderPose basePose)
+    {
+        // The base interpolation keeps advancing while this render-space error decays.
+        state.CorrectionTranslation = anchor.Position - basePose.Position;
         state.CorrectionRotation = state.SnapRotation
             ? Angle.Zero
-            : Angle.ShortestDistance(targetPose.Rotation, state.CorrectionAnchor.Rotation);
-        state.LastRendered = state.CorrectionAnchor;
-        state.Alpha = 0f;
+            : Angle.ShortestDistance(basePose.Rotation, anchor.Rotation);
+        state.LastRendered = anchor;
+    }
+
+    private static bool HasCorrection(in RenderPoseState state)
+    {
+        return state.CorrectionTranslation != Vector2.Zero
+               || state.CorrectionRotation != Angle.Zero;
+    }
+
+    private static void ClearCorrection(ref RenderPoseState state)
+    {
+        state.CorrectionTranslation = Vector2.Zero;
+        state.CorrectionRotation = Angle.Zero;
     }
 
     public override void FrameUpdate(float frameTime)
     {
         base.FrameUpdate(frameTime);
 
-        foreach (var uid in _snapRenderRotations)
-        {
-            ref var state = ref CollectionsMarshal.GetValueRefOrNullRef(_renderPoses, uid);
-            if (!Unsafe.IsNullRef(ref state))
-                SnapRenderRotation(ref state);
-        }
-
-        _snapRenderRotations.Clear();
         _remove.Clear();
+        var correctionDecay = -1f;
 
         foreach (var (uid, _) in _renderPoses)
         {
@@ -406,27 +357,42 @@ public sealed partial class TransformSystem : SharedTransformSystem
                 continue;
             }
 
-            // Mispredict so smooth it back.
-            if (state.Type == RenderInterpolationType.PredictionCorrection)
+            var correctionStarted = false;
+            if (state.PredictionHandoff == PredictionHandoffStatus.RebasePending)
+            {
+                // State application and prediction have finished, so the network base is stable for this frame.
+                state.Alpha = GetInterpolationAlpha(ref state);
+                var basePose = GetBaseRenderPose(in state, 0);
+                if (ExceedsMaxInterpolationDistance(state.LastRendered, basePose))
+                {
+                    _remove.Add(uid);
+                    continue;
+                }
+
+                StartCorrection(ref state, state.LastRendered, basePose);
+                state.PredictionHandoff = PredictionHandoffStatus.WaitingForAuthoritativeState;
+                correctionStarted = true;
+            }
+
+            if (!correctionStarted && HasCorrection(in state))
             {
                 state.PendingPredictionRollback = false;
 
-                if (frameTime > 0f)
+                if (correctionDecay < 0f)
                 {
-                    var decay = _correctionHalfLife <= 0f
-                        ? 0f
-                        : MathF.Pow(0.5f, frameTime / _correctionHalfLife);
-                    state.CorrectionTranslation *= decay;
-                    state.CorrectionRotation *= decay;
-                    state.CorrectionRemaining *= decay;
+                    correctionDecay = frameTime <= 0f
+                        ? 1f
+                        : _correctionHalfLife <= 0f
+                            ? 0f
+                            : MathF.Pow(0.5f, frameTime / _correctionHalfLife);
                 }
 
-                state.Alpha = 1f - state.CorrectionRemaining;
+                state.CorrectionTranslation *= correctionDecay;
+                state.CorrectionRotation *= correctionDecay;
             }
-            else
-            {
+
+            if (!correctionStarted)
                 state.Alpha = GetInterpolationAlpha(ref state);
-            }
         }
 
         // Resolve poses after interpolation has advanced so moving parents are cached for children.
@@ -439,20 +405,45 @@ public sealed partial class TransformSystem : SharedTransformSystem
             if (_remove.Contains(uid))
                 continue;
 
+            var xform = XformQuery.GetComponent(uid);
+            var hasCorrection = HasCorrection(in state);
+            if (state.PredictionHandoff != PredictionHandoffStatus.Inactive
+                && _timing.LastRealTick >= state.PredictionHandoffTick)
+            {
+                state.PredictionHandoffTick = GameTick.Zero;
+                state.PredictionHandoff = PredictionHandoffStatus.Inactive;
+            }
+
+            var keepPrediction = state.Type == RenderInterpolationType.PredictionInterpolation
+                                 && xform.LastModifiedTick > _timing.LastRealTick;
+
+            if (!hasCorrection
+                && state.Alpha >= 1f
+                && keepPrediction
+                && TryCreateEndpoint(xform.Coordinates, xform.LocalRotation, out var endpoint))
+            {
+                state.Source = endpoint;
+                state.Target = endpoint;
+                state.InterpolationStartAlpha = 1f;
+            }
+
             state.LastRendered = GetRenderPoseInternal(uid, 0);
 
             if (state.Type == RenderInterpolationType.PredictionInterpolation)
                 state.PendingPredictionRollback = false;
 
-            if (state.Type != RenderInterpolationType.PredictionCorrection && state.Alpha >= 1f)
-            {
-                _remove.Add(uid);
-                continue;
-            }
-
-            if (state.Type == RenderInterpolationType.PredictionCorrection
+            if (hasCorrection
                 && state.CorrectionTranslation.LengthSquared() < _minCorrectionTranslationSquared
                 && Math.Abs(state.CorrectionRotation.Theta) < _minCorrectionRotation)
+            {
+                ClearCorrection(ref state);
+                hasCorrection = false;
+            }
+
+            if (!hasCorrection
+                && state.Alpha >= 1f
+                && !keepPrediction
+                && state.PredictionHandoff == PredictionHandoffStatus.Inactive)
             {
                 _remove.Add(uid);
             }
@@ -468,6 +459,12 @@ public sealed partial class TransformSystem : SharedTransformSystem
     {
         if (_timing.TickPeriod <= TimeSpan.Zero)
             return 1f;
+
+        if (state.Type == RenderInterpolationType.NetworkInterpolation
+            && state.NetworkTargetTick > state.ChangeTick)
+        {
+            return GetNetworkInterpolationAlpha(ref state);
+        }
 
         // Prediction runs ahead of ChangeTick; clamp old segments when the phase wraps.
         var phase = _timing.TickPhase;
@@ -564,45 +561,55 @@ public sealed partial class TransformSystem : SharedTransformSystem
 
         if (_renderPoses.TryGetValue(uid, out var state))
         {
-            var snapRotation = state.SnapRotation || _snapRenderRotations.Contains(uid);
-            if (state.Type == RenderInterpolationType.PredictionCorrection)
-            {
-                var correctionTarget = ResolveEndpoint(state.Target, depth + 1);
-                return new RenderPose(
-                    correctionTarget.Position + state.CorrectionTranslation,
-                    snapRotation
-                        ? correctionTarget.Rotation
-                        : correctionTarget.Rotation + state.CorrectionRotation,
-                    state.CoordinateSpace,
-                    state.Source.RenderSpace,
-                    state.Target.RenderSpace,
-                    state.Alpha);
-            }
+            var snapRotation = state.SnapRotation || _snapRenderRotations.ContainsKey(uid);
+            var pose = GetBaseRenderPose(in state, depth + 1);
 
-            var source = ResolveEndpoint(state.Source, depth + 1);
-            var target = ResolveEndpoint(state.Target, depth + 1);
-            var alpha = GetSegmentAlpha(state);
-            return new RenderPose(
-                Vector2.Lerp(source.Position, target.Position, alpha),
+            if (!HasCorrection(in state))
+                return ApplyRenderRotationOverride(uid, pose);
+
+            pose = new RenderPose(
+                pose.Position + state.CorrectionTranslation,
                 snapRotation
-                    ? target.Rotation
-                    : Angle.Lerp(source.Rotation, target.Rotation, alpha),
-                state.CoordinateSpace,
-                state.Source.RenderSpace,
-                state.Target.RenderSpace,
-                alpha);
+                    ? pose.Rotation
+                    : pose.Rotation + state.CorrectionRotation,
+                pose.CoordinateSpace,
+                pose.SourceRenderSpace,
+                pose.TargetRenderSpace,
+                pose.RenderSpaceAlpha);
+
+            return ApplyRenderRotationOverride(uid, pose);
         }
 
         var renderSpace = xform.MapUid ?? EntityUid.Invalid;
         if (!xform.ParentUid.IsValid())
-            return new RenderPose(xform.LocalPosition, xform.LocalRotation, renderSpace);
+        {
+            var pose = new RenderPose(xform.LocalPosition, xform.LocalRotation, renderSpace);
+            return ApplyRenderRotationOverride(uid, pose);
+        }
 
         var parent = GetRenderPoseInternal(xform.ParentUid, depth + 1);
-        return parent with
+        var childPose = parent with
         {
             Position = parent.Position + parent.Rotation.RotateVec(xform.LocalPosition),
             Rotation = parent.Rotation + xform.LocalRotation
         };
+        return ApplyRenderRotationOverride(uid, childPose);
+    }
+
+    private RenderPose GetBaseRenderPose(in RenderPoseState state, int depth)
+    {
+        var source = ResolveEndpoint(state.Source, depth);
+        var targetPose = ResolveEndpoint(state.Target, depth);
+        var alpha = GetSegmentAlpha(state);
+        return new RenderPose(
+            Vector2.Lerp(source.Position, targetPose.Position, alpha),
+            state.SnapRotation
+                ? targetPose.Rotation
+                : Angle.Lerp(source.Rotation, targetPose.Rotation, alpha),
+            state.CoordinateSpace,
+            state.Source.RenderSpace,
+            state.Target.RenderSpace,
+            alpha);
     }
 
     private RenderPose ResolveEndpoint(in RenderPoseEndpoint endpoint, int depth)
@@ -662,7 +669,11 @@ public sealed partial class TransformSystem : SharedTransformSystem
             return new RenderPose(xform.LocalPosition, xform.LocalRotation, renderSpace);
 
         var parent = GetLastRenderedPoseInternal(xform.ParentUid, depth + 1);
-        return parent with { Position = parent.Position + parent.Rotation.RotateVec(xform.LocalPosition), Rotation = parent.Rotation + xform.LocalRotation };
+        return parent with
+        {
+            Position = parent.Position + parent.Rotation.RotateVec(xform.LocalPosition),
+            Rotation = parent.Rotation + xform.LocalRotation
+        };
     }
 
     private bool TryCreateEndpoint(
@@ -751,6 +762,8 @@ public sealed partial class TransformSystem : SharedTransformSystem
     {
         _renderPoses.Remove(uid);
         _snapRenderRotations.Remove(uid);
+        _renderRotationOverrides.Remove(uid);
+        RefreshPredictionSample(uid);
 
         if (!recursive || !XformQuery.TryGetComponent(uid, out var xform))
             return;
@@ -765,27 +778,12 @@ public sealed partial class TransformSystem : SharedTransformSystem
     /// <summary>
     /// Snaps rendered rotation to its simulation target without interrupting position interpolation.
     /// </summary>
-    public void SnapRenderRotation(EntityUid uid)
-    {
-        ref var state = ref CollectionsMarshal.GetValueRefOrNullRef(_renderPoses, uid);
-        if (Unsafe.IsNullRef(ref state))
-        {
-            _snapRenderRotations.Add(uid);
-            return;
-        }
-
-        SnapRenderRotation(ref state);
-    }
-
-    private void SnapRenderRotation(ref RenderPoseState state)
-    {
-        var target = ResolveEndpoint(state.Target, 0);
-        state.SnapRotation = true;
-        state.CorrectionRotation = Angle.Zero;
-        state.CorrectionAnchor = state.CorrectionAnchor with { Rotation = target.Rotation };
-        state.LastRendered = state.LastRendered with { Rotation = target.Rotation };
-    }
-
+    /// <summary>
+    /// Overrides an entity's rendered world rotation without changing its simulation transform.
+    /// </summary>
+    /// <summary>
+    /// Clears an entity's rendered world rotation override.
+    /// </summary>
     /// <summary>
     /// Enlarges a render query enough to include sparse poses whose simulation target lies outside the viewport.
     /// </summary>
@@ -853,18 +851,27 @@ public sealed partial class TransformSystem : SharedTransformSystem
         public RenderPoseEndpoint Source;
         public RenderPoseEndpoint Target;
         public RenderPose LastRendered;
-        public RenderPose CorrectionAnchor;
         public EntityUid CoordinateSpace;
         public GameTick ChangeTick;
         public RenderInterpolationType Type;
         public float Alpha;
         public float InterpolationStartAlpha;
         public float LastFramePhase;
+        public GameTick LastFrameProcessedTick;
+        public GameTick NetworkTargetTick;
         public Vector2 CorrectionTranslation;
         public Angle CorrectionRotation;
-        public float CorrectionRemaining;
         public bool PendingPredictionRollback;
         public bool SnapRotation;
+        public GameTick PredictionHandoffTick;
+        public PredictionHandoffStatus PredictionHandoff;
+    }
+
+    private enum InterpolationDecision : byte
+    {
+        Ignore,
+        Interpolate,
+        Snap,
     }
 }
 

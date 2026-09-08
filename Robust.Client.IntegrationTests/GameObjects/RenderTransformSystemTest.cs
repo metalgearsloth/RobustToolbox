@@ -48,7 +48,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         _transforms.ResetRenderPoses();
         _timing.TickRemainder = TimeSpan.Zero;
         _timing.TickTimingAdjustment = 0f;
-        ((GameTiming) _timing).FreezeTickTimingAdjustment();
+        ((GameTiming)_timing).FreezeTickTimingAdjustment();
         _timing.CurTick = new GameTick(_timing.CurTick.Value + 1);
         _timing.LastRealTick = _timing.CurTick;
     }
@@ -102,6 +102,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         MakeRemote(xform);
 
         var moveEvents = 0;
+
         void CountMove(ref MoveEvent args)
         {
             if (args.Sender == uid)
@@ -510,6 +511,72 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
             AssertVector(_transforms.GetWorldPosition(uid), snapTarget);
             AssertVector(_transforms.GetRenderWorldPosition(uid), snapTarget,
                 "large movement must not be interpolated over an active render state");
+            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out _), Is.False);
+        });
+    }
+
+    [Test]
+    public void LargeMovementSnapsWithExistingCorrection()
+    {
+        var (_, mapId) = CreateMap();
+        var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
+        var xform = _entities.GetComponent<TransformComponent>(uid);
+
+        _timing.CurTick = new GameTick(_timing.LastRealTick.Value + 2);
+        _transforms.SetLocalPosition(uid, Vector2.UnitX, xform);
+        _transforms.SnapRenderPose(uid, true);
+        var predictionTick = _timing.CurTick;
+        _transforms.RecordPredictionSample(uid, predictionTick, 0);
+        _transforms.BeginPredictionRollback(uid, predictionTick);
+
+        using (_timing.StartStateApplicationArea())
+            _transforms.SetLocalPosition(uid, Vector2.Zero, xform);
+
+        _transforms.CompletePredictionRollback(predictionTick);
+        _transforms.FinishPredictionRollback();
+
+        Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var correction), Is.True);
+        Assert.That(correction.CorrectionTranslation.LengthSquared(), Is.GreaterThan(0f));
+
+        var maxDistance = _configuration.GetCVar(CVars.NetInterpMaxDistance);
+        var snapTarget = new Vector2(maxDistance + 2f, 0f);
+
+        using (_timing.StartStateApplicationArea())
+            _transforms.SetLocalPosition(uid, snapTarget, xform);
+
+        Assert.Multiple(() =>
+        {
+            AssertVector(_transforms.GetWorldPosition(uid), snapTarget);
+            AssertVector(_transforms.GetRenderWorldPosition(uid),
+                snapTarget,
+                "large movement must snap even when a prediction correction is active");
+            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out _), Is.False);
+        });
+    }
+
+    [Test]
+    public void LargeMovementSnapsDuringPredictionHandoff()
+    {
+        var (_, mapId) = CreateMap();
+        var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
+        var xform = _entities.GetComponent<TransformComponent>(uid);
+
+        _timing.CurTick = _timing.LastRealTick + 1;
+        _transforms.SetLocalPosition(uid, Vector2.UnitX, xform);
+        SetHalfTick();
+        _transforms.FrameUpdate(0f);
+        _transforms.EndPrediction(uid);
+
+        var maxDistance = _configuration.GetCVar(CVars.NetInterpMaxDistance);
+        var snapTarget = new Vector2(maxDistance + 2f, 0f);
+        ApplyRemote(() => _transforms.SetLocalPosition(uid, snapTarget, xform));
+
+        Assert.Multiple(() =>
+        {
+            AssertVector(_transforms.GetWorldPosition(uid), snapTarget);
+            AssertVector(_transforms.GetRenderWorldPosition(uid),
+                snapTarget,
+                "large movement must snap during a prediction-to-network handoff");
             Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out _), Is.False);
         });
     }
