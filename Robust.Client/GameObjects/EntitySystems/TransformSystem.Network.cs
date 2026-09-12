@@ -14,12 +14,12 @@ public sealed partial class TransformSystem
     private void HandleAppliedTransformMove(
         EntityUid uid,
         TransformComponent xform,
-        in RenderPoseEndpoint source,
-        in RenderPoseEndpoint target,
-        in RenderPose rendered,
+        in RenderTransformEndpoint source,
+        in RenderTransformEndpoint target,
+        in RenderTransform rendered,
         EntityUid coordinateSpace,
         bool hasExisting,
-        ref RenderPoseState existing,
+        ref RenderTransformState existing,
         bool snapRotation)
     {
         // A transform that was dirty in a future prediction tick is being reset. Compare it after prediction.
@@ -29,7 +29,7 @@ public sealed partial class TransformSystem
             if (hasExisting)
                 RebasePredictionInterpolation(ref existing, source, target, rendered, coordinateSpace);
             else
-                _renderPoses.Remove(uid);
+                _renderTransforms.Remove(uid);
 
             return;
         }
@@ -48,7 +48,7 @@ public sealed partial class TransformSystem
             return;
         }
 
-        ref var networkState = ref CollectionsMarshal.GetValueRefOrAddDefault(_renderPoses, uid, out _);
+        ref var networkState = ref CollectionsMarshal.GetValueRefOrAddDefault(_renderTransforms, uid, out _);
         StartNetworkInterpolation(
             ref networkState,
             source,
@@ -61,10 +61,10 @@ public sealed partial class TransformSystem
     }
 
     private void StartNetworkInterpolation(
-        ref RenderPoseState state,
-        in RenderPoseEndpoint source,
-        in RenderPoseEndpoint target,
-        in RenderPose rendered,
+        ref RenderTransformState state,
+        in RenderTransformEndpoint source,
+        in RenderTransformEndpoint target,
+        in RenderTransform rendered,
         EntityUid coordinateSpace,
         GameTick sourceTick,
         GameTick targetTick,
@@ -88,7 +88,7 @@ public sealed partial class TransformSystem
         ClearCorrection(ref state);
     }
 
-    private float GetNetworkInterpolationAlpha(ref RenderPoseState state)
+    private float GetNetworkInterpolationAlpha(ref RenderTransformState state)
     {
         var phase = _timing.TickPhase;
         var processedTick = _timing.LastProcessedTick;
@@ -126,18 +126,18 @@ public sealed partial class TransformSystem
             || !TryCreateEndpoint(xform.Coordinates, xform.LocalRotation, out var source)
             || !TryCreateEndpoint(targetCoordinates, targetRotation, out var target))
         {
-            _renderPoses.Remove(uid);
+            _renderTransforms.Remove(uid);
             return;
         }
 
         if (!TryGetCommonRenderSpace(source.RenderSpace, target.RenderSpace, out var coordinateSpace)
             || ClassifyInterpolation(source, target) != InterpolationDecision.Interpolate)
         {
-            _renderPoses.Remove(uid);
+            _renderTransforms.Remove(uid);
             return;
         }
 
-        ref var existing = ref CollectionsMarshal.GetValueRefOrNullRef(_renderPoses, uid);
+        ref var existing = ref CollectionsMarshal.GetValueRefOrNullRef(_renderTransforms, uid);
         var hasExisting = !Unsafe.IsNullRef(ref existing);
 
         if (hasExisting
@@ -153,7 +153,7 @@ public sealed partial class TransformSystem
             ? existing.LastRendered
             : ResolveLastRenderedEndpoint(source, 0);
 
-        ref var state = ref CollectionsMarshal.GetValueRefOrAddDefault(_renderPoses, uid, out _);
+        ref var state = ref CollectionsMarshal.GetValueRefOrAddDefault(_renderTransforms, uid, out _);
         StartNetworkInterpolation(
             ref state,
             source,
@@ -167,7 +167,7 @@ public sealed partial class TransformSystem
 
     internal bool TryGetNetworkInterpolationTicks(EntityUid uid, out GameTick sourceTick, out GameTick targetTick)
     {
-        if (_renderPoses.TryGetValue(uid, out var state)
+        if (_renderTransforms.TryGetValue(uid, out var state)
             && state.Type == RenderInterpolationType.NetworkInterpolation)
         {
             sourceTick = state.ChangeTick;

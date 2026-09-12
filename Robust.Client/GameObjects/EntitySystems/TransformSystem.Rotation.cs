@@ -10,7 +10,7 @@ namespace Robust.Client.GameObjects;
 public sealed partial class TransformSystem
 {
     // Snapped rotation can update immediately while position keeps its normal interpolation.
-    private void UpdateSnappedRenderRotation(EntityUid uid, in RenderPoseEndpoint target)
+    private void UpdateSnappedRenderRotation(EntityUid uid, in RenderTransformEndpoint target)
     {
         if (!_snapRenderRotations.TryGetValue(uid, out var snapped)
             || _timing.ApplyingState
@@ -24,7 +24,7 @@ public sealed partial class TransformSystem
         _snapRenderRotations[uid] = snapped with { Rotation = targetPose.Rotation };
     }
 
-    private RenderPose ApplyRenderRotationOverride(EntityUid uid, in RenderPose pose)
+    private RenderTransform ApplyRenderRotationOverride(EntityUid uid, in RenderTransform pose)
     {
         if (_renderRotationOverrides.TryGetValue(uid, out var rotation))
             return pose with { Rotation = rotation };
@@ -34,23 +34,23 @@ public sealed partial class TransformSystem
             : pose;
     }
 
-    internal void SetWorldPositionRotationPreservingRenderPose(
+    internal void SetWorldPositionRotationPreservingRenderTransform(
         EntityUid uid,
         Vector2 worldPosition,
         Angle worldRotation,
         TransformComponent? xform = null)
     {
         // Some predicted input changes simulation rotation without changing what this frame displays.
-        var hadState = _renderPoses.TryGetValue(uid, out var state);
+        var hadState = _renderTransforms.TryGetValue(uid, out var state);
         var hasSnapRotation = _snapRenderRotations.TryGetValue(uid, out var snapRotation);
 
         SetWorldPositionRotation(uid, worldPosition, worldRotation, xform);
         RefreshPredictionSample(uid);
 
         if (hadState)
-            _renderPoses[uid] = state;
+            _renderTransforms[uid] = state;
         else
-            _renderPoses.Remove(uid);
+            _renderTransforms.Remove(uid);
 
         if (hasSnapRotation)
             _snapRenderRotations[uid] = snapRotation;
@@ -71,7 +71,7 @@ public sealed partial class TransformSystem
         if (_timing.IsFirstTimePredicted || !_snapRenderRotations.ContainsKey(uid))
             _snapRenderRotations[uid] = new SnappedRenderRotation(GetWorldRotation(uid), _timing.CurTick);
 
-        ref var state = ref CollectionsMarshal.GetValueRefOrNullRef(_renderPoses, uid);
+        ref var state = ref CollectionsMarshal.GetValueRefOrNullRef(_renderTransforms, uid);
         if (Unsafe.IsNullRef(ref state))
             return;
 
@@ -94,7 +94,7 @@ public sealed partial class TransformSystem
         _renderRotationOverrides.Remove(uid);
     }
 
-    private void SnapRenderRotation(ref RenderPoseState state)
+    private void SnapRenderRotation(ref RenderTransformState state)
     {
         var target = ResolveEndpoint(state.Target, 0);
         state.SnapRotation = true;

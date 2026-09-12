@@ -70,7 +70,7 @@ internal sealed partial class ReplayPlaybackManager
             _gameState.UpdateFullRep(state, cloneDelta: true);
 
             // Clear render smoothing.
-            _entMan.EntitySysManager.GetEntitySystem<TransformSystem>().ResetRenderPoses();
+            _entMan.EntitySysManager.GetEntitySystem<TransformSystem>().ResetRenderTransforms();
 
             var next = Replay.NextState;
             BeforeApplyState?.Invoke((state, next));

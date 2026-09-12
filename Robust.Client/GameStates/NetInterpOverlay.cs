@@ -44,7 +44,7 @@ internal sealed partial class NetInterpOverlay : Overlay
             return;
 
         var handle = args.ScreenHandle;
-        foreach (var data in _transforms.GetRenderPoseDebugData())
+        foreach (var data in _transforms.GetRenderTransformDebugData())
         {
             if ((_filter != null && data.Entity != _filter)
                 || data.CoordinateSpace != args.MapUid)
@@ -80,7 +80,7 @@ internal sealed partial class NetInterpOverlay : Overlay
         }
     }
 
-    private static string Format(in RenderPose pose)
+    private static string Format(in RenderTransform pose)
         => $"({pose.Position.X:0.00},{pose.Position.Y:0.00},{pose.Rotation.Degrees:0.0}deg)";
 
     private static void DrawMarker(DrawingHandleScreen handle, Vector2 position, Color color)
@@ -234,7 +234,7 @@ internal sealed partial class NetInterpOverlay : Overlay
 
             if (active)
             {
-                transforms.SetWorldPositionRotationPreservingRenderPose(
+                transforms.SetWorldPositionRotationPreservingRenderTransform(
                     player,
                     position + new Vector2(x, y),
                     rotation + rotationOffset,
@@ -243,7 +243,7 @@ internal sealed partial class NetInterpOverlay : Overlay
             else
             {
                 transforms.SetWorldPositionRotation(player, position + new Vector2(x, y), rotation + rotationOffset, xform);
-                transforms.SnapRenderPose(player, true);
+                transforms.SnapRenderTransform(player, true);
             }
 
             shell.WriteLine(

@@ -22,7 +22,7 @@ public sealed partial class TransformSystem
         _predictionReconciliation.TryBeginRollback(
             uid,
             predictionTick,
-            GetRenderPoseInternal((uid, xform), 0));
+            GetRenderTransformInternal((uid, xform), 0));
     }
 
     internal void CompletePredictionRollback(GameTick predictionTick)
@@ -88,7 +88,7 @@ public sealed partial class TransformSystem
         if (rollback.Status is PredictionRollbackStatus.Pending or PredictionRollbackStatus.HardReset)
         {
             if (rollback.Status == PredictionRollbackStatus.HardReset)
-                _renderPoses.Remove(rollback.Entity);
+                _renderTransforms.Remove(rollback.Entity);
 
             return;
         }
@@ -97,8 +97,8 @@ public sealed partial class TransformSystem
             return;
 
         // Layer the visible error over the newly predicted base pose.
-        ref var state = ref CollectionsMarshal.GetValueRefOrNullRef(_renderPoses, rollback.Entity);
-        RenderPose basePose;
+        ref var state = ref CollectionsMarshal.GetValueRefOrNullRef(_renderTransforms, rollback.Entity);
+        RenderTransform basePose;
 
         if (Unsafe.IsNullRef(ref state))
         {
@@ -110,7 +110,7 @@ public sealed partial class TransformSystem
             }
 
             basePose = ResolveEndpoint(endpoint, 0);
-            ref var newState = ref CollectionsMarshal.GetValueRefOrAddDefault(_renderPoses, rollback.Entity, out _);
+            ref var newState = ref CollectionsMarshal.GetValueRefOrAddDefault(_renderTransforms, rollback.Entity, out _);
             StartPredictionInterpolation(
                 ref newState,
                 endpoint,
@@ -125,12 +125,12 @@ public sealed partial class TransformSystem
         }
         else
         {
-            basePose = GetBaseRenderPose(in state, 0);
+            basePose = GetBaseRenderTransform(in state, 0);
         }
 
         if (ExceedsMaxInterpolationDistance(rollback.Anchor, basePose))
         {
-            _renderPoses.Remove(rollback.Entity);
+            _renderTransforms.Remove(rollback.Entity);
             return;
         }
 
@@ -147,7 +147,7 @@ public sealed partial class TransformSystem
 
         _snapRenderRotations.Remove(uid);
 
-        ref var state = ref CollectionsMarshal.GetValueRefOrNullRef(_renderPoses, uid);
+        ref var state = ref CollectionsMarshal.GetValueRefOrNullRef(_renderTransforms, uid);
         if (Unsafe.IsNullRef(ref state)
             || !XformQuery.TryGetComponent(uid, out var xform)
             || xform.Deleted)
@@ -196,12 +196,12 @@ public sealed partial class TransformSystem
 
     private void HandlePredictedTransformMove(
         EntityUid uid,
-        in RenderPoseEndpoint source,
-        in RenderPoseEndpoint target,
-        in RenderPose rendered,
+        in RenderTransformEndpoint source,
+        in RenderTransformEndpoint target,
+        in RenderTransform rendered,
         EntityUid coordinateSpace,
         bool hasExisting,
-        ref RenderPoseState existing,
+        ref RenderTransformState existing,
         bool snapRotation)
     {
         if (_timing.IsFirstTimePredicted)
@@ -219,7 +219,7 @@ public sealed partial class TransformSystem
             }
 
             var preserveCorrection = hasExisting && HasCorrection(in existing);
-            ref var state = ref CollectionsMarshal.GetValueRefOrAddDefault(_renderPoses, uid, out _);
+            ref var state = ref CollectionsMarshal.GetValueRefOrAddDefault(_renderTransforms, uid, out _);
             StartPredictionInterpolation(
                 ref state,
                 source,
@@ -238,14 +238,14 @@ public sealed partial class TransformSystem
         }
 
         // Rollback without render state must not interpolate from a temporary rollback position.
-        _renderPoses.Remove(uid);
+        _renderTransforms.Remove(uid);
     }
 
     private void StartPredictionInterpolation(
-        ref RenderPoseState state,
-        in RenderPoseEndpoint source,
-        in RenderPoseEndpoint target,
-        in RenderPose rendered,
+        ref RenderTransformState state,
+        in RenderTransformEndpoint source,
+        in RenderTransformEndpoint target,
+        in RenderTransform rendered,
         EntityUid coordinateSpace,
         bool preserveCorrection,
         bool snapRotation)
@@ -270,10 +270,10 @@ public sealed partial class TransformSystem
     }
 
     private void RebasePredictionInterpolation(
-        ref RenderPoseState state,
-        in RenderPoseEndpoint source,
-        in RenderPoseEndpoint target,
-        in RenderPose rendered,
+        ref RenderTransformState state,
+        in RenderTransformEndpoint source,
+        in RenderTransformEndpoint target,
+        in RenderTransform rendered,
         EntityUid coordinateSpace)
     {
         // Rollback updates the saved segment without starting a new visible interpolation.
@@ -282,10 +282,10 @@ public sealed partial class TransformSystem
     }
 
     private void RebasePredictionHandoff(
-        ref RenderPoseState state,
-        in RenderPoseEndpoint source,
-        in RenderPoseEndpoint target,
-        in RenderPose rendered,
+        ref RenderTransformState state,
+        in RenderTransformEndpoint source,
+        in RenderTransformEndpoint target,
+        in RenderTransform rendered,
         EntityUid coordinateSpace)
     {
         // Buffered states can still be stale while prediction hands back to network presentation.
@@ -295,10 +295,10 @@ public sealed partial class TransformSystem
     }
 
     private void RebasePredictionState(
-        ref RenderPoseState state,
-        in RenderPoseEndpoint source,
-        in RenderPoseEndpoint target,
-        in RenderPose rendered,
+        ref RenderTransformState state,
+        in RenderTransformEndpoint source,
+        in RenderTransformEndpoint target,
+        in RenderTransform rendered,
         EntityUid coordinateSpace)
     {
         // Prediction rollback may revisit a previous simulation tick so keep it so the correction remains continuous.
@@ -326,10 +326,10 @@ public sealed partial class TransformSystem
     }
 
     private bool TryHandlePredictionHandoff(
-        ref RenderPoseState state,
-        in RenderPoseEndpoint source,
-        in RenderPoseEndpoint target,
-        in RenderPose rendered,
+        ref RenderTransformState state,
+        in RenderTransformEndpoint source,
+        in RenderTransformEndpoint target,
+        in RenderTransform rendered,
         EntityUid coordinateSpace,
         InterpolationDecision decision)
     {
@@ -352,22 +352,22 @@ public sealed partial class TransformSystem
 
     internal void EndPrediction(EntityUid uid)
     {
-        ref var state = ref CollectionsMarshal.GetValueRefOrNullRef(_renderPoses, uid);
+        ref var state = ref CollectionsMarshal.GetValueRefOrNullRef(_renderTransforms, uid);
         if (Unsafe.IsNullRef(ref state)
             || state.Type != RenderInterpolationType.PredictionInterpolation
             || !XformQuery.TryGetComponent(uid, out var xform)
             || xform.Deleted
             || !TryCreateEndpoint(xform.Coordinates, xform.LocalRotation, out var target)
-            || !TryBindRenderPoseToParent(state.LastRendered, target.Parent, out var source)
+            || !TryBindRenderTransformToParent(state.LastRendered, target.Parent, out var source)
             || !TryGetCommonRenderSpace(source.RenderSpace, target.RenderSpace, out var coordinateSpace))
         {
-            _renderPoses.Remove(uid);
+            _renderTransforms.Remove(uid);
             return;
         }
 
         if (ClassifyInterpolation(source, target) == InterpolationDecision.Snap)
         {
-            _renderPoses.Remove(uid);
+            _renderTransforms.Remove(uid);
             return;
         }
 
@@ -382,9 +382,9 @@ public sealed partial class TransformSystem
     }
 
     private void StartPredictionHandoff(
-        ref RenderPoseState state,
-        in RenderPoseEndpoint source,
-        in RenderPoseEndpoint target,
+        ref RenderTransformState state,
+        in RenderTransformEndpoint source,
+        in RenderTransformEndpoint target,
         EntityUid coordinateSpace,
         GameTick sourceTick)
     {
@@ -415,12 +415,12 @@ public sealed partial class TransformSystem
 
     private struct PredictionSample(
         EntityUid entity,
-        RenderPoseEndpoint endpoint,
+        RenderTransformEndpoint endpoint,
         GameTick tick,
         uint inputSequence)
     {
         public readonly EntityUid Entity = entity;
-        public RenderPoseEndpoint Endpoint = endpoint;
+        public RenderTransformEndpoint Endpoint = endpoint;
         public readonly GameTick Tick = tick;
         public uint InputSequence = inputSequence;
     }
@@ -432,7 +432,7 @@ public sealed partial class TransformSystem
         private PredictionSample _latestSample;
         private PredictionSample _previousSample;
 
-        public bool TryBeginRollback(EntityUid uid, GameTick tick, in RenderPose anchor)
+        public bool TryBeginRollback(EntityUid uid, GameTick tick, in RenderTransform anchor)
         {
             // Reconciliation only compares endpoints from the same prediction tick.
             PredictionSample sample;
@@ -480,7 +480,7 @@ public sealed partial class TransformSystem
 
         public void Record(
             EntityUid uid,
-            in RenderPoseEndpoint endpoint,
+            in RenderTransformEndpoint endpoint,
             GameTick tick,
             uint inputSequence)
         {
@@ -532,13 +532,13 @@ public sealed partial class TransformSystem
 
     private struct PredictionRollback(
         EntityUid entity,
-        RenderPoseEndpoint endpoint,
-        RenderPose anchor,
+        RenderTransformEndpoint endpoint,
+        RenderTransform anchor,
         GameTick tick)
     {
         public readonly EntityUid Entity = entity;
-        public readonly RenderPoseEndpoint Endpoint = endpoint;
-        public readonly RenderPose Anchor = anchor;
+        public readonly RenderTransformEndpoint Endpoint = endpoint;
+        public readonly RenderTransform Anchor = anchor;
         public readonly GameTick Tick = tick;
         public PredictionRollbackStatus Status = PredictionRollbackStatus.Pending;
     }

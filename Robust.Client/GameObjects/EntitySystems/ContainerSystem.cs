@@ -44,14 +44,14 @@ public sealed partial class ContainerSystem : SharedContainerSystem
         Entity<TransformComponent> entity,
         ref EntGotInsertedIntoContainerMessage args)
     {
-        _renderTransforms.SnapRenderPose(entity, true);
+        _renderTransforms.SnapRenderTransform(entity, true);
         _renderSnapQueue.Add(entity);
     }
 
     [SubscribeLocalEvent]
     private void OnRenderContainerRemoved(Entity<TransformComponent> entity, ref EntGotRemovedFromContainerMessage args)
     {
-        _renderTransforms.SnapRenderPose(entity, true);
+        _renderTransforms.SnapRenderTransform(entity, true);
         _renderSnapQueue.Add(entity);
     }
 
@@ -303,7 +303,7 @@ public sealed partial class ContainerSystem : SharedContainerSystem
         foreach (var entity in _renderSnapQueue)
         {
             if (!Deleted(entity))
-                _renderTransforms.SnapRenderPose(entity, true);
+                _renderTransforms.SnapRenderTransform(entity, true);
         }
 
         _renderSnapQueue.Clear();

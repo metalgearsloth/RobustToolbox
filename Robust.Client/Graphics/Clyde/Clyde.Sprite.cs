@@ -79,7 +79,7 @@ internal partial class Clyde
         foreach (var (treeOwner, comp) in _spriteTreeSystem.GetIntersectingTrees(map, renderQueryBounds))
         {
             var treeXform = query.GetComponent(treeOwner);
-            var treePose = _transformSystem.GetRenderWorldPose((treeOwner, treeXform));
+            var treePose = _transformSystem.GetRenderWorldTransform((treeOwner, treeXform));
             var bounds = _transformSystem.GetInvRenderWorldMatrix((treeOwner, treeXform)).TransformBox(renderQueryBounds);
             var pixelSnapOffset = Vector2.Zero;
             DebugTools.Assert(treeXform.MapUid == treeXform.ParentUid || !treeXform.ParentUid.IsValid());

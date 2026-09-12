@@ -26,7 +26,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
      * Okay so because our game runs at TPS, we need to be able to smoothly render entities A -> B
      * We also need to handle mispredicts (correction for translation OR rotation)
      *
-     * RenderPoseState handles what the render position of a particular entity was so we can avoid mutating transformcomponent
+     * RenderTransformState handles what the render position of a particular entity was so we can avoid mutating transformcomponent
      * itself and can just let it run in the simulation just fine.
      *
      * We also use it to store any corrections required so they can be adjusted over _correctionHalfLife time
@@ -46,11 +46,11 @@ public sealed partial class TransformSystem : SharedTransformSystem
     [Dependency] private IClientGameTiming _timing = default!;
 
     [ViewVariables]
-    private readonly Dictionary<EntityUid, RenderPoseState> _renderPoses = new();
+    private readonly Dictionary<EntityUid, RenderTransformState> _renderTransforms = new();
 
     private readonly Dictionary<EntityUid, SnappedRenderRotation> _snapRenderRotations = new();
     private readonly HashSet<EntityUid> _snapRenderRotationEntities = new();
-    private readonly HashSet<EntityUid> _snapRenderPoseAfterParentChange = new();
+    private readonly HashSet<EntityUid> _snapRenderTransformAfterParentChange = new();
     private readonly Dictionary<EntityUid, Angle> _renderRotationOverrides = new();
     private readonly HashSet<EntityUid> _remove = new();
 
@@ -86,10 +86,10 @@ public sealed partial class TransformSystem : SharedTransformSystem
     public override void Shutdown()
     {
         OnGlobalMoveEvent -= OnTransformMoved;
-        _renderPoses.Clear();
+        _renderTransforms.Clear();
         _snapRenderRotations.Clear();
         _snapRenderRotationEntities.Clear();
-        _snapRenderPoseAfterParentChange.Clear();
+        _snapRenderTransformAfterParentChange.Clear();
         _renderRotationOverrides.Clear();
         _predictionReconciliation.Clear();
         base.Shutdown();
@@ -98,12 +98,12 @@ public sealed partial class TransformSystem : SharedTransformSystem
     /// <summary>
     /// Clears all cached render state.
     /// </summary>
-    public void ResetRenderPoses()
+    public void ResetRenderTransforms()
     {
-        _renderPoses.Clear();
+        _renderTransforms.Clear();
         _snapRenderRotations.Clear();
         _snapRenderRotationEntities.Clear();
-        _snapRenderPoseAfterParentChange.Clear();
+        _snapRenderTransformAfterParentChange.Clear();
         _renderRotationOverrides.Clear();
         _remove.Clear();
         _predictionReconciliation.Clear();
@@ -112,10 +112,10 @@ public sealed partial class TransformSystem : SharedTransformSystem
     [SubscribeLocalEvent]
     private void OnTransformShutdown(EntityUid uid, TransformComponent component, ComponentShutdown args)
     {
-        _renderPoses.Remove(uid);
+        _renderTransforms.Remove(uid);
         _snapRenderRotations.Remove(uid);
         _snapRenderRotationEntities.Remove(uid);
-        _snapRenderPoseAfterParentChange.Remove(uid);
+        _snapRenderTransformAfterParentChange.Remove(uid);
         _renderRotationOverrides.Remove(uid);
 
         _predictionReconciliation.RemoveEntity(uid);
@@ -150,15 +150,15 @@ public sealed partial class TransformSystem : SharedTransformSystem
         var uid = args.Sender;
         var xform = args.Component;
 
-        if (_snapRenderPoseAfterParentChange.Remove(uid))
+        if (_snapRenderTransformAfterParentChange.Remove(uid))
         {
-            SnapRenderPose(uid);
+            SnapRenderTransform(uid);
             return;
         }
 
         if (xform.Deleted || !TryCreateEndpoint(args.NewPosition, args.NewRotation, out var target))
         {
-            _renderPoses.Remove(uid);
+            _renderTransforms.Remove(uid);
             return;
         }
 
@@ -166,11 +166,11 @@ public sealed partial class TransformSystem : SharedTransformSystem
 
         if (!TryCreateEndpoint(args.OldPosition, args.OldRotation, out var oldEndpoint))
         {
-            _renderPoses.Remove(uid);
+            _renderTransforms.Remove(uid);
             return;
         }
 
-        ref var existing = ref CollectionsMarshal.GetValueRefOrNullRef(_renderPoses, uid);
+        ref var existing = ref CollectionsMarshal.GetValueRefOrNullRef(_renderTransforms, uid);
         var hasExisting = !Unsafe.IsNullRef(ref existing);
         var snapRotation = _snapRenderRotationEntities.Contains(uid);
 
@@ -178,7 +178,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
             existing.SnapRotation = snapRotation;
 
         var source = oldEndpoint;
-        RenderPose rendered;
+        RenderTransform rendered;
 
         if (hasExisting)
         {
@@ -201,7 +201,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
                 source = existing.Source;
             }
             else if ((parentOrRenderSpaceChanged || sameTickPredictionRollback)
-                     && !TryBindRenderPoseToParent(rendered, args.OldPosition.EntityId, out source))
+                     && !TryBindRenderTransformToParent(rendered, args.OldPosition.EntityId, out source))
             {
                 source = oldEndpoint;
             }
@@ -213,7 +213,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
 
         if (!TryGetCommonRenderSpace(source.RenderSpace, target.RenderSpace, out var coordinateSpace))
         {
-            _renderPoses.Remove(uid);
+            _renderTransforms.Remove(uid);
             return;
         }
 
@@ -221,7 +221,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
         var decision = ClassifyInterpolation(source, target);
         if (decision == InterpolationDecision.Snap)
         {
-            _renderPoses.Remove(uid);
+            _renderTransforms.Remove(uid);
             return;
         }
 
@@ -270,11 +270,11 @@ public sealed partial class TransformSystem : SharedTransformSystem
 
     private void HandleIgnoredTransformMove(
         EntityUid uid,
-        in RenderPoseEndpoint target,
-        in RenderPose rendered,
+        in RenderTransformEndpoint target,
+        in RenderTransform rendered,
         EntityUid coordinateSpace,
         bool hasExisting,
-        ref RenderPoseState existing,
+        ref RenderTransformState existing,
         bool snapRotation)
     {
         if (hasExisting && HasCorrection(in existing))
@@ -292,12 +292,12 @@ public sealed partial class TransformSystem : SharedTransformSystem
             return;
         }
 
-        _renderPoses.Remove(uid);
+        _renderTransforms.Remove(uid);
     }
 
     private InterpolationDecision ClassifyInterpolation(
-        in RenderPoseEndpoint source,
-        in RenderPoseEndpoint target)
+        in RenderTransformEndpoint source,
+        in RenderTransformEndpoint target)
     {
         var sourcePose = ResolveEndpoint(source, 0);
         var targetPose = ResolveEndpoint(target, 0);
@@ -315,10 +315,10 @@ public sealed partial class TransformSystem : SharedTransformSystem
         return InterpolationDecision.Interpolate;
     }
 
-    private bool ExceedsMaxInterpolationDistance(in RenderPose source, in RenderPose target)
+    private bool ExceedsMaxInterpolationDistance(in RenderTransform source, in RenderTransform target)
         => Vector2.DistanceSquared(source.Position, target.Position) >= _maxInterpolationDistanceSquared;
 
-    private static bool EndpointsEqualApprox(in RenderPoseEndpoint a, in RenderPoseEndpoint b)
+    private static bool EndpointsEqualApprox(in RenderTransformEndpoint a, in RenderTransformEndpoint b)
     {
         return a.Parent == b.Parent
                && a.RenderSpace == b.RenderSpace
@@ -326,7 +326,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
                && a.LocalRotation.EqualsApprox(b.LocalRotation);
     }
 
-    private void StartCorrection(ref RenderPoseState state, in RenderPose anchor, in RenderPose basePose)
+    private void StartCorrection(ref RenderTransformState state, in RenderTransform anchor, in RenderTransform basePose)
     {
         // The base interpolation keeps advancing while this render-space error decays.
         state.CorrectionTranslation = anchor.Position - basePose.Position;
@@ -336,13 +336,13 @@ public sealed partial class TransformSystem : SharedTransformSystem
         state.LastRendered = anchor;
     }
 
-    private static bool HasCorrection(in RenderPoseState state)
+    private static bool HasCorrection(in RenderTransformState state)
     {
         return state.CorrectionTranslation != Vector2.Zero
                || state.CorrectionRotation != Angle.Zero;
     }
 
-    private static void ClearCorrection(ref RenderPoseState state)
+    private static void ClearCorrection(ref RenderTransformState state)
     {
         state.CorrectionTranslation = Vector2.Zero;
         state.CorrectionRotation = Angle.Zero;
@@ -355,9 +355,9 @@ public sealed partial class TransformSystem : SharedTransformSystem
         _remove.Clear();
         var correctionDecay = -1f;
 
-        foreach (var (uid, _) in _renderPoses)
+        foreach (var (uid, _) in _renderTransforms)
         {
-            ref var state = ref CollectionsMarshal.GetValueRefOrNullRef(_renderPoses, uid);
+            ref var state = ref CollectionsMarshal.GetValueRefOrNullRef(_renderTransforms, uid);
             if (Unsafe.IsNullRef(ref state))
                 continue;
 
@@ -372,7 +372,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
             {
                 // State application and prediction have finished, so the network base is stable for this frame.
                 state.Alpha = GetInterpolationAlpha(ref state);
-                var basePose = GetBaseRenderPose(in state, 0);
+                var basePose = GetBaseRenderTransform(in state, 0);
                 if (ExceedsMaxInterpolationDistance(state.LastRendered, basePose))
                 {
                     _remove.Add(uid);
@@ -406,9 +406,9 @@ public sealed partial class TransformSystem : SharedTransformSystem
         }
 
         // Resolve poses after interpolation has advanced so moving parents are cached for children.
-        foreach (var (uid, _) in _renderPoses)
+        foreach (var (uid, _) in _renderTransforms)
         {
-            ref var state = ref CollectionsMarshal.GetValueRefOrNullRef(_renderPoses, uid);
+            ref var state = ref CollectionsMarshal.GetValueRefOrNullRef(_renderTransforms, uid);
             if (Unsafe.IsNullRef(ref state))
                 continue;
 
@@ -437,7 +437,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
                 state.InterpolationStartAlpha = 1f;
             }
 
-            state.LastRendered = GetRenderPoseInternal(uid, 0);
+            state.LastRendered = GetRenderTransformInternal(uid, 0);
 
             if (state.Type == RenderInterpolationType.PredictionInterpolation)
                 state.PendingPredictionRollback = false;
@@ -461,11 +461,11 @@ public sealed partial class TransformSystem : SharedTransformSystem
 
         foreach (var uid in _remove)
         {
-            _renderPoses.Remove(uid);
+            _renderTransforms.Remove(uid);
         }
     }
 
-    private float GetInterpolationAlpha(ref RenderPoseState state)
+    private float GetInterpolationAlpha(ref RenderTransformState state)
     {
         if (_timing.TickPeriod <= TimeSpan.Zero)
             return 1f;
@@ -490,14 +490,14 @@ public sealed partial class TransformSystem : SharedTransformSystem
     /// Gets the transform used for drawing.
     /// </summary>
     [Pure]
-    public RenderPose GetRenderWorldPose(Entity<TransformComponent?> ent)
+    public RenderTransform GetRenderWorldTransform(Entity<TransformComponent?> ent)
     {
         var uid = ent.Owner;
         var xform = ent.Comp;
         if (!XformQuery.Resolve(uid, ref xform, false))
             return default;
 
-        return GetRenderPoseInternal((uid, xform), 0);
+        return GetRenderTransformInternal((uid, xform), 0);
     }
 
     /// <summary>
@@ -507,7 +507,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
     public (Vector2 WorldPosition, Angle WorldRotation) GetRenderWorldPositionRotation(
         Entity<TransformComponent?> ent)
     {
-        var pose = GetRenderWorldPose(ent);
+        var pose = GetRenderWorldTransform(ent);
         return (pose.Position, pose.Rotation);
     }
 
@@ -516,14 +516,14 @@ public sealed partial class TransformSystem : SharedTransformSystem
     /// </summary>
     [Pure]
     public Vector2 GetRenderWorldPosition(Entity<TransformComponent?> ent)
-        => GetRenderWorldPose(ent).Position;
+        => GetRenderWorldTransform(ent).Position;
 
     /// <summary>
     /// Gets an entity's rendered world rotation.
     /// </summary>
     [Pure]
     public Angle GetRenderWorldRotation(Entity<TransformComponent?> ent)
-        => GetRenderWorldPose(ent).Rotation;
+        => GetRenderWorldTransform(ent).Rotation;
 
     /// <summary>
     /// Gets an entity's rendered world matrix.
@@ -531,7 +531,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
     [Pure]
     public Matrix3x2 GetRenderWorldMatrix(Entity<TransformComponent?> ent)
     {
-        var pose = GetRenderWorldPose(ent);
+        var pose = GetRenderWorldTransform(ent);
         return Matrix3Helpers.CreateTransform(pose.Position, pose.Rotation);
     }
 
@@ -541,7 +541,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
     [Pure]
     public Matrix3x2 GetInvRenderWorldMatrix(Entity<TransformComponent?> ent)
     {
-        var pose = GetRenderWorldPose(ent);
+        var pose = GetRenderWorldTransform(ent);
         return Matrix3Helpers.CreateInverseTransform(pose.Position, pose.Rotation);
     }
 
@@ -556,28 +556,28 @@ public sealed partial class TransformSystem : SharedTransformSystem
         if (!XformQuery.Resolve(uid, ref xform, false))
             return MapCoordinates.Nullspace;
 
-        var pose = GetRenderWorldPose((uid, xform));
+        var pose = GetRenderWorldTransform((uid, xform));
         return TryGetRenderSpaceMapId(pose.CoordinateSpace, out var mapId)
             ? new MapCoordinates(pose.Position, mapId)
             : MapCoordinates.Nullspace;
     }
 
-    private RenderPose GetRenderPoseInternal(Entity<TransformComponent?> ent, int depth)
+    private RenderTransform GetRenderTransformInternal(Entity<TransformComponent?> ent, int depth)
     {
         var uid = ent.Owner;
         var xform = ent.Comp;
         if (depth >= MaxTransformDepth || !XformQuery.Resolve(uid, ref xform, false))
             return default;
 
-        if (_renderPoses.TryGetValue(uid, out var state))
+        if (_renderTransforms.TryGetValue(uid, out var state))
         {
             var snapRotation = state.SnapRotation || _snapRenderRotations.ContainsKey(uid);
-            var pose = GetBaseRenderPose(in state, depth + 1);
+            var pose = GetBaseRenderTransform(in state, depth + 1);
 
             if (!HasCorrection(in state))
                 return ApplyRenderRotationOverride(uid, pose);
 
-            pose = new RenderPose(
+            pose = new RenderTransform(
                 pose.Position + state.CorrectionTranslation,
                 snapRotation
                     ? pose.Rotation
@@ -593,11 +593,11 @@ public sealed partial class TransformSystem : SharedTransformSystem
         var renderSpace = xform.MapUid ?? EntityUid.Invalid;
         if (!xform.ParentUid.IsValid())
         {
-            var pose = new RenderPose(xform.LocalPosition, xform.LocalRotation, renderSpace);
+            var pose = new RenderTransform(xform.LocalPosition, xform.LocalRotation, renderSpace);
             return ApplyRenderRotationOverride(uid, pose);
         }
 
-        var parent = GetRenderPoseInternal(xform.ParentUid, depth + 1);
+        var parent = GetRenderTransformInternal(xform.ParentUid, depth + 1);
         var childPose = parent with
         {
             Position = parent.Position + parent.Rotation.RotateVec(xform.LocalPosition),
@@ -606,12 +606,12 @@ public sealed partial class TransformSystem : SharedTransformSystem
         return ApplyRenderRotationOverride(uid, childPose);
     }
 
-    private RenderPose GetBaseRenderPose(in RenderPoseState state, int depth)
+    private RenderTransform GetBaseRenderTransform(in RenderTransformState state, int depth)
     {
         var source = ResolveEndpoint(state.Source, depth);
         var targetPose = ResolveEndpoint(state.Target, depth);
         var alpha = GetSegmentAlpha(state);
-        return new RenderPose(
+        return new RenderTransform(
             Vector2.Lerp(source.Position, targetPose.Position, alpha),
             state.SnapRotation
                 ? targetPose.Rotation
@@ -622,15 +622,15 @@ public sealed partial class TransformSystem : SharedTransformSystem
             alpha);
     }
 
-    private RenderPose ResolveEndpoint(in RenderPoseEndpoint endpoint, int depth)
+    private RenderTransform ResolveEndpoint(in RenderTransformEndpoint endpoint, int depth)
     {
         // Endpoints store local coordinates. Resolve through rendered parents so child interpolation follows
         // the same visual parent pose that will be drawn this frame.
         if (!endpoint.Parent.IsValid() || depth >= MaxTransformDepth)
-            return new RenderPose(endpoint.LocalPosition, endpoint.LocalRotation, endpoint.RenderSpace);
+            return new RenderTransform(endpoint.LocalPosition, endpoint.LocalRotation, endpoint.RenderSpace);
 
-        var parent = GetRenderPoseInternal(endpoint.Parent, depth + 1);
-        return new RenderPose(
+        var parent = GetRenderTransformInternal(endpoint.Parent, depth + 1);
+        return new RenderTransform(
             parent.Position + parent.Rotation.RotateVec(endpoint.LocalPosition),
             parent.Rotation + endpoint.LocalRotation,
             parent.CoordinateSpace,
@@ -639,7 +639,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
             1f);
     }
 
-    private static float GetSegmentAlpha(RenderPoseState state)
+    private static float GetSegmentAlpha(RenderTransformState state)
     {
         var remaining = 1f - state.InterpolationStartAlpha;
         if (remaining <= float.Epsilon)
@@ -648,16 +648,16 @@ public sealed partial class TransformSystem : SharedTransformSystem
         return Math.Clamp((state.Alpha - state.InterpolationStartAlpha) / remaining, 0f, 1f);
     }
 
-    private RenderPose ResolveLastRenderedEndpoint(in RenderPoseEndpoint endpoint, int depth)
+    private RenderTransform ResolveLastRenderedEndpoint(in RenderTransformEndpoint endpoint, int depth)
     {
         // Used when re-parenting across parents or render spaces. Sampling last-rendered parents avoids a
         // one-frame snap back to simulation coordinates during grid traversal or z-level transitions.
         // Yes this tilted me for years.
         if (!endpoint.Parent.IsValid() || depth >= MaxTransformDepth)
-            return new RenderPose(endpoint.LocalPosition, endpoint.LocalRotation, endpoint.RenderSpace);
+            return new RenderTransform(endpoint.LocalPosition, endpoint.LocalRotation, endpoint.RenderSpace);
 
-        var parent = GetLastRenderedPoseInternal(endpoint.Parent, depth + 1);
-        return new RenderPose(
+        var parent = GetLastRenderedTransformInternal(endpoint.Parent, depth + 1);
+        return new RenderTransform(
             parent.Position + parent.Rotation.RotateVec(endpoint.LocalPosition),
             parent.Rotation + endpoint.LocalRotation,
             parent.CoordinateSpace,
@@ -666,19 +666,19 @@ public sealed partial class TransformSystem : SharedTransformSystem
             1f);
     }
 
-    private RenderPose GetLastRenderedPoseInternal(EntityUid uid, int depth, TransformComponent? xform = null)
+    private RenderTransform GetLastRenderedTransformInternal(EntityUid uid, int depth, TransformComponent? xform = null)
     {
         if (depth >= MaxTransformDepth || !XformQuery.Resolve(uid, ref xform, false))
             return default;
 
-        if (_renderPoses.TryGetValue(uid, out var state))
+        if (_renderTransforms.TryGetValue(uid, out var state))
             return state.LastRendered;
 
         var renderSpace = xform.MapUid ?? EntityUid.Invalid;
         if (!xform.ParentUid.IsValid())
-            return new RenderPose(xform.LocalPosition, xform.LocalRotation, renderSpace);
+            return new RenderTransform(xform.LocalPosition, xform.LocalRotation, renderSpace);
 
-        var parent = GetLastRenderedPoseInternal(xform.ParentUid, depth + 1);
+        var parent = GetLastRenderedTransformInternal(xform.ParentUid, depth + 1);
         return parent with
         {
             Position = parent.Position + parent.Rotation.RotateVec(xform.LocalPosition),
@@ -689,7 +689,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
     private bool TryCreateEndpoint(
         in EntityCoordinates coordinates,
         Angle rotation,
-        out RenderPoseEndpoint endpoint)
+        out RenderTransformEndpoint endpoint)
     {
         if (!coordinates.EntityId.IsValid()
             || !XformQuery.TryGetComponent(coordinates.EntityId, out var parent)
@@ -699,11 +699,11 @@ public sealed partial class TransformSystem : SharedTransformSystem
             return false;
         }
 
-        endpoint = new RenderPoseEndpoint(coordinates.EntityId, coordinates.Position, rotation, renderSpace);
+        endpoint = new RenderTransformEndpoint(coordinates.EntityId, coordinates.Position, rotation, renderSpace);
         return true;
     }
 
-    private bool TryBindRenderPoseToParent(in RenderPose pose, EntityUid parentUid, out RenderPoseEndpoint endpoint)
+    private bool TryBindRenderTransformToParent(in RenderTransform pose, EntityUid parentUid, out RenderTransformEndpoint endpoint)
     {
         // Convert the current rendered world pose into the new parent's local space so interpolation can
         // continue after a parent change.
@@ -715,10 +715,10 @@ public sealed partial class TransformSystem : SharedTransformSystem
             return false;
         }
 
-        var parent = GetLastRenderedPoseInternal(parentUid, 0, parentXform);
+        var parent = GetLastRenderedTransformInternal(parentUid, 0, parentXform);
         var localPosition = (-parent.Rotation).RotateVec(pose.Position - parent.Position);
         var localRotation = pose.Rotation - parent.Rotation;
-        endpoint = new RenderPoseEndpoint(parentUid, localPosition, localRotation, renderSpace);
+        endpoint = new RenderTransformEndpoint(parentUid, localPosition, localRotation, renderSpace);
         return true;
     }
 
@@ -768,11 +768,11 @@ public sealed partial class TransformSystem : SharedTransformSystem
     /// <summary>
     /// Discards active render interpolation for an entity and optionally its descendants.
     /// </summary>
-    public void SnapRenderPose(EntityUid uid, bool recursive = false)
+    public void SnapRenderTransform(EntityUid uid, bool recursive = false)
     {
-        _renderPoses.Remove(uid);
+        _renderTransforms.Remove(uid);
         _snapRenderRotations.Remove(uid);
-        _snapRenderPoseAfterParentChange.Remove(uid);
+        _snapRenderTransformAfterParentChange.Remove(uid);
         _renderRotationOverrides.Remove(uid);
         _predictionReconciliation.MarkRollbackHardReset(uid);
         RefreshPredictionSample(uid);
@@ -783,7 +783,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
         var children = xform.ChildEnumerator;
         while (children.MoveNext(out var child))
         {
-            SnapRenderPose(child, true);
+            SnapRenderTransform(child, true);
         }
     }
 
@@ -793,10 +793,10 @@ public sealed partial class TransformSystem : SharedTransformSystem
     /// <remarks>
     /// Parent-change events are raised before the corresponding move event creates render interpolation.
     /// </remarks>
-    public void SnapRenderPoseAfterParentChange(EntityUid uid, bool recursive = false)
+    public void SnapRenderTransformAfterParentChange(EntityUid uid, bool recursive = false)
     {
-        SnapRenderPose(uid, recursive);
-        _snapRenderPoseAfterParentChange.Add(uid);
+        SnapRenderTransform(uid, recursive);
+        _snapRenderTransformAfterParentChange.Add(uid);
     }
 
     /// <summary>
@@ -818,11 +818,11 @@ public sealed partial class TransformSystem : SharedTransformSystem
     /// <summary>
     /// Enumerates active render interpolation state for debugging.
     /// </summary>
-    public IEnumerable<RenderPoseDebugData> GetRenderPoseDebugData()
+    public IEnumerable<RenderTransformDebugData> GetRenderTransformDebugData()
     {
-        foreach (var uid in _renderPoses.Keys)
+        foreach (var uid in _renderTransforms.Keys)
         {
-            if (TryGetRenderPoseDebugData(uid, out var data))
+            if (TryGetRenderTransformDebugData(uid, out var data))
                 yield return data;
         }
     }
@@ -831,9 +831,9 @@ public sealed partial class TransformSystem : SharedTransformSystem
     /// Gets active render interpolation state for an entity.
     /// </summary>
     [Pure]
-    public bool TryGetRenderPoseDebugData(EntityUid uid, out RenderPoseDebugData data)
+    public bool TryGetRenderTransformDebugData(EntityUid uid, out RenderTransformDebugData data)
     {
-        if (!_renderPoses.TryGetValue(uid, out var state)
+        if (!_renderTransforms.TryGetValue(uid, out var state)
             || !XformQuery.TryGetComponent(uid, out var xform))
         {
             data = default;
@@ -843,10 +843,10 @@ public sealed partial class TransformSystem : SharedTransformSystem
         var simulation = GetWorldPositionRotation(xform);
         var source = ResolveEndpoint(state.Source, 0);
         var target = ResolveEndpoint(state.Target, 0);
-        var rendered = GetRenderPoseInternal((uid, xform), 0);
-        data = new RenderPoseDebugData(
+        var rendered = GetRenderTransformInternal((uid, xform), 0);
+        data = new RenderTransformDebugData(
             uid,
-            new RenderPose(simulation.WorldPosition, simulation.WorldRotation, xform.MapUid ?? EntityUid.Invalid),
+            new RenderTransform(simulation.WorldPosition, simulation.WorldRotation, xform.MapUid ?? EntityUid.Invalid),
             rendered,
             source,
             target,
@@ -861,11 +861,11 @@ public sealed partial class TransformSystem : SharedTransformSystem
         return true;
     }
 
-    private struct RenderPoseState
+    private struct RenderTransformState
     {
-        public RenderPoseEndpoint Source;
-        public RenderPoseEndpoint Target;
-        public RenderPose LastRendered;
+        public RenderTransformEndpoint Source;
+        public RenderTransformEndpoint Target;
+        public RenderTransform LastRendered;
         public EntityUid CoordinateSpace;
         public GameTick ChangeTick;
         public RenderInterpolationType Type;
@@ -893,7 +893,7 @@ public sealed partial class TransformSystem : SharedTransformSystem
 /// <summary>
 /// A rendered transform and its coordinate.
 /// </summary>
-public readonly record struct RenderPose(
+public readonly record struct RenderTransform(
     Vector2 Position,
     Angle Rotation,
     EntityUid CoordinateSpace,
@@ -901,13 +901,13 @@ public readonly record struct RenderPose(
     EntityUid TargetRenderSpace,
     float RenderSpaceAlpha)
 {
-    public RenderPose(Vector2 position, Angle rotation, EntityUid renderSpace)
+    public RenderTransform(Vector2 position, Angle rotation, EntityUid renderSpace)
         : this(position, rotation, renderSpace, renderSpace, renderSpace, 1f)
     {
     }
 }
 
-internal readonly record struct RenderPoseEndpoint(
+internal readonly record struct RenderTransformEndpoint(
     EntityUid Parent,
     Vector2 LocalPosition,
     Angle LocalRotation,
@@ -954,12 +954,12 @@ public struct RenderSpaceCompatibilityEvent
 /// <summary>
 /// Diagnostic data for an active render interpolation.
 /// </summary>
-public readonly record struct RenderPoseDebugData(
+public readonly record struct RenderTransformDebugData(
     EntityUid Entity,
-    RenderPose Simulation,
-    RenderPose Rendered,
-    RenderPose Source,
-    RenderPose Target,
+    RenderTransform Simulation,
+    RenderTransform Rendered,
+    RenderTransform Source,
+    RenderTransform Target,
     EntityUid Parent,
     EntityUid CoordinateSpace,
     EntityUid SourceRenderSpace,

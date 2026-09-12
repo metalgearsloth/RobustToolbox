@@ -45,7 +45,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
     [SetUp]
     public void Setup()
     {
-        _transforms.ResetRenderPoses();
+        _transforms.ResetRenderTransforms();
         _timing.TickRemainder = TimeSpan.Zero;
         _timing.TickTimingAdjustment = 0f;
         ((GameTiming)_timing).FreezeTickTimingAdjustment();
@@ -287,7 +287,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         var halfRoot = new Vector2(MathF.Sqrt(0.125f), 0.1f + MathF.Sqrt(0.125f));
         var halfTarget = new Vector2(1f + MathF.Sqrt(0.125f), 0.1f - MathF.Sqrt(0.125f));
         var expected = Vector2.Lerp(halfRoot, halfTarget, 0.5f);
-        var pose = _transforms.GetRenderWorldPose(uid);
+        var pose = _transforms.GetRenderWorldTransform(uid);
         var nestedExpected = pose.Position + pose.Rotation.RotateVec(new Vector2(0.25f, 0f));
 
         Assert.Multiple(() =>
@@ -299,7 +299,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
         SetTickAlpha(1f);
         _transforms.FrameUpdate(0f);
-        var finalPose = _transforms.GetRenderWorldPose(uid);
+        var finalPose = _transforms.GetRenderWorldTransform(uid);
         Assert.Multiple(() =>
         {
             AssertVector(finalPose.Position, new Vector2(1f, -0.3f));
@@ -309,7 +309,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
     }
 
     [Test]
-    public void SpriteAndEyeCoordinatesUseTheSameRenderPose()
+    public void SpriteAndEyeCoordinatesUseTheSameRenderTransform()
     {
         var (_, mapId) = CreateMap();
         var uid = _entities.SpawnEntity(null, new MapCoordinates(Vector2.Zero, mapId));
@@ -406,7 +406,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
     }
 
     [Test]
-    public void TimingAdjustmentChangeMidTickDoesNotMoveRenderPose()
+    public void TimingAdjustmentChangeMidTickDoesNotMoveRenderTransform()
     {
         var oldTickRate = _timing.TickRate;
         var oldTimingAdjustment = _timing.TickTimingAdjustment;
@@ -461,7 +461,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
         ApplyRemote(() => _transforms.SetCoordinates(uid, xform, new EntityCoordinates(mapA, Vector2.Zero), Angle.Zero, false));
         ApplyRemote(() => _transforms.SetLocalPosition(uid, Vector2.UnitX, xform));
-        _transforms.SnapRenderPose(uid);
+        _transforms.SnapRenderTransform(uid);
         AssertVector(_transforms.GetRenderWorldPosition(uid), Vector2.UnitX, "explicit teleport must snap");
 
         ApplyRemote(() => _transforms.SetLocalPosition(uid, new Vector2(10f, 0f), xform));
@@ -479,7 +479,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         ApplyRemote(() => _containers.Remove(uid, container, reparent: false, force: true));
         ApplyRemote(() => _transforms.DetachEntity(uid, xform));
         Assert.That(xform.MapID, Is.EqualTo(MapId.Nullspace));
-        Assert.That(_transforms.GetRenderWorldPose(uid).CoordinateSpace.IsValid(), Is.False);
+        Assert.That(_transforms.GetRenderWorldTransform(uid).CoordinateSpace.IsValid(), Is.False);
         Assert.That(mapAId, Is.Not.EqualTo(MapId.Nullspace));
     }
 
@@ -497,7 +497,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
         Assert.Multiple(() =>
         {
-            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var data), Is.True);
+            Assert.That(_transforms.TryGetRenderTransformDebugData(uid, out var data), Is.True);
             Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.NetworkInterpolation));
             AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(0.5f, 0f));
         });
@@ -511,7 +511,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
             AssertVector(_transforms.GetWorldPosition(uid), snapTarget);
             AssertVector(_transforms.GetRenderWorldPosition(uid), snapTarget,
                 "large movement must not be interpolated over an active render state");
-            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out _), Is.False);
+            Assert.That(_transforms.TryGetRenderTransformDebugData(uid, out _), Is.False);
         });
     }
 
@@ -524,7 +524,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
         _timing.CurTick = new GameTick(_timing.LastRealTick.Value + 2);
         _transforms.SetLocalPosition(uid, Vector2.UnitX, xform);
-        _transforms.SnapRenderPose(uid, true);
+        _transforms.SnapRenderTransform(uid, true);
         var predictionTick = _timing.CurTick;
         _transforms.RecordPredictionSample(uid, predictionTick, 0);
         _transforms.BeginPredictionRollback(uid, predictionTick);
@@ -535,7 +535,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         _transforms.CompletePredictionRollback(predictionTick);
         _transforms.FinishPredictionRollback();
 
-        Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var correction), Is.True);
+        Assert.That(_transforms.TryGetRenderTransformDebugData(uid, out var correction), Is.True);
         Assert.That(correction.CorrectionTranslation.LengthSquared(), Is.GreaterThan(0f));
 
         var maxDistance = _configuration.GetCVar(CVars.NetInterpMaxDistance);
@@ -550,7 +550,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
             AssertVector(_transforms.GetRenderWorldPosition(uid),
                 snapTarget,
                 "large movement must snap even when a prediction correction is active");
-            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out _), Is.False);
+            Assert.That(_transforms.TryGetRenderTransformDebugData(uid, out _), Is.False);
         });
     }
 
@@ -577,7 +577,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
             AssertVector(_transforms.GetRenderWorldPosition(uid),
                 snapTarget,
                 "large movement must snap during a prediction-to-network handoff");
-            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out _), Is.False);
+            Assert.That(_transforms.TryGetRenderTransformDebugData(uid, out _), Is.False);
         });
     }
 
@@ -663,7 +663,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
             _transforms.FrameUpdate(0f);
             AssertVector(_transforms.GetRenderWorldPosition(uid), new Vector2(0.25f, 0f));
             AssertVector(_transforms.GetRenderWorldPosition(child), new Vector2(0.5f, 0f));
-            var pose = _transforms.GetRenderWorldPose(child);
+            var pose = _transforms.GetRenderWorldTransform(child);
             Assert.That(pose.CoordinateSpace, Is.EqualTo(mapA));
             Assert.That(pose.SourceRenderSpace, Is.EqualTo(mapA));
             Assert.That(pose.TargetRenderSpace, Is.EqualTo(mapB));
@@ -672,7 +672,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
             SetTickAlpha(0.75f);
             _transforms.FrameUpdate(0f);
-            pose = _transforms.GetRenderWorldPose(child);
+            pose = _transforms.GetRenderWorldTransform(child);
             Assert.That(pose.CoordinateSpace, Is.EqualTo(mapA), "the coordinate space must not switch mid-lerp");
             Assert.That(pose.SourceRenderSpace, Is.EqualTo(mapA));
             Assert.That(pose.TargetRenderSpace, Is.EqualTo(mapB));
@@ -810,7 +810,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
         _timing.CurTick = new GameTick(_timing.LastRealTick.Value + 2);
         _transforms.SetLocalPosition(uid, Vector2.UnitX, xform);
-        _transforms.SnapRenderPose(uid, true);
+        _transforms.SnapRenderTransform(uid, true);
         var predictionTick = _timing.CurTick;
         _transforms.RecordPredictionSample(uid, predictionTick, 0);
         _transforms.BeginPredictionRollback(uid, predictionTick);
@@ -828,7 +828,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
         {
             AssertVector(_transforms.GetWorldPosition(uid), Vector2.Zero);
             AssertVector(_transforms.GetRenderWorldPosition(uid), Vector2.UnitX);
-            Assert.That(_transforms.TryGetRenderPoseDebugData(uid, out var data), Is.True);
+            Assert.That(_transforms.TryGetRenderTransformDebugData(uid, out var data), Is.True);
             Assert.That(data.Type, Is.EqualTo(RenderInterpolationType.PredictionInterpolation));
             Assert.That(data.CorrectionTranslation.LengthSquared(), Is.GreaterThan(0f));
         });
@@ -915,7 +915,7 @@ public sealed class RenderTransformSystemTest : RobustUnitTest
 
     private void AssertNoCorrection(EntityUid uid)
     {
-        if (!_transforms.TryGetRenderPoseDebugData(uid, out var data))
+        if (!_transforms.TryGetRenderTransformDebugData(uid, out var data))
             return;
 
         Assert.Multiple(() =>
