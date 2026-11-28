@@ -120,6 +120,12 @@ namespace Robust.Client.Graphics.Clyde
                         _hasGLSrgb = false;
                         _sawmillOgl.Debug("  sRGB: false (window broken sRGB)");
                     }
+                    else if (_glContext is GLContextWindow && !IsDefaultFramebufferSrgb())
+                    {
+                        // GLES has no GL_FRAMEBUFFER_SRGB toggle so it gets faked.
+                        _hasGLSrgb = false;
+                        _sawmillOgl.Debug("  sRGB: false (window framebuffer is linear)");
+                    }
                     else
                     {
                         _hasGLSrgb = true;
@@ -154,6 +160,34 @@ namespace Robust.Client.Graphics.Clyde
 
                 _sawmillOgl.Debug($"  {capName}: {cap}");
             }
+        }
+
+        /// <summary>
+        /// Checks whether the current (window) default framebuffer encodes writes as sRGB.
+        /// </summary>
+        private bool IsDefaultFramebufferSrgb()
+        {
+            // IDK why OpenTK doesn't expose these sooo.
+            const int GL_BACK = 0x0405;
+            const int GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING = 0x8210;
+            const int GL_SRGB = 0x8C40;
+
+            GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+            GL.GetFramebufferAttachmentParameter(
+                FramebufferTarget.Framebuffer,
+                (FramebufferAttachment) GL_BACK,
+                (FramebufferParameterName) GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING,
+                out int encoding);
+
+            var error = GL.GetError();
+            if (error != ErrorCode.NoError)
+            {
+                // Can't tell, so assume linear.
+                _sawmillOgl.Debug($"  Failed to query window framebuffer encoding: {error}");
+                return false;
+            }
+
+            return encoding == GL_SRGB;
         }
 
         private void CheckGLDebuggerStatus(HashSet<string> extensions)

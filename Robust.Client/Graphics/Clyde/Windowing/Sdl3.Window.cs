@@ -175,9 +175,11 @@ internal partial class Clyde
                 SDL.SDL_GL_SetAttribute(GLAttr.SDL_GL_BLUE_SIZE, 8);
                 SDL.SDL_GL_SetAttribute(GLAttr.SDL_GL_ALPHA_SIZE, 8);
                 SDL.SDL_GL_SetAttribute(GLAttr.SDL_GL_STENCIL_SIZE, 8);
+                // Windows ES goes through ANGLE, which can't exactly do sRGB window surfaces (see HasBrokenWindowSrgb).
+                // Clyde checks what it actually got and falls back to sRGB emulation.
                 SDL.SDL_GL_SetAttribute(
                     GLAttr.SDL_GL_FRAMEBUFFER_SRGB_CAPABLE,
-                    s.Profile == GLContextProfile.Es ? 0 : 1);
+                    s.Profile == GLContextProfile.Es && OperatingSystem.IsWindows() ? 0 : 1);
 
                 // Steam overlay causes memory leak with multiple double buffered windows.
                 SDL.SDL_GL_SetAttribute(GLAttr.SDL_GL_DOUBLEBUFFER, parameters.Main ? 1 : 0);

@@ -52,6 +52,7 @@ END TEMPLATE-->
 * Fix input exceptions on replays.
 * Fix replay errors due to entity re-entry on checkpoints when scrubbing.
 * Fix chunk entity bugs around networked states.
+* Fix the game being too dark due to sRGB colors being double-applied in some cases.
 
 ### Other
 
